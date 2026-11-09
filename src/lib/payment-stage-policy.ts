@@ -6,7 +6,7 @@ export type ApprovalStage = {
   is_required: boolean;
   has_local_candidates?: boolean;
 };
-export type StageTarget = { userId: string; roleId: string } | null;
+export type StageTarget = { userId: string | null; roleId: string; routingReason?: string | null } | null;
 
 export function isLocalApprovalStage(step: ApprovalStage) {
   return step.has_local_candidates ?? step.candidates.some(candidate => candidate.scope !== "company");

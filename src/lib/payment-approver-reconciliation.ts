@@ -1,6 +1,6 @@
 import { readAllRows } from "@/lib/supabase-pagination";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { advanceApproval, loadApprovalSteps, resolveStepApprover } from "@/lib/payment-approval-steps";
+import { advanceApproval, approvalRoleIdsForStep, loadApprovalSteps, resolveStepApprover } from "@/lib/payment-approval-steps";
 import { effectiveApprovalStepOrder, isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { paymentApproverNeedsReconciliation } from "@/lib/payment-approver-reconciliation-policy";
 
@@ -49,6 +49,7 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
     .filter(row => isPendingPaymentApproval(row.status, row.approval_status));
   const stepsCache = new Map<string, Awaited<ReturnType<typeof loadApprovalSteps>>>();
   const targetCache = new Map<string, Awaited<ReturnType<typeof resolveStepApprover>>>();
+  const locationModelCache = new Map<string, string | null>();
 
   for (const request of rows) {
     result.checked += 1;
@@ -77,6 +78,7 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
         targetCache.set(targetKey, target);
       }
       let targetStepOrder = resolvedStepOrder;
+      let advancedRoleIds: string[] | null = null;
       if (!target && !step.is_required) {
         const advance = await advanceApproval(request.company_id, steps, resolvedStepOrder, request.location_id);
         if (advance.approver && advance.nextStepOrder) {
@@ -85,20 +87,37 @@ export async function reconcilePendingPaymentApprovers(options: { companyId?: st
             routingReason: `Optional approval stage skipped because no eligible approver is mapped; ${advance.approver.routingReason || "advanced to the next configured approval stage"}`
           };
           targetStepOrder = advance.nextStepOrder;
+          advancedRoleIds = advance.roleIds;
         } else if (advance.noApproverConfigured && advance.nextStepOrder) {
           targetStepOrder = advance.nextStepOrder;
+          advancedRoleIds = advance.roleIds;
         }
       }
       if (!paymentApproverNeedsReconciliation(request, target, targetStepOrder) && (!target?.routingReason || target.routingReason === request.approval_routing_reason)) continue;
 
       const now = new Date().toISOString();
+      const activeStep = steps.find(item => item.step_order === targetStepOrder) ?? step;
+      const modelKey = `${request.company_id}:${request.location_id}`;
+      let locationModelId = locationModelCache.get(modelKey);
+      if (locationModelId === undefined) {
+        const station = await supabaseAdmin
+          .from("stations")
+          .select("location_model_id")
+          .eq("company_id", request.company_id)
+          .eq("id", request.location_id)
+          .maybeSingle();
+        locationModelId = (station.data?.location_model_id as string | null | undefined) ?? null;
+        locationModelCache.set(modelKey, locationModelId);
+      }
       const update = target ? {
         ...(request.approval_status === "NO_APPROVER_CONFIGURED" ? { approval_status: "PENDING" } : {}),
         approval_routing_reason: target.routingReason || "Approver mapping refreshed",
         updated_by: null,
         current_approver_user_id: target.userId,
         current_approver_role_id: target.roleId,
-        current_approver_role_ids: [target.roleId],
+        current_approver_role_ids: advancedRoleIds?.length
+          ? advancedRoleIds
+          : approvalRoleIdsForStep(activeStep, target.roleId, locationModelId),
         current_step_order: targetStepOrder,
         email_next_reminder_at: null,
         updated_at: now

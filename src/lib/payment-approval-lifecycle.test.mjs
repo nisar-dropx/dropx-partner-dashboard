@@ -118,6 +118,22 @@ test('location payment exclusion skips an AOM while preserving the same user mem
   const next=await routing.advanceApproval('co',steps,1,'NLRE',new Set(['cluster']));
   assert.equal(next.nextStepOrder,3);assert.equal(next.approver.userId,'head');
 });
+test('company stages with Ops/Fleet twin roles stay a shared pool and keep every candidate role id',async()=>{
+  const {routing,tables}=routingFixture();
+  tables.user_roles.push({id:'fleet-fltm',code:'FLEET_FLTM',company_id:'co',is_active:true,location_access_mode:'selected'});
+  tables.profiles.push({company_id:'co',id:'fleet',role_id:'fleet-fltm',full_name:'FLEET & ASSETS',is_active:true});
+  tables.company_product_memberships.push({company_id:'co',user_id:'fleet',role_id:'fleet-fltm',product_code:'fleet',is_active:true,has_all_location_access:true,location_scope_ids:[]});
+  tables.company_product_memberships.find(row=>row.user_id==='head').role_id='ops-fltm';
+  tables.user_roles.push({id:'ops-fltm',code:'OPERATIONS_FLTM',company_id:'co',is_active:true,location_access_mode:'selected'});
+  tables.profiles.find(row=>row.id==='head').role_id='ops-fltm';
+  const step={id:'fleet-manager',step_order:1,is_required:true,candidates:[{role_id:'ops-fltm',scope:'company'},{role_id:'fleet-fltm',scope:'company'}]};
+  const target=await routing.resolveStepApprover('co',step,'NLRE');
+  assert.equal(target.userId,null);
+  assert.match(target.routingReason,/shared company role pool/i);
+  const advanced=await routing.advanceApproval('co',[step],0,'NLRE',new Set());
+  assert.equal(advanced.approver.userId,null);
+  assert.deepEqual(advanced.roleIds,['ops-fltm','fleet-fltm']);
+});
 test('business-model conditions select the configured final approver without hardcoded model names',async()=>{
   const {routing,tables}=routingFixture();
   const finalStep={id:'final',step_order:3,is_required:true,candidates:[
@@ -136,7 +152,7 @@ test('reconciliation handles more than 250 requests and keeps reason-specific Fl
   const {reconcilePendingPaymentApprovers}=compile('./payment-approver-reconciliation.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows},'@/lib/payment-stage-policy':stage,
     '@/lib/payment-approver-reconciliation-policy':{paymentApproverNeedsReconciliation},
-    '@/lib/payment-approval-steps':{loadApprovalSteps:async(_c,_h,id)=>{loaded.push(id);return rows.find(r=>r.id===id).adhoc_approval_steps??steps;},resolveStepApprover:async(_c,step)=>({userId:step.candidates[0].role_id,roleId:step.candidates[0].role_id,routingReason:'Current People assignment'}),advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'bh',roleId:'bh'},noApproverConfigured:false})}
+    '@/lib/payment-approval-steps':{loadApprovalSteps:async(_c,_h,id)=>{loaded.push(id);return rows.find(r=>r.id===id).adhoc_approval_steps??steps;},resolveStepApprover:async(_c,step)=>({userId:step.candidates[0].role_id,roleId:step.candidates[0].role_id,routingReason:'Current People assignment'}),advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'bh',roleId:'bh'},roleIds:['bh'],noApproverConfigured:false}),approvalRoleIdsForStep:(step,fallback)=>step?.candidates?.length?step.candidates.map(c=>c.role_id):fallback?[fallback]:[]}
   });
   const result=await reconcilePendingPaymentApprovers();assert.equal(result.checked,520);assert.equal(result.reassigned,520);assert.deepEqual(result.errors,[]);
   assert.equal(loaded.length,2);assert.equal(rows[0].current_approver_user_id,'cm');assert.equal(rows[1].current_approver_user_id,'fleet');
@@ -148,7 +164,7 @@ test('reconciliation advances an unmapped optional stage to the next required ap
   const {reconcilePendingPaymentApprovers}=compile('./payment-approver-reconciliation.ts',{
     '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/supabase-pagination':{readAllRows},'@/lib/payment-stage-policy':stage,
     '@/lib/payment-approver-reconciliation-policy':{paymentApproverNeedsReconciliation},
-    '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,resolveStepApprover:async(_c,step)=>step.step_order===2?null:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},noApproverConfigured:false})}
+    '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,resolveStepApprover:async(_c,step)=>step.step_order===2?null:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},advanceApproval:async()=>({done:false,nextStepOrder:3,approver:{userId:'head',roleId:'bh',routingReason:'Current People assignment'},roleIds:['bh'],noApproverConfigured:false}),approvalRoleIdsForStep:(step,fallback)=>step?.candidates?.length?step.candidates.map(c=>c.role_id):fallback?[fallback]:[]}
   });
   const result=await reconcilePendingPaymentApprovers();assert.equal(result.reassigned,1);
   assert.equal(rows[0].current_step_order,3);assert.equal(rows[0].current_approver_user_id,'head');

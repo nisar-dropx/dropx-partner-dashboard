@@ -513,13 +513,14 @@ export async function approvePaymentRequest(formData: FormData) {
         });
       } else {
         const target = advance.approver!;
+        const nextRoleIds = (advance.roleIds?.length ? advance.roleIds : [target.roleId]);
         await updatePaymentRequest(request.id, companyId, {
           status: `${roleCode}_APPROVED`,
           approval_status: `${roleCode}_APPROVED`,
           current_step_order: advance.nextStepOrder,
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
-          current_approver_role_ids: [target.roleId],
+          current_approver_role_ids: nextRoleIds,
           approval_routing_reason: coverageReason
             ? `${coverageReason}; advanced to the next configured approval stage`
             : target.routingReason || "Advanced to the next configured approval stage",
@@ -531,7 +532,7 @@ export async function approvePaymentRequest(formData: FormData) {
           current_step_order: advance.nextStepOrder,
           current_approver_user_id: target.userId,
           current_approver_role_id: target.roleId,
-          current_approver_role_ids: [target.roleId],
+          current_approver_role_ids: nextRoleIds,
           approval_routing_reason: coverageReason
             ? `${coverageReason}; advanced to the next configured approval stage`
             : target.routingReason || "Advanced to the next configured approval stage",

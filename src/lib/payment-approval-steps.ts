@@ -2,7 +2,7 @@ import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarc
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, loadEffectivePositionAccess, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { paymentRoutingDay, resolvePaymentCover } from "@/lib/payment-delegation-policy";
-import { resolveInitialStage } from "@/lib/payment-stage-policy";
+import { isLocalApprovalStage, resolveInitialStage } from "@/lib/payment-stage-policy";
 import { loadPaymentReportingHierarchy } from "@/lib/payment-reporting-hierarchy";
 
 export type ApprovalStepCandidate = {
@@ -18,7 +18,28 @@ export type ApprovalStepRow = {
   is_required: boolean;
   has_local_candidates?: boolean;
 };
-export type ApproverTarget = { userId: string; roleId: string; routingReason?: string | null } | null;
+export type ApproverTarget = { userId: string | null; roleId: string; routingReason?: string | null } | null;
+
+function candidatesForLocationModel(
+  step: ApprovalStepRow | null | undefined,
+  locationModelId?: string | null
+) {
+  return (step?.candidates ?? []).filter((candidate) => {
+    const configuredModelIds = candidate.location_model_ids ?? [];
+    return !configuredModelIds.length || Boolean(locationModelId && configuredModelIds.includes(locationModelId));
+  });
+}
+
+/** Persist every configured role on the active step so Ops/Fleet twin roles stay actionable. */
+export function approvalRoleIdsForStep(
+  step: ApprovalStepRow | null | undefined,
+  fallbackRoleId?: string | null,
+  locationModelId?: string | null
+) {
+  const roleIds = [...new Set(candidatesForLocationModel(step, locationModelId).map((candidate) => candidate.role_id).filter(Boolean))];
+  if (roleIds.length) return roleIds;
+  return fallbackRoleId ? [fallbackRoleId] : [];
+}
 
 type PaymentApproverExclusionRow = {
   effective_until: string | null;
@@ -197,6 +218,7 @@ async function delegateCanAct(companyId: string, userId: string, locationId: str
 
 async function redirectThroughDelegation(companyId: string, target: NonNullable<ApproverTarget>, locationId?: string | null): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
+  if (!target.userId) return target;
   const admin = supabaseAdmin;
   const today = paymentRoutingDay();
   const result = await resolvePaymentCover(target.userId, async userId => {
@@ -255,6 +277,45 @@ async function redirectThroughDelegation(companyId: string, target: NonNullable<
  * to company_product_memberships. Roster availability never removes approval
  * responsibility: use an explicit delegate or keep the request with its manager.
  */
+async function companyStepPoolUserIds(
+  companyId: string,
+  step: ApprovalStepRow,
+  locationId: string | null | undefined,
+  locationModelId: string | null | undefined
+) {
+  const pool = new Set<string>();
+  for (const candidate of candidatesForLocationModel(step, locationModelId)) {
+    for (const userId of await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId)) {
+      pool.add(userId);
+    }
+  }
+  return pool;
+}
+
+/**
+ * Company-scoped stages (Fleet Manager, Business Head, …) often list twin
+ * product roles. Naming one person locks peers out of Needs my action even
+ * when they hold an equivalent role on Ops. Keep those stages as a role pool.
+ */
+async function withSharedCompanyPool(
+  companyId: string,
+  step: ApprovalStepRow,
+  locationId: string | null | undefined,
+  locationModelId: string | null | undefined,
+  approver: NonNullable<ApproverTarget>
+): Promise<NonNullable<ApproverTarget>> {
+  if (isLocalApprovalStage(step) || !approver.userId) return approver;
+  const pool = await companyStepPoolUserIds(companyId, step, locationId, locationModelId);
+  if (pool.size <= 1) return approver;
+  return {
+    userId: null,
+    roleId: approver.roleId,
+    routingReason: approver.routingReason
+      ? `${approver.routingReason}; shared company role pool`
+      : "Shared company role pool"
+  };
+}
+
 export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
   const [excludedUserIds, requestModelId] = await Promise.all([
@@ -262,17 +323,19 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     stationLocationModelId(companyId, locationId)
   ]);
 
-  const applicableCandidates = step.candidates.filter((candidate) => {
-    const configuredModelIds = candidate.location_model_ids ?? [];
-    return !configuredModelIds.length || Boolean(requestModelId && configuredModelIds.includes(requestModelId));
-  });
+  const applicableCandidates = candidatesForLocationModel(step, requestModelId);
 
   for (const [candidateIndex, candidate] of applicableCandidates.entries()) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
     if (positionApprover && !excludedUserIds.has(positionApprover.userId)) {
       const covered = await redirectThroughDelegation(companyId, positionApprover, locationId);
-      if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };
+      if (covered) {
+        return withSharedCompanyPool(companyId, step, locationId, requestModelId, {
+          ...covered,
+          routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment")
+        });
+      }
     }
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
@@ -291,7 +354,12 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
       if (excludedUserIds.has(profile.id)) continue;
       if (profile.id === positionApprover?.userId) continue;
       const covered = await redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id }, locationId);
-      if (covered) return { ...covered, routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment") };
+      if (covered) {
+        return withSharedCompanyPool(companyId, step, locationId, requestModelId, {
+          ...covered,
+          routingReason: covered.routingReason || (candidateIndex ? "Configured fallback role: primary approver unavailable or unmapped" : "Current People assignment")
+        });
+      }
     }
   }
 
@@ -314,11 +382,14 @@ export type InitialApprovalTarget = {
  * later walk it forward.
  */
 export async function resolveInitialApprovalTarget(companyId: string, steps: ApprovalStepRow[], locationId: string | null | undefined): Promise<InitialApprovalTarget> {
-  const { step, approver } = await resolveInitialStage(steps, step => resolveStepApprover(companyId, step, locationId));
+  const [{ step, approver }, locationModelId] = await Promise.all([
+    resolveInitialStage(steps, step => resolveStepApprover(companyId, step, locationId)),
+    stationLocationModelId(companyId, locationId)
+  ]);
   return {
     approver,
     currentStepOrder: step?.step_order ?? 1,
-    currentApprovalRoleIds: approver ? [approver.roleId] : step?.candidates.map(candidate => candidate.role_id) ?? [],
+    currentApprovalRoleIds: approvalRoleIdsForStep(step, approver?.roleId, locationModelId),
     totalSteps: steps.length
   };
 }
@@ -327,6 +398,7 @@ export type AdvanceResult = {
   done: boolean;
   nextStepOrder: number | null;
   approver: ApproverTarget;
+  roleIds: string[];
   noApproverConfigured: boolean;
 };
 
@@ -362,7 +434,9 @@ export async function paymentApprovalCoverage(
       throughStepOrder = step.step_order;
       continue;
     }
-    if (!hierarchy.isSameOrAbove(actorUserId, approver.userId)) break;
+    // Shared company role pools have no named person; they cannot be covered by
+    // a higher People manager skipping ahead.
+    if (!approver.userId || !hierarchy.isSameOrAbove(actorUserId, approver.userId)) break;
     throughStepOrder = step.step_order;
   }
 
@@ -383,19 +457,21 @@ export async function advanceApproval(
   alreadyApprovedUserIds: ReadonlySet<string> = new Set()
 ): Promise<AdvanceResult> {
   const remaining = steps.filter((step) => step.step_order > currentStepOrder).sort((left, right) => left.step_order - right.step_order);
+  const locationModelId = await stationLocationModelId(companyId, locationId);
 
   for (const step of remaining) {
     const approver = await resolveStepApprover(companyId, step, locationId);
+    const roleIds = approvalRoleIdsForStep(step, approver?.roleId, locationModelId);
     // Someone who already approved this request is not asked again at a later
     // step (e.g. the AOM approving on the CLM's behalf, or a Zonal Head who is
     // also the Business Head) - their approval already covers it. A mandatory
     // step with NO approver still blocks (below); it is only skipped when the
     // person who would approve it has already approved.
-    if (approver && alreadyApprovedUserIds.has(approver.userId)) continue;
-    if (approver) return { done: false, nextStepOrder: step.step_order, approver, noApproverConfigured: false };
+    if (approver?.userId && alreadyApprovedUserIds.has(approver.userId)) continue;
+    if (approver) return { done: false, nextStepOrder: step.step_order, approver, roleIds, noApproverConfigured: false };
     if (!step.is_required) continue;
-    return { done: false, nextStepOrder: step.step_order, approver: null, noApproverConfigured: true };
+    return { done: false, nextStepOrder: step.step_order, approver: null, roleIds, noApproverConfigured: true };
   }
 
-  return { done: true, nextStepOrder: null, approver: null, noApproverConfigured: false };
+  return { done: true, nextStepOrder: null, approver: null, roleIds: [], noApproverConfigured: false };
 }

@@ -6,7 +6,7 @@ export type PersistedPaymentApprover = {
 
 export type ResolvedPaymentApprover = {
   roleId: string;
-  userId: string;
+  userId: string | null;
 };
 
 export function paymentApproverNeedsReconciliation(

@@ -176,7 +176,7 @@ async function createCompanyAdminProfileForLogin(authUserId: string, email: stri
       is_master_owner: false,
       is_active: true
     }, { onConflict: "id" })
-    .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+    .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
     .single();
 
   if (createError) {
@@ -241,16 +241,22 @@ export async function GET(request: NextRequest) {
     const isPeopleHost = isPeopleHostName(host);
     const isFinanceHost = isFinanceHostName(host);
 
+    const googleDisplayName = String(
+      data.user.user_metadata?.full_name ||
+      data.user.user_metadata?.name ||
+      ""
+    ).trim();
+
     const { data: profileById } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+    .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
     .eq("id", data.user.id)
     .maybeSingle();
   let profile = profileById;
   if (!profile) {
     const { data: emailProfiles } = await supabaseAdmin
       .from("profiles")
-      .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+      .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
       .ilike("email", email);
     const activeEmailProfiles = (emailProfiles ?? []).filter((item) => item.is_active);
     const masterOwnerProfile = activeEmailProfiles.find((item) => item.is_master_owner);
@@ -260,12 +266,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!profile && !isPlatformAdminHost) {
-    const fallbackName = String(
-      data.user.user_metadata?.full_name ||
-      data.user.user_metadata?.name ||
-      ""
-    ).trim();
-    profile = await createCompanyAdminProfileForLogin(data.user.id, email, fallbackName);
+    profile = await createCompanyAdminProfileForLogin(data.user.id, email, googleDisplayName);
   }
 
   const [{ data: allEmailLocations }, { data: locationRoles }] = await Promise.all([
@@ -302,11 +303,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!profile && emailLocationIds.length && locationRole && matchedCompanyIds.length <= 1) {
-    const fullName = String(
-      data.user.user_metadata?.full_name ||
-      data.user.user_metadata?.name ||
-      email.split("@")[0]
-    ).trim();
+    const fullName = googleDisplayName || email.split("@")[0];
     const { data: createdProfile, error: createProfileError } = await supabaseAdmin
       .from("profiles")
       .insert({
@@ -319,7 +316,7 @@ export async function GET(request: NextRequest) {
         invite_method: "Google",
         is_active: true
       })
-      .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+      .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
       .single();
     profile = createdProfile;
     if (createProfileError) {
@@ -343,7 +340,7 @@ export async function GET(request: NextRequest) {
         is_active: true
       })
       .eq("id", profile.id)
-      .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+      .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
       .single();
     profile = updatedProfile ?? profile;
     if (updateProfileError) {
@@ -352,6 +349,26 @@ export async function GET(request: NextRequest) {
         locationCount: emailLocationIds.length,
         message: updateProfileError.message
       });
+    }
+  }
+
+  // Shared Google Workspace mailboxes rename in Admin Console; keep portal
+  // shell labels in sync so Ops Pulse does not keep a stale personal name.
+  if (profile?.is_active && googleDisplayName && googleDisplayName !== String(profile.full_name ?? "").trim()) {
+    const { data: renamedProfile, error: renameError } = await supabaseAdmin
+      .from("profiles")
+      .update({ full_name: googleDisplayName })
+      .eq("id", profile.id)
+      .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+      .maybeSingle();
+    if (renameError) {
+      console.error("Google display name sync failed", {
+        email,
+        profileId: profile.id,
+        message: renameError.message
+      });
+    } else if (renamedProfile) {
+      profile = renamedProfile;
     }
   }
 
@@ -376,7 +393,7 @@ export async function GET(request: NextRequest) {
         .from("profiles")
         .update({ company_id: masterCompanyId })
         .eq("id", profile.id)
-        .select("id, email, role_id, location_scope_ids, is_active, company_id, is_master_owner")
+        .select("id, email, full_name, role_id, location_scope_ids, is_active, company_id, is_master_owner")
         .single();
       profile = updatedProfile ?? profile;
     }
