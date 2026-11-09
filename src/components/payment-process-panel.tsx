@@ -2,7 +2,7 @@
 import { ReportTable } from "@/components/report-table";
 
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
@@ -335,6 +335,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
   const [finalizePending, setFinalizePending] = useState(false);
   const [finalizeResults, setFinalizeResults] = useState<BankResponseImportResult[]>([]);
   const [finalizeInputKey, setFinalizeInputKey] = useState(0);
+  const refreshAfterFinalize = useRef(false);
   const [processRequest, setProcessRequest] = useState<PaymentProcessRequest | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -380,6 +381,10 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
     setFinalizeError("");
     setFinalizeResults([]);
     setFinalizeInputKey((value) => value + 1);
+    if (refreshAfterFinalize.current) {
+      refreshAfterFinalize.current = false;
+      router.refresh();
+    }
   }
 
   async function uploadBankResponses(event: FormEvent<HTMLFormElement>) {
@@ -397,6 +402,8 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
         setFinalizeProgress(`Checking file ${index + 1} of ${files.length}: ${file.name}`);
         const body = new FormData();
         body.append("bank_response_files", file);
+        // Keep the results mounted until the operator closes the window.
+        refreshAfterFinalize.current = true;
         try {
           const response = await fetch("/api/payments/process/bank-response", { body, method: "POST" });
           const payload = await response.json().catch(() => null) as { error?: string; results?: BankResponseImportResult[] } | null;
@@ -405,14 +412,12 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
         } catch (error) {
           setFinalizeResults(current => [...current, { fileName: file.name, ok: false, error: error instanceof Error ? error.message : "Unable to confirm this file. Retry the same file safely." }]);
         }
-        router.refresh();
       }
     } catch (error) {
       setFinalizeError(error instanceof Error ? error.message : "Unable to import the selected bank response files.");
     } finally {
       setFinalizePending(false);
       setFinalizeProgress("");
-      router.refresh();
     }
   }
 
