@@ -13,3 +13,12 @@ Changed losses, deductions, pay, run release state or bank details invalidate ap
 The database uses service-only RPCs, tenant/station/actor checks, append-only decision events and a shared company loss lock. Insert guards protect legacy generation paths. Server routes also gate both re-download paths. Failure to read loss clearance blocks downloads. Saved files already outside the system cannot be recalled; existing processing payments must be reconciled before another file is generated.
 
 Migration: `20261108142437_loss_payment_clearance_and_people_finance.sql`. Apply this single migration to the shared project; do not push unrelated migration history. Coordinate Finance, People and Dashboard releases. Tests: `pnpm run test:payment-release`, existing Workforce bank-format tests, People payroll bank/export/loss tests, and both products' release integrity checks. Synthetic tests never approve or issue production payroll.
+
+## Loss-clearance switch
+Ops Masters → Loss Recovery Master → **Require loss clearance before payment release**.
+This company setting is enabled unless explicitly switched off. Disabling it pauses
+the loss-clearance approval gate for Workforce, Helpers and People payroll.
+Existing deductions, People Finance approval, payment-processing locks and other
+payroll validations still apply. Re-enabling requires a valid clearance again;
+old approvals still expire when their source or payroll fingerprint changes.
+Changes use the master's existing permission, concurrency check and audit history.

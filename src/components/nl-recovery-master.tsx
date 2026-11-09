@@ -93,6 +93,7 @@ export function NlRecoveryMaster({
                       "reserve_other_recoveries",
                       "cctv_public_confirmation",
                       "installment_thresholds_enabled",
+                      "require_loss_payment_clearance",
                     ].map((k) => [k, f.has(k)]),
                   ),
                   ...Object.fromEntries(
@@ -129,6 +130,18 @@ export function NlRecoveryMaster({
             }}
           >
             <fieldset className={styles.fieldset} disabled={!canEdit || busy}>
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  name="require_loss_payment_clearance"
+                  defaultChecked={settings.recovery_policy.require_loss_payment_clearance !== false}
+                />
+                Require loss clearance before payment release
+              </label>
+              <p className={styles.hint}>
+                Off: payments can proceed without loss-clearance approval.
+                Payroll checks, deductions and bank processing locks still apply.
+              </p>
               <label>
                 Final recoverable source statuses
                 <textarea
