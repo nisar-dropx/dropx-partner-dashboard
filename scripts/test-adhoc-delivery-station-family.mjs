@@ -86,4 +86,14 @@ for (const role of ['anon','authenticated']) {
  await db.exec('reset role');
 }
 await db.exec('set role service_role');assert.deepEqual(await roster(),[]);await db.exec('reset role');
+await db.exec('alter table payment_requests add column bank_paid_amount numeric');
+const bankCreditMigration=read('20261109083202_reconcile_released_adhoc_bank_credits.sql');
+await db.exec(bankCreditMigration);
+await db.exec(bankCreditMigration);
+await db.exec("update payment_requests set status='processing' where id=3");
+await assert.rejects(()=>db.exec("update payment_requests set status='processed',bank_paid_amount=1200 where id=3"),/already has a paid ad hoc/);
+await assert.rejects(()=>db.exec("begin; select set_config('app.payment_request_bank_settlement','allowed',true); update payment_requests set status='processed' where id=3; commit"),/already has a paid ad hoc/);
+await db.exec('rollback');
+await db.exec("begin; select set_config('app.payment_request_bank_settlement','allowed',true); update payment_requests set status='processed',bank_paid_amount=1200 where id=3; commit");
+assert.deepEqual((await db.query('select status,bank_paid_amount::int from payment_requests where id=3')).rows,[{status:'processed',bank_paid_amount:1200}]);
 await db.close();console.log('PASS station-family migration twice, mapping-only DA roster, XPT imports, date/owner/provider isolation, frozen scope, legacy bank export, paid-XPT protection, duplicate prevention, refreshes, role grants.');

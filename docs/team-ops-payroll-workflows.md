@@ -16,6 +16,11 @@ files retain a fallback link; preview never changes sharing or proxies files thr
 
 ## Actual bank credits and partial payments — 7 November 2026
 
+Verified bank credits for released ad hoc payments reconcile even when a paid
+ad hoc request or Workforce payout now overlaps. The delivery identity trigger
+still checks for conflicts on manual settlement. Bank identity matching,
+immutable credit evidence and UTR replay checks still apply.
+
 Central bank-response finalization matches the reference, beneficiary account and
 IFSC. A positive paid credit may be below the issued amount; it may not exceed
 the unpaid approved balance. Bank value/debit-account fields remain evidence,
