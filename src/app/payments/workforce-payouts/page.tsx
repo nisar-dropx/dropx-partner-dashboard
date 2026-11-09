@@ -28,7 +28,10 @@ import { WorkforcePayoutChecks } from "@/components/workforce-payout-checks";
 import { loadPayoutPaymentPreviews } from "@/lib/payout-payment-preview-batching";
 import {
   mergeWorkforcePayoutPaymentState,
+  withWorkforcePayoutRecordedSettlements,
+  workforcePayoutNeedsRecordedSettlements,
   workforcePayoutPublicationRefreshPending,
+  type WorkforcePayoutRecordedSettlement,
   type WorkforcePayoutPaymentSummary
 } from "@/lib/workforce-payout-payment-summary";
 import {
@@ -552,6 +555,33 @@ async function withPayoutPaymentSummaries(
   previews.push(...previewResult.data);
   if (processingResult.error) return { rows, error: processingResult.error.message };
   processingItems.push(...(processingResult.data ?? []));
+  const blockedKeys = new Set(previews.filter(preview => audience === "workforce"
+    && workforcePayoutNeedsRecordedSettlements(preview.eligibility_code))
+    .map(preview => `${preview.workforce_id.toLowerCase()}|${preview.station_id.toLowerCase()}`));
+  const blockedIds = [...new Set([...blockedKeys].map(key => key.split("|")[0]))];
+  type ScopedSettlement = WorkforcePayoutRecordedSettlement & {
+    credited_workforce_id: string;
+    station_id: string;
+  };
+  const recordedByRow = new Map<string, ScopedSettlement[]>();
+  const settlementResults = await mapWithConcurrency(chunkedValues(blockedIds, 250), 3,
+    async ids => readAllRows(admin.from("workforce_payout_effective_paid_allocations")
+      .select("payment_allocation_id,payment_item_id,credited_workforce_id,station_id,settled_amount_snapshot")
+      .eq("company_id", companyId)
+      .eq("period_start", fromDate)
+      .eq("period_end", toDate)
+      .in("credited_workforce_id", ids)
+      .order("payment_allocation_id")));
+  for (const result of settlementResults) {
+    if (result.error) return { rows, error: `Recorded payout settlements could not be loaded: ${result.error.message}` };
+    for (const settlement of (result.data ?? []) as ScopedSettlement[]) {
+      const key = `${settlement.credited_workforce_id.toLowerCase()}|${settlement.station_id.toLowerCase()}`;
+      if (!blockedKeys.has(key)) continue;
+      const entries = recordedByRow.get(key) ?? [];
+      entries.push(settlement);
+      recordedByRow.set(key, entries);
+    }
+  }
   const allocationResults = audience === "workforce"
     ? await mapWithConcurrency(
       chunkedValues(processingItems.map((item) => item.id), 250),
@@ -625,7 +655,7 @@ async function withPayoutPaymentSummaries(
         ? `${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`
         : "";
       const processingInstruction = processingItemByPayoutRow.get(payoutRowKey);
-      const summary: WorkforcePayoutPaymentSummary | undefined = preview ? {
+      let summary: WorkforcePayoutPaymentSummary | undefined = preview ? {
         processingPaymentItemId: processingInstruction?.id ?? null,
         processingInstructionAmount: processingInstruction?.instructionAmount ?? null,
         currentNetAmount,
@@ -640,6 +670,9 @@ async function withPayoutPaymentSummaries(
         eligibilityCode: String(preview.eligibility_code ?? "").trim() || null,
         eligibilityMessage: String(preview.eligibility_message ?? "").trim() || null
       } : undefined;
+      if (summary && blockedKeys.has(payoutRowKey)) {
+        summary = withWorkforcePayoutRecordedSettlements(summary, row.netAmount, recordedByRow.get(payoutRowKey) ?? []);
+      }
       return {
         ...row,
         publicationPaymentReady: preview?.eligible === true,

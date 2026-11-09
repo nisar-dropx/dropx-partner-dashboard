@@ -45,6 +45,58 @@ type WorkforcePayoutPaymentState = {
   paymentSummary?: WorkforcePayoutPaymentSummary;
 };
 
+// The bank candidate deliberately stops before reading money when a mapping or
+// publication is being revised. Those zero placeholders are not payment history.
+export function workforcePayoutNeedsRecordedSettlements(eligibilityCode: string | null | undefined) {
+  return [
+    "mapping_relock_required",
+    "publication_missing",
+    "publication_stale_or_incomplete",
+    "publication_refresh_pending"
+  ].includes(String(eligibilityCode ?? "").trim().toLowerCase());
+}
+
+export type WorkforcePayoutRecordedSettlement = {
+  payment_allocation_id: string;
+  payment_item_id: string;
+  settled_amount_snapshot: number | string;
+};
+
+export function withWorkforcePayoutRecordedSettlements(
+  summary: WorkforcePayoutPaymentSummary,
+  liveNetAmount: number,
+  settlements: readonly WorkforcePayoutRecordedSettlement[]
+): WorkforcePayoutPaymentSummary {
+  if (!workforcePayoutNeedsRecordedSettlements(summary.eligibilityCode)) return summary;
+  const target = paise(liveNetAmount);
+  if (target === null) throw new Error("The current payout amount is unavailable.");
+  const allocations = new Map<string, { itemId: string; amount: number }>();
+  for (const row of settlements) {
+    const amount = paise(row.settled_amount_snapshot);
+    if (!row.payment_allocation_id || !row.payment_item_id || amount === null || amount < 0) {
+      throw new Error("Recorded payout settlement evidence is invalid.");
+    }
+    const previous = allocations.get(row.payment_allocation_id);
+    if (previous && (previous.amount !== amount || previous.itemId !== row.payment_item_id)) {
+      throw new Error("Recorded payout settlement evidence conflicts.");
+    }
+    allocations.set(row.payment_allocation_id, { itemId: row.payment_item_id, amount });
+  }
+  const paid = [...allocations.values()].reduce((sum, row) => sum + row.amount, 0);
+  return {
+    ...summary,
+    currentNetAmount: target / 100,
+    paidAmount: paid / 100,
+    balancePayable: Math.max(0, target - paid) / 100,
+    overpaidAmount: Math.max(0, paid - target) / 100,
+    historyCount: Math.max(summary.historyCount, new Set([...allocations.values()].map(row => row.itemId)).size),
+    // This enriches the worksheet only. Relock/publication and all bank gates
+    // remain mandatory, even when the live calculation has a positive balance.
+    availableToPay: 0,
+    eligible: false
+  };
+}
+
 function paise(value: unknown) {
   if (value === null || value === undefined || value === "" || typeof value === "boolean") return null;
   const amount = Number(value);
