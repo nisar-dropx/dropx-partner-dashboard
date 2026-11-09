@@ -47,6 +47,10 @@ begin
   select pg_get_functiondef(
     'public.workforce_relock_payout_mappings(uuid,uuid,date,date,uuid[],uuid,text,text,jsonb)'::regprocedure
   ) into definition;
+  -- pg_get_functiondef preserves the body's original CRLF line endings.
+  -- Normalize those before matching multiline anchors (SQL editor exports
+  -- and prior CLI migrations can otherwise differ only in newline format).
+  definition := replace(definition, E'\r\n', E'\n');
   if strpos(definition, 'unpaid_missing_publication_relock_v1') > 0 then
     return;
   end if;
@@ -61,3 +65,7 @@ $patch$;
 
 notify pgrst, 'reload schema';
 commit;
+
+select strpos(pg_get_functiondef(
+  'public.workforce_relock_payout_mappings(uuid,uuid,date,date,uuid[],uuid,text,text,jsonb)'::regprocedure
+), 'unpaid_missing_publication_relock_v1') > 0 as fix_installed;

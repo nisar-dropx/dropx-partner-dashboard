@@ -1007,12 +1007,42 @@ try {
   const missingBaselinePatch = readFileSync(new URL(
     "../supabase/migrations/20261109180255_workforce_relock_unpaid_missing_publication.sql", import.meta.url
   ), "utf8");
+  // Match the SQL-editor export from production, including its CRLF body and
+  // later-installed bank-processing assertion. An optional supplied live
+  // definition lets this fixture exercise the exact deployed function.
+  await db.exec(`create function public.workforce_assert_payout_not_processing(uuid,uuid,date,date)
+    returns void language plpgsql as $$ begin
+      if exists(select 1 from public.workforce_payout_payment_items
+        where company_id=$1 and workforce_id=$2 and period_start=$3
+          and period_end=$4 and status='processing') then
+        raise exception 'Existing bank-processing guard';
+      end if;
+    end $$;`);
+  const relockSignature = "public.workforce_relock_payout_mappings(uuid,uuid,date,date,uuid[],uuid,text,text,jsonb)";
+  const existingDefinition = (await db.query(`select pg_get_functiondef($1::regprocedure) as definition`,
+    [relockSignature])).rows[0].definition;
+  const liveDefinition = process.env.RELOCK_FUNCTION_FIXTURE
+    ? readFileSync(process.env.RELOCK_FUNCTION_FIXTURE, "utf8")
+    : existingDefinition.replace(
+      "perform public.lock_workforce_payment_allocation_company(p_company_id);",
+      `perform public.lock_workforce_payment_allocation_company(p_company_id);
+       perform public.workforce_assert_payout_not_processing(p_company_id,id,p_period_start,p_period_end)
+       from unnest(v_impacted_ids) id;`
+    ).replaceAll("\n", "\r\n");
+  await db.exec(liveDefinition);
+  const oldFormattingPatch = missingBaselinePatch.replace(
+    "  definition := replace(definition, E'\\r\\n', E'\\n');", ""
+  );
+  await assert.rejects(db.exec(oldFormattingPatch), /Unexpected relock function shape/);
+  await db.exec("rollback");
   await db.exec(missingBaselinePatch);
   await db.exec(missingBaselinePatch);
+  assert.match((await db.query(`select pg_get_functiondef($1::regprocedure) as definition`,
+    [relockSignature])).rows[0].definition, /perform public\.workforce_assert_payout_not_processing/);
   for (const status of ["paid", "processing"]) {
     await db.query(`insert into public.workforce_payout_payment_items values ($1,$2,$3,$4,$5)`,
       [company, missingWorker, periodStart, periodEnd, status]);
-    await assert.rejects(db.query(relockSql, missingArgs), /period has bank payment history/i);
+    await assert.rejects(db.query(relockSql, missingArgs), /period has bank payment history|Existing bank-processing guard/i);
     await db.exec(`delete from public.workforce_payout_payment_items`);
   }
   await db.query(`insert into public.workforce_payout_effective_paid_allocations values ($1,$2,$3,$4,$5)`,
