@@ -37,6 +37,7 @@ export function disputeEvidenceValues(value: unknown) {
   return JSON.stringify(value,(key,item)=>["updated_at","updatedAt","checkedAt","dependency_hash"].includes(key)?undefined:item);
 }
 const numeric = (n: unknown): number | null => n == null || n === "" || !Number.isFinite(Number(n)) ? null : Number(n);
+const attendanceSchedule = (line: Row) => ["per_day", "per_month", "per_hour"].includes(line.schedule);
 export function disputeDays(snapshot: Row): Row[] {
   const days = new Map<string, Row>();
   for (const line of snapshot.lines ?? []) {
@@ -54,14 +55,23 @@ export function disputeDays(snapshot: Row): Row[] {
   for (const day of snapshot.worksheet?.daily_breakdown ?? []) {
     if (!days.has(day.date)) days.set(day.date, { date: day.date, units: numeric(day.workDayUnits), attendanceKnown: numeric(day.workDayUnits) !== null, deliveries: null, deliveryKnown: false, providerIds: [], lines: day.lines ?? [] });
   }
-  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return [...days.values()].map((day): Row => ({ ...day, attendanceApplicable: day.lines.some(attendanceSchedule) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+/** Only the associate's published inputs, without provider identities or internal calculation metadata. */
+export function associateDisputeDays(snapshot: Row) {
+  return disputeDays(snapshot).map(({ date, units, attendanceKnown, attendanceApplicable, deliveries, deliveryKnown, lines }) => ({
+    date, units, attendanceKnown, attendanceApplicable, deliveries, deliveryKnown,
+    lines: lines.map((line: Row) => ({ code: line.code, count: numeric(line.count) })),
+  }));
 }
 export function disputeItems(snapshot: Row): GuideItem[] {
   const b = publishedPayoutBreakdown(snapshot, snapshot.lines ?? [], snapshot.item ?? {});
   const deductions=new Map<string,GuideItem>();
   for(const d of b.deductions){const key=`deduction:${d.code}:${d.recoveryKey??"head"}`;const old=deductions.get(key);deductions.set(key,{key,code:d.code,label:d.label,kind:"deduction",amount:cash((old?.amount??0)+d.amount),units:null,rate:null,recoveryKey:d.recoveryKey});}
   return [
-    { key: "attendance", code: "attendance", label: "Work days", kind: "attendance", amount: 0, rate: null, units: numeric(snapshot.item?.work_days) },
+    ...(b.earnings.some(e => ["per_day", "per_month", "per_hour"].includes(e.basis))
+      ? [{ key: "attendance", code: "attendance", label: "Work days", kind: "attendance", amount: 0, rate: null, units: numeric(snapshot.item?.work_days) }] : []),
     ...b.earnings.map((e, i) => ({ key: `earning:${e.code}:${i}`, code: e.code, label: e.label,
       kind: /KM|FUEL|KILOMET/i.test(`${e.code} ${e.label}`) ? "fuel" : ["per_day", "per_month", "per_hour"].includes(e.basis) ? "salary" : e.basis === "per_unit" ? "production" : "allowance", amount: e.amount, rate: e.rate, units: e.units })),
     ...deductions.values(),
@@ -74,7 +84,7 @@ export function normalizeGuidedClaim(snapshot: Row, raw: Row): GuidedClaim {
   const component = disputeItems(snapshot).find(i => i.key === raw.component && i.kind === issue.id);
   if (!component) throw new Error("Select the actual payment or deduction from your payout.");
   if (!disputeConcerns(issue.id,component).includes(raw.concern)) throw new Error("Choose what needs checking.");
-  const available = new Set(disputeDays(snapshot).map(d => d.date));
+  const available = new Set(disputeDays(snapshot).filter(d => issue.id !== "attendance" || d.attendanceApplicable).map(d => d.date));
   const dates = [...new Set(Array.isArray(raw.dates) ? raw.dates.map(String) : [])].sort() as string[];
   if (!["deduction","allowance"].includes(issue.id) && (!dates.length || dates.length > 31 || dates.some(d => !available.has(d)))) throw new Error("Select the affected dates from this payout.");
   const note = String(raw.note ?? "").trim().slice(0, 1000);

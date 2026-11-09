@@ -274,3 +274,21 @@ test("a superseded publication remains hidden after relock", async () => {
   }).load();
   assert.deepEqual(payouts, []);
 });
+
+test("associate API retains daily delivery/return counts, including zero, without internal identities", async () => {
+  const paymentLines = [
+    {code:"DELIVERY",label:"Delivery",componentType:"production",count:35,rate:13,amount:455},
+    {code:"CRETURN",label:"C-return",componentType:"production",count:2,rate:13,amount:26},
+    {code:"SELLER_PICKUP",label:"MFN",componentType:"production",count:0,rate:3,amount:0},
+  ];
+  const snapshot = {item:publishedItem,worksheet:{production_breakdown:paymentLines},lines:[{
+    work_date:"2026-09-01",source_type:"worksheet",provider_member_id:"private-provider-id",
+    calculation_snapshot:{workDayUnits:1,counts:{totalDelivery:35},paymentLines},
+  }]};
+  const [payout] = await payoutLoaderFixture({publications:[{...septemberPublication,snapshot}]}).load();
+  assert.equal(payout.disputeItems.some(item=>item.kind==='attendance'),false);
+  assert.deepEqual(payout.disputeDays[0].lines,[{code:'DELIVERY',count:35},{code:'CRETURN',count:2},{code:'SELLER_PICKUP',count:0}]);
+  assert.equal(payout.disputeDays[0].attendanceApplicable,false);
+  assert.equal(JSON.stringify(payout.disputeDays).includes('private-provider-id'),false);
+  assert.equal(guided.publishedDayCount(payout.disputeDays[0],'SELLER_PICKUP'),0);
+});
