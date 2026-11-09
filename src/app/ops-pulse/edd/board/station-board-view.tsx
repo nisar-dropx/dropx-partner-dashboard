@@ -362,7 +362,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [error, setError] = useState<string | null>(null);
   const [whatsAppTarget, setWhatsAppTarget] = useState<WhatsAppTarget | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
-  const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
+  const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number; pulled?: number } | null>(null);
   const [openStation, setOpenStation] = useState<string | null>(null);
   const [tids, setTids] = useState<TidRow[] | null>(null);
   const [tidsBusy, setTidsBusy] = useState(false);
@@ -760,7 +760,12 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         setRun(next.run);
         setBackfillNote(boardRefreshStatus(next));
         setBackfillProgress(next.refreshRunning && next.refreshTotal
-          ? { done: next.refreshDone || 0, total: next.refreshTotal } : null);
+          ? {
+              done: next.refreshDone || 0,
+              total: next.refreshTotal,
+              pulled: Math.max(next.refreshDone || 0, next.refreshPulled || 0),
+            }
+          : null);
       } catch {
         if (!cancelled && ++failures >= 3) setBackfillNote('Refresh status unavailable · showing the last saved data. Reconnecting…');
       } finally { polling = false; }
@@ -1154,7 +1159,11 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
             <span>
               {backfillNote
                 || (backfillProgress && backfillProgress.total > 0
-                  ? `Pulling stations · ${backfillProgress.done}/${backfillProgress.total}`
+                  ? `Saved ${backfillProgress.done}/${backfillProgress.total}${
+                      (backfillProgress.pulled || 0) > backfillProgress.done
+                        ? ` · pulled ${backfillProgress.pulled}/${backfillProgress.total}`
+                        : ""
+                    }`
                   : "Pulling board data…")}
             </span>
           </div>
