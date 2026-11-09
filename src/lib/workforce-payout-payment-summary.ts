@@ -217,7 +217,7 @@ export function workforcePayoutPaymentEligibilityLabel(
     case "payment_on_hold":
       return "Payment on hold";
     case "payout_dispute_open":
-      return "Open payout dispute";
+      return "Payout dispute pending";
     case "pan_not_linked":
       return "PAN not linked";
     default:

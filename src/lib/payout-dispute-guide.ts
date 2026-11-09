@@ -60,8 +60,9 @@ export function disputeItems(snapshot: Row): GuideItem[] {
   const b = publishedPayoutBreakdown(snapshot, snapshot.lines ?? [], snapshot.item ?? {});
   const deductions=new Map<string,GuideItem>();
   for(const d of b.deductions){const key=`deduction:${d.code}:${d.recoveryKey??"head"}`;const old=deductions.get(key);deductions.set(key,{key,code:d.code,label:d.label,kind:"deduction",amount:cash((old?.amount??0)+d.amount),units:null,rate:null,recoveryKey:d.recoveryKey});}
+  const hasAttendancePay = b.earnings.some(e => ["per_day", "per_month", "per_hour"].includes(e.basis));
   return [
-    { key: "attendance", code: "attendance", label: "Work days", kind: "attendance", amount: 0, rate: null, units: numeric(snapshot.item?.work_days) },
+    ...(hasAttendancePay ? [{ key: "attendance", code: "attendance", label: "Work days", kind: "attendance", amount: 0, rate: null, units: numeric(snapshot.item?.work_days) } as GuideItem] : []),
     ...b.earnings.map((e, i) => ({ key: `earning:${e.code}:${i}`, code: e.code, label: e.label,
       kind: /KM|FUEL|KILOMET/i.test(`${e.code} ${e.label}`) ? "fuel" : ["per_day", "per_month", "per_hour"].includes(e.basis) ? "salary" : e.basis === "per_unit" ? "production" : "allowance", amount: e.amount, rate: e.rate, units: e.units })),
     ...deductions.values(),
@@ -164,7 +165,7 @@ export function buildGuidedPlan(snapshot: Row, claim: GuidedClaim, form: FormDat
         delta=after.amount-recorded;
       } else delta = (proposed - field.current) * field.lines!.reduce((n, l) => n + Number(l.count), 0);
     } else if (field.selector !== "attendance") delta = (proposed - field.current) * (field.selector === "deduction" ? -1 : 1);
-    return { area: field.key, kind: claim.issue === "deduction" ? "deduction" : claim.issue === "attendance" ? "attendance" : "production", target_field: `${field.label}${field.date ? ` · ${field.date}` : ""}`, unit: field.unit, current_value: field.current, proposed_value: proposed, unit_rate: field.rate, expected_delta_paise: Math.round(cash(delta) * 100), selector: field.selector, code: field.code, date: field.date, recovery_key: field.recoveryKey ?? null };
+    return { area: field.key, kind: claim.issue, target_field: `${field.label}${field.date ? ` · ${field.date}` : ""}`, unit: field.unit, current_value: field.current, proposed_value: proposed, unit_rate: field.rate, expected_delta_paise: Math.round(cash(delta) * 100), selector: field.selector, code: field.code, date: field.date, recovery_key: field.recoveryKey ?? null };
   });
   let grossDelta = 0, deductionDelta = 0;
   if (claim.issue === "attendance") {
@@ -206,6 +207,6 @@ export function buildGuidedPlan(snapshot: Row, claim: GuidedClaim, form: FormDat
   if (grossDelta) deductionDelta += automatic.reduce((n, h) => n + h.after - h.before, 0);
   const delta = cash(grossDelta - deductionDelta);
   if (!items.some(i => i.current_value !== i.proposed_value)) throw new Error("No value changed. Request clarification or propose rejection.");
-  return { schema: 3, kind: claim.issue === "deduction" ? "deduction" : "attendance", target_field: items.map(i => i.target_field).join("; "), current_value: items.map(i => i.current_value).join("; "), proposed_value: items.map(i => i.proposed_value).join("; "), items, expected_delta_paise: Math.round(delta * 100), claim,
+  return { schema: 3, kind: claim.issue, target_field: items.map(i => i.target_field).join("; "), current_value: items.map(i => i.current_value).join("; "), proposed_value: items.map(i => i.proposed_value).join("; "), items, expected_delta_paise: Math.round(delta * 100), claim,
     totals: { gross_before: grossBefore, gross_after: cash(grossBefore + grossDelta), deductions_before: deductionsBefore, deductions_after: cash(deductionsBefore + deductionDelta), net_before: cash(netBefore), net_after: cash(netBefore + delta) }, automatic_deductions: automatic, evidence_checked_at: context.checkedAt };
 }

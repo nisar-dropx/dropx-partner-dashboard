@@ -105,7 +105,7 @@ test("open payout disputes are a row-level preview and bank-batch exclusion", ()
   assert.match(bankFileRoute, /review\|dispute\|active workforce profile/);
   assert.match(bankDialog, /response\.headers\.get\("X-Workforce-Payout-Skipped-Dispute-Count"\)/);
   assert.match(bankDialog, /Bank file created for eligible rows\./);
-  assert.match(bankDialog, /Open payout dispute/);
+  assert.match(bankDialog, /Payout dispute pending/);
   assert.doesNotMatch(disputeWorkflowMigration, /pg_get_functiondef|execute replace\(v_definition/);
 });
 

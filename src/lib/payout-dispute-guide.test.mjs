@@ -72,3 +72,28 @@ test('ownership and wrongful deduction claims need no replacement amount',()=>{
   assert.equal(c.expected,'');assert.deepEqual(c.dates,[]);assert.equal(guidedFields(s,c)[0].current,500);
  }
 });
+
+test('per-package-only payouts do not offer an irrelevant attendance dispute',()=>{
+ const line={work_date:'2026-10-10',provider_member_id:'200001',calculation_snapshot:{counts:{totalDelivery:20},paymentLines:[{code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300,componentType:'production'}]}};
+ const s={item:{work_days:1,gross_amount:300,deduction_amount:0,net_amount:300},lines:[line],worksheet:{production_breakdown:[{code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300}],deduction_breakdown:[]}};
+ const items=disputeItems(s);
+ assert.equal(items.some(item=>item.kind==='attendance'),false);
+ assert.deepEqual([...new Set(items.map(item=>item.kind))],['production']);
+ assert.throws(()=>normalizeGuidedClaim(s,{issue:'attendance',component:'attendance',dates:['2026-10-10'],concern:'I worked but the day is missing'}),/actual payment/);
+ const production=items[0];
+ const c=normalizeGuidedClaim(s,{issue:'production',component:production.key,dates:['2026-10-10'],concern:'Count is incorrect',counts:[{date:'2026-10-10',component:production.key,value:40}]});
+ const f=new FormData();f.set('value_0','40');f.set('checked_value_0','on');
+ const p=buildGuidedPlan(s,c,f,{policies:[],percentageDeductions:[],checkedAt:'2026-11-10'});
+ assert.equal(p.items[0].kind,'production');
+ assert.equal(p.expected_delta_paise,30000);
+});
+
+test('mixed fixed and per-package payouts retain both attendance and production issues',()=>{
+ const s=structuredClone(baseSnapshot);
+ const delivery={code:'DELIVERY',label:'Delivery',schedule:'per_unit',rate:15,count:20,amount:300,componentType:'production'};
+ s.lines[9].calculation_snapshot.paymentLines.push(delivery);
+ s.worksheet.production_breakdown.push(delivery);
+ const kinds=new Set(disputeItems(s).map(item=>item.kind));
+ assert.equal(kinds.has('attendance'),true);
+ assert.equal(kinds.has('production'),true);
+});

@@ -146,7 +146,7 @@ export function WorkforcePayoutBankDialog({
       operationIdRef.current = "";
       if (skippedDisputeCount > 0) {
         setNotice(
-          `Bank file created for eligible rows. ${skippedDisputeCount} selected payout row${skippedDisputeCount === 1 ? " was" : "s were"} skipped because an open dispute was detected. The refreshed table marks ${skippedDisputeCount === 1 ? "it" : "them"} as Open payout dispute.`
+          `Bank file created for eligible rows. ${skippedDisputeCount} selected payout row${skippedDisputeCount === 1 ? " was" : "s were"} skipped because a payout dispute is still pending. The refreshed table marks ${skippedDisputeCount === 1 ? "it" : "them"} as Payout dispute pending.`
         );
       } else {
         setMode(null);

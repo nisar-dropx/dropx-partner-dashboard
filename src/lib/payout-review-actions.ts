@@ -17,6 +17,7 @@ const ACTIONS = new Set([
   "propose_correction",
   "propose_rejection",
   "approve_final",
+  "reject_final",
   "send_back",
   "claim_processing",
   "block_processing",
@@ -51,6 +52,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
   if (!ACTIONS.has(action)) throw new Error("Choose a valid dispute action.");
   if (!UUID.test(disputeId)) throw new Error("This dispute is invalid. Refresh and try again.");
   if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new Error("This dispute changed. Refresh and try again.");
+  if (action === "reject_final" && note.length < 10) throw new Error("Give a clear rejection reason of at least 10 characters.");
 
   const payoutPageCode = ops ? "ops_workforce_payouts" : "workforce_payouts";
   if (["claim_processing", "block_processing", "complete_processing"].includes(action)) {
@@ -60,7 +62,7 @@ export async function performPayoutReview(form: FormData): Promise<PayoutReviewR
   const payload: Record<string, unknown> = { note: note || null, portal: ops ? "ops" : "workforce" };
   const companyId = requireCompanyId(auth);
   let actorRoleIds = auth.effectiveRoleIds;
-  if (!ops && ["approve_final", "send_back", "return_review"].includes(action)) {
+  if (!ops && ["approve_final", "reject_final", "send_back", "return_review"].includes(action)) {
     const dispute = await supabaseAdmin.from("workforce_payout_disputes")
       .select("station_id").eq("company_id", companyId).eq("id", disputeId).single();
     if (dispute.error || !dispute.data) throw new Error("Dispute is unavailable. Refresh and try again.");

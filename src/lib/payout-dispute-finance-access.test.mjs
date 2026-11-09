@@ -53,7 +53,7 @@ test("all-location membership retains its existing scope", async () => {
 test("both the desk and final server actions use the shared scoped access", () => {
   const action = readFileSync(new URL("./payout-review-actions.ts", import.meta.url), "utf8");
   const desk = readFileSync(new URL("../components/payout-review-desk.tsx", import.meta.url), "utf8");
-  assert.match(action, /!ops && \["approve_final", "send_back", "return_review"\]\.includes\(action\)/);
+  assert.match(action, /!ops && \["approve_final", "reject_final", "send_back", "return_review"\]\.includes\(action\)/);
   assert.match(action, /p_actor_role_ids: actorRoleIds/);
   assert.match(action, /p_locations: auth.hasAllLocationAccess/);
   assert.match(desk, /stage === "final" && financeAccess/);

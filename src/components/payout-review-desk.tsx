@@ -377,6 +377,7 @@ export async function PayoutReviewDesk({
         const sameInitialActor = dispute.initial_reviewed_by === auth.userId || dispute.proposed_by === auth.userId;
         const sameApprovalActor = sameInitialActor || dispute.final_approved_by === auth.userId;
         const plan = record(dispute.correction_plan);        const result = record(dispute.processing_result);
+        const legacyCorrectionNeedsRecalculation = dispute.proposed_decision === "resolved" && plan.schema !== 3;
         const candidate = latestRevision.get(String(dispute.id));
         const beforePaise = netPaise(publication);
         const afterPaise = netPaise(candidate);
@@ -412,9 +413,9 @@ export async function PayoutReviewDesk({
                 {dispute.proposed_note ? <>: “{dispute.proposed_note}”</> : null} <small>{when(dispute.initial_reviewed_at || dispute.proposed_at)}</small>
                 {Object.keys(plan).length ? (
                   <>
-                    <div className={guide.scroll}><table className={guide.table}><thead><tr><th>Item / date</th><th>In payout</th><th>Validated correction</th><th>Rate</th></tr></thead><tbody>{(Array.isArray(plan.items) && plan.items.length ? plan.items : [plan]).map((item: Row, index: number) => {
+                    <div className={guide.scroll}><table className={guide.table}><thead><tr><th>Item / date</th><th>In payout</th><th>Validated correction</th><th>Rate</th><th>Pay impact</th></tr></thead><tbody>{(Array.isArray(plan.items) && plan.items.length ? plan.items : [plan]).map((item: Row, index: number) => {
                       const display=(value:any)=>value==null?"—":item.selector==="attendance"?attendanceLabel({attendanceKnown:true,units:Number(value)}):`${value}${item.unit?` ${item.unit==="rupees"?"₹":item.unit}`:""}`;
-                      return <tr key={index}><td>{String(item.target_field||"—")}</td><td>{display(item.current_value)}</td><td>{display(item.proposed_value)}</td><td>{item.unit_rate!=null&&!["₹","rupees"].includes(item.unit)?`₹${item.unit_rate}`:"—"}</td></tr>;
+                      return <tr key={index}><td>{String(item.target_field||"—")}</td><td>{display(item.current_value)}</td><td>{display(item.proposed_value)}</td><td>{item.unit_rate!=null&&!["₹","rupees"].includes(item.unit)?`₹${item.unit_rate}`:"—"}</td><td>{item.expected_delta_paise!=null?moneyFromPaise(item.expected_delta_paise):"—"}</td></tr>;
                     })}</tbody></table></div>
                     {plan.expected_delta_paise != null ? <p><b>Total expected net change:</b> {moneyFromPaise(plan.expected_delta_paise)}</p> : null}
                     {plan.totals?<p>Gross ₹{plan.totals.gross_before} → ₹{plan.totals.gross_after} · Deductions ₹{plan.totals.deductions_before} → ₹{plan.totals.deductions_after} · Net ₹{plan.totals.net_before} → ₹{plan.totals.net_after}</p>:null}
@@ -427,7 +428,7 @@ export async function PayoutReviewDesk({
               <p className={styles.approval}><b>Final approval:</b> {dispute.final_approved_by_name} · {when(dispute.final_approved_at)}</p>
             ) : null}
             {dispute.status === "rejected" ? (
-              <p className={styles.proposal}><b>Final decision:</b> “{dispute.resolution || dispute.proposed_note}”{dispute.final_approved_by_name || dispute.approved_by_name ? <small> · approved by {dispute.final_approved_by_name || dispute.approved_by_name}</small> : null}</p>
+              <p className={styles.proposal}><b>Final decision:</b> “{dispute.resolution || dispute.proposed_note}”{dispute.final_approved_by_name || dispute.approved_by_name ? <small> · decided by {dispute.final_approved_by_name || dispute.approved_by_name}</small> : null}</p>
             ) : null}
             {dispute.status === "resolved" ? (
               <div className={styles.resolution}>
@@ -461,14 +462,38 @@ export async function PayoutReviewDesk({
               sameInitialActor ? <p className={styles.hint}>You performed the initial review. A different final approver must decide.</p>
                 : canFinal ? (
                   <div className={styles.finalActions}>
-                    <form id={`final-${disputeId}`} action={action} className={styles.simpleAction}>
-                      <input name="dispute_id" type="hidden" value={dispute.id} />
-                      <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
-                      <input name="note" maxLength={1000} placeholder="Final approval note (optional)" aria-label="Final approval note" />
-                      <DisputeBalanceChoice plan={plan}/>
-                      <label><input type="checkbox" name="evidence_reviewed" required/> Evidence and payout impact checked</label>
-                      <button className="button" name="transition" value="approve_final">{dispute.proposed_decision === "rejected" ? "Confirm rejection" : "Approve correction for processing"}</button>
-                    </form>
+                    {legacyCorrectionNeedsRecalculation ? (
+                      <div className={styles.legacyWarning} role="alert">
+                        <b>This older proposal cannot safely change payroll.</b>
+                        <span>Return it for guided recalculation before approval, or reject it with a reason.</span>
+                        <form action={action} className={styles.simpleAction}>
+                          <input name="dispute_id" type="hidden" value={dispute.id}/>
+                          <input name="expected_version" type="hidden" value={dispute.version}/>
+                          <input name="note" type="hidden" value="Revalidate the specific item and recalculate gross, deductions and net using current evidence."/>
+                          <button name="transition" value="return_review" className="button">Return for guided recalculation</button>
+                        </form>
+                      </div>
+                    ) : (
+                      <form id={`final-${disputeId}`} action={action} className={styles.simpleAction}>
+                        <input name="dispute_id" type="hidden" value={dispute.id} />
+                        <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
+                        <input name="note" maxLength={1000} placeholder="Final approval note (optional)" aria-label="Final approval note" />
+                        <DisputeBalanceChoice plan={plan}/>
+                        <label><input type="checkbox" name="evidence_reviewed" required/> Evidence and payout impact checked</label>
+                        <button className="button" name="transition" value="approve_final">{dispute.proposed_decision === "rejected" ? "Confirm rejection" : "Approve correction for processing"}</button>
+                      </form>
+                    )}
+                    {dispute.proposed_decision !== "rejected" ? (
+                      <details className={styles.rejectAction}>
+                        <summary>Reject dispute</summary>
+                        <form action={action} className={styles.simpleAction}>
+                          <input name="dispute_id" type="hidden" value={dispute.id} />
+                          <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
+                          <input name="note" required minLength={10} maxLength={1000} placeholder="Clear rejection reason shown to the associate" aria-label="Final rejection reason" />
+                          <button className="button secondary" name="transition" value="reject_final">Reject dispute</button>
+                        </form>
+                      </details>
+                    ) : null}
                     <form action={action} className={styles.simpleAction}>
                       <input name="dispute_id" type="hidden" value={dispute.id} />
                       <input name="expected_version" type="hidden" value={String(dispute.version || 1)} />
@@ -527,7 +552,7 @@ export async function PayoutReviewDesk({
             ) : null}
 
 
-            {((canFinal&&["pending_final_approval","in_review"].includes(dispute.status))||(canProcess&&["approved_for_processing","processing","processing_blocked"].includes(dispute.status)))&&plan.schema!==3?<form action={action} className={styles.simpleAction}><input name="dispute_id" type="hidden" value={dispute.id}/><input name="expected_version" type="hidden" value={dispute.version}/><input name="note" type="hidden" value="Revalidate the specific item and recalculate gross, deductions and net using current evidence."/><button name="transition" value="return_review" className="button secondary">Return for guided recalculation</button></form>:null}
+            {canProcess&&["approved_for_processing","processing","processing_blocked"].includes(dispute.status)&&plan.schema!==3?<form action={action} className={styles.simpleAction}><input name="dispute_id" type="hidden" value={dispute.id}/><input name="expected_version" type="hidden" value={dispute.version}/><input name="note" type="hidden" value="Revalidate the specific item and recalculate gross, deductions and net using current evidence."/><button name="transition" value="return_review" className="button secondary">Return for guided recalculation</button></form>:null}
             </div>
           </details>
         );

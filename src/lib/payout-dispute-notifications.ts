@@ -36,7 +36,7 @@ function noticeFor(action: string, dispute: Record<string, unknown>): Notice | n
       decision: "Your payout dispute was approved. The payout team is now applying the correction."
     };
   }
-  if (action === "approve_final" && status === "rejected") {
+  if (["approve_final", "reject_final"].includes(action) && status === "rejected") {
     return {
       eventCode: "payout_dispute_rejected",
       decision: String(dispute.resolution || dispute.proposed_note || "Your payout dispute was not approved.")
