@@ -5,16 +5,46 @@ import * as crypto from 'node:crypto';
 import ts from 'typescript';
 
 const secret = 'test-only-key';
-function load(fetch, env = { SUPABASE_SERVICE_ROLE_KEY: secret }) {
+function load(fetch, env = { SUPABASE_SERVICE_ROLE_KEY: secret }, dueResult = {data:[{advance_id:'due'}],error:null}, queries = []) {
   const source = readFileSync(new URL('./own-advance-deduction.ts', import.meta.url), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
   new Function('require', 'exports', 'process', 'fetch', output)(name => {
     if (name === 'server-only') return {};
+    if (name === '@/lib/supabase-admin') return {
+      supabaseAdmin: {
+        rpc(name, args) {
+          queries.push({ name, args });
+          return {
+            eq(column, value) {
+              queries.push({ column, value });
+              return { limit: async limit => { queries.push({ limit }); return dueResult; } };
+            }
+          };
+        }
+      }
+    };
     assert.equal(name, 'node:crypto'); return crypto;
   }, module.exports, { env }, fetch);
   return module.exports.loadOwnAdvanceDeduction;
 }
+
+test('verified empty personal advance ledger avoids a duplicate payout calculation', async () => {
+  const queries = [];
+  const lookup = load(() => assert.fail('must not recalculate payout'), undefined, { data: [], error: null }, queries);
+  assert.equal(await lookup('company', 'canonical-worker', '2026-11'), 0);
+  assert.deepEqual(queries, [
+    { name: 'pay_advance_period_due', args: { p_company: 'company', p_period: '2026-11-01', p_target: 'workforce', p_run: null } },
+    { column: 'worker_id', value: 'canonical-worker' }, { limit: 1 }
+  ]);
+});
+
+test('unavailable or malformed advance ledger never hides a deduction', async () => {
+  for (const due of [{ data: [], error: { message: 'timeout' } }, { data: null, error: null }]) {
+    await assert.rejects(load(() => assert.fail('must not fetch'), undefined, due)('company', 'worker', '2026-11'),
+      { message: 'Your advance deductions could not be verified. Please retry.' });
+  }
+});
 test('service lookup binds the canonical company, worker and month; never forwards actor cookies or secret', async () => {
   for (const amount of [0, 78.12]) {
     let calls = 0;
