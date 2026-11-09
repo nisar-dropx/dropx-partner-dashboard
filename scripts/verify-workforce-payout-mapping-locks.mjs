@@ -979,7 +979,65 @@ try {
     /approved or paid Workforce payroll period cannot be unlocked/i
   );
 
-  console.log("Workforce payout mapping unlock/relock migration verification passed.");
+  // Regression: correction audit survives a removed unpublished/unpaid snapshot.
+  const missingWorker = randomUUID();
+  const missingPublication = randomUUID();
+  await seedPublishedPayout({ workforceId: missingWorker, reviewId: randomUUID(),
+    publicationId: missingPublication, mappingId: randomUUID(), memberId: "MISSING-BASE" });
+  const missingUnlock = (await db.query(
+    `select public.workforce_unlock_payout_mappings($1,$2,$3,$4,array[$5]::uuid[],$6,$7) as result`,
+    [company, actor, periodStart, periodEnd, missingWorker, randomUUID(), "Correct unpaid mapping before first bank payment."]
+  )).rows[0].result;
+  await db.query(`delete from public.workforce_payout_publications where id=$1`, [missingPublication]);
+  const missingArgs = [company, actor, periodStart, periodEnd, missingUnlock.unlock_ids[0],
+    randomUUID(), "Publish current unpaid calculation after mapping correction.", dependencyHash,
+    JSON.stringify([{ workforce_id: missingWorker, station_id: station,
+      snapshot: publicationSnapshot(missingWorker, station, "MISSING-BASE"), snapshot_hash: "c".repeat(64) }])];
+  const relockSql = `select public.workforce_relock_payout_mappings($1,$2,$3,$4,array[$5]::uuid[],$6,$7,$8,$9::jsonb) as result`;
+  await assert.rejects(db.query(relockSql, missingArgs), /source publication.*unavailable/i);
+  await db.exec(`
+    create table public.workforce_payout_payment_items (
+      company_id uuid, workforce_id uuid, period_start date, period_end date, status text
+    );
+    create table public.workforce_payout_effective_paid_allocations (
+      company_id uuid, credited_workforce_id uuid, original_workforce_id uuid,
+      period_start date, period_end date
+    );
+  `);
+  const missingBaselinePatch = readFileSync(new URL(
+    "../supabase/migrations/20261109180255_workforce_relock_unpaid_missing_publication.sql", import.meta.url
+  ), "utf8");
+  await db.exec(missingBaselinePatch);
+  await db.exec(missingBaselinePatch);
+  for (const status of ["paid", "processing"]) {
+    await db.query(`insert into public.workforce_payout_payment_items values ($1,$2,$3,$4,$5)`,
+      [company, missingWorker, periodStart, periodEnd, status]);
+    await assert.rejects(db.query(relockSql, missingArgs), /period has bank payment history/i);
+    await db.exec(`delete from public.workforce_payout_payment_items`);
+  }
+  await db.query(`insert into public.workforce_payout_effective_paid_allocations values ($1,$2,$3,$4,$5)`,
+    [company, missingWorker, workforce, periodStart, periodEnd]);
+  await assert.rejects(db.query(relockSql, missingArgs), /period has bank payment history/i);
+  await db.exec(`delete from public.workforce_payout_effective_paid_allocations`);
+  // Prior-month payments do not block the new month's unpaid calculation.
+  await db.query(`insert into public.workforce_payout_payment_items values ($1,$2,'2026-08-01','2026-08-31','paid')`,
+    [company, missingWorker]);
+  const recovered = (await db.query(relockSql, missingArgs)).rows[0].result;
+  assert.equal(recovered.relocked, 1);
+  assert.equal(recovered.published, 1);
+  assert.deepEqual((await db.query(relockSql, missingArgs)).rows[0].result, recovered);
+  const recoveredPublication = (await db.query(
+    `select revision,notification_status,supersedes_publication_id,mapping_relock_id from public.workforce_payout_publications where workforce_id=$1`,
+    [missingWorker])).rows[0];
+  assert.equal(recoveredPublication.revision, 2);
+  assert.equal(recoveredPublication.notification_status, "disabled");
+  assert.equal(recoveredPublication.supersedes_publication_id, null);
+  assert.equal(recoveredPublication.mapping_relock_id, missingArgs[5]);
+  assert.equal((await db.query(`select status from public.workforce_payout_mapping_unlocks where id=$1`,
+    [missingUnlock.unlock_ids[0]])).rows[0].status, "relocked");
+  assert.equal((await db.query(`select count(*)::int as n from public.workforce_payout_payment_items`)).rows[0].n, 1);
+
+  console.log("Workforce payout mapping unlock/relock migration verification passed, including unpaid missing-publication recovery.");
 } finally {
   await db.close();
 }
