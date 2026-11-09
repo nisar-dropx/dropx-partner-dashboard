@@ -1,4 +1,4 @@
-type Day = { date?: string; attendanceKnown?: boolean; units?: unknown };
+type Day = { date?: string; attendanceKnown?: boolean; attendanceApplicable?: boolean; units?: unknown };
 
 export function attendanceLabel(day?: Omit<Day, "date">) {
   if (!day?.attendanceKnown || day.units == null || !Number.isFinite(Number(day.units))) return "Not available";
@@ -11,6 +11,7 @@ export function attendanceLabel(day?: Omit<Day, "date">) {
 
 export function attendanceDateChoices<T extends Day>(days: T[], issue?: string, concern?: string): T[] {
   if (issue !== "attendance") return days;
+  days = days.filter(d => d.attendanceApplicable !== false);
   if (!concern) return [];
   if (concern === "I worked but the day is missing") return days.filter(d => d.attendanceKnown && d.units != null && Number(d.units) === 0);
   if (concern === "Full day shown as half day") return days.filter(d => d.attendanceKnown && Number(d.units) === 0.5);
