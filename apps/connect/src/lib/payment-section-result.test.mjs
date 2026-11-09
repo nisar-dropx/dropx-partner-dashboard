@@ -22,7 +22,8 @@ test('optional estimate can be skipped without creating a failure',async()=>{
 test('payments keep auth-scoped reads separate and guard stale earnings',()=>{
  const source=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
  assert.match(source,/reconcileOwnProduction\(result.earnings,result.summary\)/);
- assert.match(source,/if\(version!==generation.current\)return/);
+ assert.match(source,/if\(version!==generation.current\|\|!request.isCurrent\(\)\)return/);
+ assert.match(source,/paymentRead<EarningsData>/);
  assert.match(source,/result.month!==earningsMonth/);
  assert.match(source,/month=\{payoutMonth\}/);
  assert.match(source,/latestPayoutMonthApplied/);
@@ -32,7 +33,8 @@ test('payments keep auth-scoped reads separate and guard stale earnings',()=>{
  assert.match(source,/createRoutePreviewCache/);
  assert.match(source,/normalizePayoutMonth/);
  const payouts=readFileSync(new URL('../components/associate-payouts.tsx',import.meta.url),'utf8');
- assert.match(payouts,/!response.ok \|\| !Array.isArray\(body.payouts\)/);
+ assert.match(payouts,/await paymentRead\(`/);
+ assert.match(payouts,/!Array.isArray\(body.payouts\)/);
  assert.match(payouts,/generation !== loadGeneration.current/);
  assert.match(payouts,/setPayouts\(\[\]\)/);
  assert.match(payouts,/Payout not published yet/);
