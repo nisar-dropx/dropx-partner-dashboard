@@ -10,6 +10,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {loadOwnAdvanceDeduction} from '@/lib/own-advance-deduction';
+import {loadOwnLossDue} from '@/lib/own-loss-due';
 import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
 import {ownIncentives,type IncentiveAttendance,type IncentiveSource,type OwnCampaign} from '@/lib/workforce-own-incentives';
 import {assertNoProviderDirectOverlap} from '@/lib/direct-workforce-payment';
@@ -248,9 +249,8 @@ export async function GET(request: Request) {
     // a separate historical record, never added again and never treated as outstanding dues.
     summary.additions=adjustments.summary.additions;
     summary.grossAmount=Math.round((summary.baseAmount+incentives.summary.amount+summary.additions)*100)/100;
-    const due = workforce?.id ? await db().rpc("nl_loss_recovery_due",{p_company:account.companyId,p_salary_month:month,p_target:"workforce"},{get:true}) : {data:[],error:null};
-    if(due.error)throw new Error("Your loss deductions could not be verified. Please retry.");
-    let {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due.data||[]);
+    const due = workforce?.id ? await loadOwnLossDue(db(),account.companyId,workforce.id,month) : [];
+    let {deductionAmount,netAmount,lossRecoveryAmount,lossRecoveryDeferred}=ownLossRecoveryEstimate(String(workforce?.id||""),summary.grossAmount,adjustments.summary.deductions,due);
     let advanceRecoveryAmount=0;
     if(workforce?.id) {
       advanceRecoveryAmount=await loadOwnAdvanceDeduction(account.companyId,workforce.id,month);

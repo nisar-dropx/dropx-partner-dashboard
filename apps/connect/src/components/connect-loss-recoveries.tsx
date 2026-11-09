@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {paymentRead,latestPaymentRead} from '@/lib/payment-read';
 import { RecoveryDetail, monthLabel, type Recovery } from "./connect-loss-recovery-detail";
 
 const money = (n: number) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -20,28 +21,30 @@ export function ConnectLossRecoveries({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<Recovery | null>(null);
+  const paymentRequest=useRef(latestPaymentRead());
 
   const load = useCallback(async () => {
+    const request=paymentRequest.current.start();
     setLoading(true);
     setError("");
     try {
       const q = new URLSearchParams({ accountId, profileType });
-      const response = await fetch(`/api/connect/loss-recoveries?${q}`, {
-        cache: "no-store",
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Unable to load loss recoveries.");
-      setRows(Array.isArray(body.recoveries) ? body.recoveries : []);
+      const body = await paymentRead(`/api/connect/loss-recoveries?${q}`, {signal:request.signal});
+      if (!Array.isArray(body.recoveries)) throw new Error('Unable to verify loss recoveries. Please retry.');
+      if(request.isCurrent())setRows(body.recoveries);
     } catch (e) {
+      if(!request.isCurrent())return;
       setError(e instanceof Error ? e.message : "Unable to load loss recoveries.");
       setRows([]);
     } finally {
-      setLoading(false);
+      if(request.isCurrent())setLoading(false);
     }
   }, [accountId, profileType]);
 
   useEffect(() => {
+    setRows([]);setOpen(false);setDetail(null);
     void load();
+    return ()=>paymentRequest.current.cancel();
   }, [load]);
 
   if (loading) return null;

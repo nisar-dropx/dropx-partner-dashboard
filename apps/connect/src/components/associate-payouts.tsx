@@ -1,4 +1,5 @@
 "use client";
+import {paymentRead,latestPaymentRead} from '@/lib/payment-read';
 import { AssociateDisputeRequest } from "./associate-dispute-request";
 import { RecoveryDetailButton } from "./connect-loss-recovery-detail";
 
@@ -141,27 +142,28 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
   const [notice, setNotice] = useState("");
   const [disputeAreas, setDisputeAreas] = useState<PayoutDisputeArea[]>([]);
   const loadGeneration = useRef(0);
+  const paymentRequest = useRef(latestPaymentRead());
   const disputeSectionRef = useRef<HTMLElement>(null);
   const query = new URLSearchParams({ accountId, profileType }).toString();
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
+    const request = paymentRequest.current.start();
     setLoading(true);
     setLoadError("");
     try {
-      const response = await fetch(`/api/connect/payout-review?${query}`, { cache: "no-store" });
-      const body = await response.json();
-      if (!response.ok || !Array.isArray(body.payouts)) throw new Error("Payout lookup failed");
-      if (generation !== loadGeneration.current) return;
+      const body = await paymentRead(`/api/connect/payout-review?${query}`, {signal:request.signal});
+      if (!Array.isArray(body.payouts)) throw new Error("Payout lookup failed");
+      if (generation !== loadGeneration.current || !request.isCurrent()) return;
       setPayouts(body.payouts);
       const latestMonth = latestPublishedPayoutMonth(body.payouts);
       if (latestMonth) onLatestMonthChange?.(latestMonth);
       setLoadError("");
     } catch {
-      if (generation !== loadGeneration.current) return;
+      if (generation !== loadGeneration.current || !request.isCurrent()) return;
       setLoadError("We couldn’t load your published payouts. Please select Retry. If this continues, contact the Workforce team.");
     } finally {
-      if (generation === loadGeneration.current) setLoading(false);
+      if (generation === loadGeneration.current && request.isCurrent()) setLoading(false);
     }
   }, [onLatestMonthChange, query]);
 
@@ -175,7 +177,7 @@ export function AssociatePayouts({ accountId, profileType, month, onMonthLockCha
     setActionError("");
   }, [query]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); return () => paymentRequest.current.cancel(); }, [load]);
 
   useEffect(() => {
     setSelected("");
