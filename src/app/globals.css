@@ -7425,6 +7425,82 @@ h3 {
   white-space: nowrap;
 }
 
+.payment-contact-picker-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #eaecf0;
+  padding-top: 10px;
+}
+
+.payment-contact-picker-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  background: #fff;
+  padding: 6px 6px 6px 10px;
+}
+
+.payment-contact-picker-item.active {
+  border-color: rgba(18, 183, 106, 0.45);
+  background: #f6fffb;
+}
+
+.payment-contact-picker-item-select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  min-width: 0;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.payment-contact-picker-item-select strong,
+.payment-contact-picker-item-select small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-contact-picker-item-select strong {
+  color: #182230;
+  font-size: 12px;
+}
+
+.payment-contact-picker-item-select small {
+  color: #667085;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.payment-contact-picker-delete {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  background: #fff;
+  color: #b42318;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 7px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.payment-contact-picker-delete:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .payment-contact-picker-head {
     grid-template-columns: 34px minmax(0, 1fr);
@@ -7436,6 +7512,14 @@ h3 {
 
   .payment-contact-picker-selection {
     grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .payment-contact-picker-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .payment-contact-picker-delete {
+    justify-self: start;
   }
 
   .payment-contact-verified {

@@ -48,13 +48,22 @@ export function PaymentBeneficiaryFields({
   const [selectedBankContactId, setSelectedBankContactId] = useState("");
   const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
   const [verificationMessage, setVerificationMessage] = useState("");
-  const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
-  const upiContacts = useMemo(() => savedContacts.filter((contact) => contact.upi_id), [savedContacts]);
+  const [contacts, setContacts] = useState(savedContacts);
+  const bankContacts = useMemo(() => contacts.filter((contact) => contact.bank_account_no && contact.ifsc), [contacts]);
+  const upiContacts = useMemo(() => contacts.filter((contact) => contact.upi_id), [contacts]);
+
+  useEffect(() => {
+    setContacts(savedContacts);
+  }, [savedContacts]);
 
   useEffect(() => {
     const firstSupportedMode = supportedPaymentModes[0];
     if (firstSupportedMode && !supportedPaymentModes.includes(paymentMode)) setPaymentMode(firstSupportedMode);
   }, [paymentMode, supportedPaymentModes]);
+
+  function removeSavedContact(contactId: string) {
+    setContacts((current) => current.filter((contact) => contact.id !== contactId));
+  }
 
   function invalidateBankVerification() {
     setSelectedBankContactId("");
@@ -203,7 +212,7 @@ export function PaymentBeneficiaryFields({
       ) : paymentMode === "upi_payment" ? (
         <div className="form-grid three" key="upi-payment-fields">
           <div className="span-3">
-            <PaymentContactPicker contacts={upiContacts} mode="upi" onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
+            <PaymentContactPicker contacts={upiContacts} mode="upi" onDeleted={removeSavedContact} onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
           </div>
           <label>
             UPI ID *
@@ -246,7 +255,7 @@ export function PaymentBeneficiaryFields({
       ) : (
         <div className="form-grid three" key="account-transfer-fields">
           <div className="span-3">
-            <PaymentContactPicker contacts={bankContacts} mode="bank" onValueChange={selectBankContact} selectedId={selectedBankContactId} />
+            <PaymentContactPicker contacts={bankContacts} mode="bank" onDeleted={removeSavedContact} onValueChange={selectBankContact} selectedId={selectedBankContactId} />
           </div>
           <label>
             Bank Account No *

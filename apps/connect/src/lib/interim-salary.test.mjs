@@ -24,6 +24,8 @@ test('Salary Calculation is the desktop/mobile label while the interim warning r
   assert.match(page, /Paid leave/);
   assert.match(page, /View split/);
   assert.match(page, /id="paid-leave-split"/);
+  assert.match(page, /when People marks your salary calculation ready/);
+  assert.doesNotMatch(page, /when a salary payment is prepared/);
   assert.doesNotMatch(page, /each counted on its own/);
   assert.doesNotMatch(flow + page, /Interim salary|interim salary/);
 });
@@ -137,14 +139,19 @@ function dataFixture() {
   const { loadInterimSalaries } = load('./interim-salary-data.ts', { './interim-salary': salary });
   return { queries, tables, state, load: (a = account) => loadInterimSalaries(db, a) };
 }
-test('loader scopes every worker read by company/type/ID and limits runs to issued/published history', async () => {
+test('loader scopes every worker read by company/type/ID and lists ready calculations before payment', async () => {
   const f = dataFixture(); assert.equal((await f.load())[0].awaitingConfirmation, 18000);
   for (const query of f.queries) {
     assert.ok(query.filters.some(x => JSON.stringify(x) === JSON.stringify(['eq', 'company_id', 'company'])));
     if (query.table !== 'hr_payroll_runs') for (const [key, value] of [['worker_type', 'employee'], ['worker_id', 'worker']]) assert.ok(query.filters.some(x => x[1] === key && x[2] === value));
   }
+  assert.ok(f.queries.find(q => q.table === 'hr_payroll_run_people').filters.some(x => x[0] === 'eq' && x[1] === 'calculation_status' && x[2] === 'ready'));
   assert.ok(f.queries.find(q => q.table === 'hr_pay_documents').filters.some(x => x[0] === 'is' && x[1] === 'revoked_at' && x[2] === null));
-  assert.deepEqual(f.queries.find(q => q.table === 'hr_payroll_runs').filters.find(x => x[0] === 'in')[2], ['run']);
+  assert.deepEqual(f.queries.find(q => q.table === 'hr_payroll_runs').filters.find(x => x[0] === 'in' && x[1] === 'id')[2], ['run']);
+  assert.deepEqual(f.queries.find(q => q.table === 'hr_payroll_runs').filters.find(x => x[0] === 'in' && x[1] === 'status')[2], ['calculated', 'reviewed', 'approved', 'locked']);
+  f.tables.hr_payroll_bank_lines = [];
+  assert.equal((await f.load())[0].payable, 18000);
+  assert.equal((await f.load())[0].provisional, true);
 });
 test('loader classifies paid leave for the signed-in worker only', async () => {
   const f = dataFixture();
@@ -157,8 +164,9 @@ test('loader classifies paid leave for the signed-in worker only', async () => {
 });
 test('unreleased drafts stay private, Workforce performs no reads, failures do not become zero payroll', async () => {
   const f = dataFixture(); await assert.rejects(f.load({ ...account, workspace: 'workforce' })); assert.equal(f.queries.length, 0);
-  f.tables.hr_payroll_bank_lines = []; assert.deepEqual(await f.load(), []); assert.equal(f.queries.length, 2);
-  f.state.fail = 'hr_payroll_bank_lines'; await assert.rejects(f.load(), /Unable to load salary/);
+  f.tables.hr_payroll_run_people = []; assert.deepEqual(await f.load(), []); assert.equal(f.queries.length, 1);
+  f.tables.hr_payroll_run_people = [person]; f.tables.hr_payroll_runs = [{ ...run, status: 'draft' }]; assert.deepEqual(await f.load(), []);
+  f.tables.hr_payroll_runs = [run]; f.state.fail = 'hr_payroll_run_people'; await assert.rejects(f.load(), /Unable to load the salary/);
 });
 test('salary API enforces session ownership and People scope, and uses no-store', async () => {
   const state = { denied: false, selected: account, loads: 0, fails: false };

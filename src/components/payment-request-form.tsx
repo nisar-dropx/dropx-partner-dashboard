@@ -149,11 +149,20 @@ export function PaymentRequestForm({
   const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
   const [selectedBankContactId, setSelectedBankContactId] = useState("");
   const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
+  const [contacts, setContacts] = useState(savedContacts);
   const selectedHead = useMemo(() => heads.find((head) => head.id === selectedHeadId) ?? null, [heads, selectedHeadId]);
   const deliveryIdentityPolicy = normalizeDeliveryIdentityPolicy(selectedHead?.delivery_identity_policy);
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(selectedHead?.supported_payment_modes), [selectedHead]);
-  const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
-  const upiContacts = useMemo(() => savedContacts.filter((contact) => contact.upi_id), [savedContacts]);
+  const bankContacts = useMemo(() => contacts.filter((contact) => contact.bank_account_no && contact.ifsc), [contacts]);
+  const upiContacts = useMemo(() => contacts.filter((contact) => contact.upi_id), [contacts]);
+
+  useEffect(() => {
+    setContacts(savedContacts);
+  }, [savedContacts]);
+
+  function removeSavedContact(contactId: string) {
+    setContacts((current) => current.filter((contact) => contact.id !== contactId));
+  }
   const amount = Number(amountText);
   const hasAmount = amountText.trim().length > 0 && Number.isFinite(amount);
   const expenseApprovalThreshold = selectedHead?.expense_approval_threshold ?? null;
@@ -334,7 +343,7 @@ export function PaymentRequestForm({
           ) : isUpiPayment ? (
             <div className="form-grid three">
               <div className="span-3">
-                <PaymentContactPicker contacts={upiContacts} disabled={blockedByExpenseApproval} mode="upi" onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
+                <PaymentContactPicker contacts={upiContacts} disabled={blockedByExpenseApproval} mode="upi" onDeleted={removeSavedContact} onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
               </div>
               <label>
                 UPI ID *
@@ -362,7 +371,7 @@ export function PaymentRequestForm({
           ) : (
             <div className="form-grid three">
               <div className="span-3">
-                <PaymentContactPicker contacts={bankContacts} disabled={blockedByExpenseApproval} mode="bank" onValueChange={selectBankContact} selectedId={selectedBankContactId} />
+                <PaymentContactPicker contacts={bankContacts} disabled={blockedByExpenseApproval} mode="bank" onDeleted={removeSavedContact} onValueChange={selectBankContact} selectedId={selectedBankContactId} />
               </div>
               <label>
                 Bank Account No *
