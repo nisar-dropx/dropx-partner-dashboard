@@ -4,7 +4,7 @@ import {canProcessPayment} from "@/lib/payment-processing-policy";
 import { hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { insertPaymentApprovalLog } from "@/app/payments/approvals/actions";
+import { paymentBankBalance } from "@/lib/payment-bank-balance";
 
 type PaymentBankRow = {
   id: string;
@@ -21,6 +21,7 @@ type RequestRow = {
   location_code: string;
   amount: number | null;
   amount_requested: number | null;
+  bank_paid_amount?: number | null;
   payment_mode: string | null;
   bank_account_no: string | null;
   beneficiary_account_no: string | null;
@@ -55,6 +56,7 @@ function safe(value: unknown) {
 }
 
 function isReadyForPaymentProcess(request: RequestRow) {
+  if (paymentBankBalance(request).remaining <= 0) return false;
   const status = String(request.status ?? "").toUpperCase();
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
   const hasCurrentApprover = Boolean(request.current_approver_user_id || request.current_approver_role_id);
@@ -74,7 +76,7 @@ function fedOneRows(requests: RequestRow[], debitAccountNumber: string, valueDat
     return {
       "Transaction Type": beneficiaryIfsc.startsWith("FDRL") ? "IFT" : "NEFT",
       "Debit Account Number": debitAccountNumber,
-      "Transaction Amount": Number(request.amount ?? request.amount_requested ?? 0),
+      "Transaction Amount": paymentBankBalance(request).remaining,
       "Value Date": valueDate,
       "Beneficiary Account Number": safe(request.beneficiary_account_number || request.beneficiary_account_no || request.bank_account_no),
       "Beneficiary Name": safe(request.beneficiary_account_holder || request.account_holder_name),
@@ -95,41 +97,25 @@ function parseRequestIds(value: string | null) {
     .filter(Boolean)));
 }
 
-async function markRequestsProcessing(companyId: string, requestIds: string[], actorUserId: string | null) {
-  if (!requestIds.length || !supabaseAdmin) return;
-  const now = new Date().toISOString();
-  const payload = {
-    status: "processing",
-    approval_status: "PROCESSING",
-    processing_started_at: now,
-    updated_at: now,
-    updated_by: actorUserId
-  };
-  const { error } = await supabaseAdmin
-    .from("payment_requests")
-    .update(payload)
-    .eq("company_id", companyId)
-    .in("id", requestIds);
-  if (error) {
-    const fallback = await supabaseAdmin
-      .from("payment_requests")
-      .update({
-        approval_status: "PROCESSING",
-        updated_at: payload.updated_at
-      })
-      .eq("company_id", companyId)
-      .in("id", requestIds);
-    if (fallback.error) throw new Error(fallback.error.message);
-  }
-
-  await Promise.all(requestIds.map((requestId) => insertPaymentApprovalLog({
-    company_id: companyId,
-    payment_request_id: requestId,
-    request_id: requestId,
-    approver_user_id: actorUserId,
-    action: "processing",
-    comments: "Bank transfer file generated; payment moved to processing."
-  }, companyId)));
+async function markRequestsProcessing(companyId: string, requests: RequestRow[], actorUserId: string) {
+  if (!requests.length || !supabaseAdmin) return;
+  const { data, error } = await supabaseAdmin.rpc("prepare_payment_request_bank_export", {
+    p_company_id: companyId,
+    p_actor_user_id: actorUserId,
+    p_rows: requests.map((request) => {
+      const balance = paymentBankBalance(request);
+      return {
+        id: request.id,
+        reference_no: request.request_no,
+        approved_amount: balance.approved,
+        paid_amount: balance.paid,
+        credit_account: request.beneficiary_account_number || request.beneficiary_account_no || request.bank_account_no,
+        ifsc: request.beneficiary_ifsc || request.ifsc
+      };
+    })
+  });
+  if (error) throw new Error(error.message);
+  if (Number(data?.prepared) !== requests.length) throw new Error("Bank export could not verify every selected payment balance. Refresh and try again.");
 }
 
 export async function GET(request: Request) {
@@ -181,6 +167,7 @@ export async function GET(request: Request) {
         location_code,
         amount,
         amount_requested,
+        bank_paid_amount,
         payment_mode,
         bank_account_no,
         beneficiary_account_no,
@@ -245,7 +232,7 @@ export async function GET(request: Request) {
     XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
     const fileDate = valueDate.replace(/\//g, "");
-    await markRequestsProcessing(companyId, requests.map((item) => item.id), authorization.userId);
+    await markRequestsProcessing(companyId, requests, authorization.userId);
 
     return new Response(new Uint8Array(buffer), {
       headers: {

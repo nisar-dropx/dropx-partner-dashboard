@@ -977,3 +977,135 @@ assert.deepEqual((await db.query("select request_no,status from payment_requests
 ]);
 assert.equal((await db.query("select count(*)::integer n from payment_request_approvals a join payment_requests r on r.id=a.payment_request_id where r.request_no='ADHOCVALID' and a.action='processed'")).rows[0].n,1);
 console.log("Central bank response finalizer verification passed, including ad hoc row exceptions and replay.");
+
+// Exercise real instalment recording through the same mixed-file finalizer.
+const settlementMigration=readFileSync("supabase/migrations/20261106230107_partial_bank_settlements.sql","utf8").replace(/\r\n/g,"\n");
+await db.exec(readFileSync('scripts/fixtures/partial-bank-payout-ledger-schema.sql','utf8'));
+await db.exec(`create table if not exists public.workforce(id uuid primary key,company_id uuid);
+  create table if not exists public.helpers(id uuid primary key,company_id uuid);
+  create function public.lock_workforce_payment_allocation_company(uuid) returns void language sql as $$select$$;`);
+const migrationFunction=(file,name)=>{
+  const source=readFileSync(file,'utf8').replace(/\r\n/g,'\n');
+  const found=source.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$function\\$;`,'i'));
+  assert.ok(found,`Missing migrated function ${name}`);return found[0];
+};
+const evidenceFile='supabase/migrations/20261013110000_payout_payment_settlement_evidence_manual_finalize.sql';
+for(const name of ['payout_bank_response_core_rows','enrich_workforce_payout_response_evidence_on_replay',
+  'enrich_helper_payout_response_evidence_on_replay','capture_workforce_payout_response_evidence','capture_helper_payout_response_evidence']) {
+  await db.exec(migrationFunction(evidenceFile,name));
+}
+await db.exec(migrationFunction('supabase/migrations/20261009112849_workforce_payout_bank_payment_ledger.sql','workforce_finalize_payout_payment_response'));
+await db.exec(migrationFunction('supabase/migrations/20261010210000_helper_payout_bank_payment_ledger.sql','helper_finalize_payout_payment_response'));
+await db.exec(`create trigger test_capture_workforce after insert on workforce_payout_payment_response_imports for each row execute function capture_workforce_payout_response_evidence();
+  create trigger test_capture_helper after insert on helper_payout_payment_response_imports for each row execute function capture_helper_payout_response_evidence();`);
+// Optional schema-only snapshots let rollout verification exercise the exact
+// hosted pre-migration functions against synthetic data in local PGlite.
+if(process.env.PARTIAL_BANK_BASELINE_DIRECTORY) {
+  for(const name of ['workforce_finalize_payout_payment_response','helper_finalize_payout_payment_response',
+    'finalize_central_bank_response','finalize_central_bank_response_partially']) {
+    await db.exec(readFileSync(`${process.env.PARTIAL_BANK_BASELINE_DIRECTORY}/partial-bank-${name}.sql`,'utf8').replace(/\r\n/g,'\n'));
+  }
+}
+await db.exec(settlementMigration);
+await db.exec(settlementMigration);
+await db.exec(`create table if not exists public.profiles(id uuid primary key,is_active boolean);
+  insert into public.profiles(id,is_active) values('10000000-0000-4000-8000-000000000002',true)
+    on conflict (id) do update set is_active=true`);
+const exportMigration=readFileSync("supabase/migrations/20261109075245_partial_bank_export_balance_guard.sql","utf8").replace(/\r\n/g,"\n");
+await db.exec(exportMigration);
+await db.exec(exportMigration);
+await db.exec(`insert into payment_requests(id,company_id,request_no,location_id,status,approval_status,payment_mode,
+  beneficiary_account_number,beneficiary_ifsc,amount)
+  values('10000000-0000-4000-8000-000000000f01','10000000-0000-4000-8000-000000000001','PARTIAL20000',
+    '10000000-0000-4000-8000-000000000102','processing','PROCESSING','account_transfer','123456789012','SBIN0000001',20000)`);
+const creditRow={...rows.generic[0],supports_partial_settlement:true,reference_no:'PARTIAL20000',debit_amount_paise:500000,utr_cin:'PARTIAL-CREDIT-1'};
+let creditSequence=0;
+const settleCredit=(row)=>partialCall({operationId:`10000000-0000-4000-8000-${(0xf100+creditSequence++).toString(16).padStart(12,'0')}`,
+  fileHash:(creditSequence.toString(16).padStart(64,'0')),payload:{generic:[row]}}).then(r=>r.rows[0].result);
+assert.equal((await settleCredit({...creditRow,supports_partial_settlement:false})).error_rows,1,'Old app cannot create a partial balance before balance-aware export is live');
+const partialCredit=await settleCredit(creditRow);
+assert.equal(partialCredit.processed_rows,1);
+assert.deepEqual((await db.query("select amount::text,bank_paid_amount::text,status,bank_status from payment_requests where request_no='PARTIAL20000'")).rows[0],
+  {amount:'20000.00',bank_paid_amount:'5000.00',status:'processing',bank_status:'Partial Payment'});
+assert.equal((await db.query("select count(*)::int n from payment_request_bank_settlements")).rows[0].n,1);
+await assert.rejects(db.exec("update payment_requests set approval_status='PROCESSING' where request_no='PARTIAL20000'"),/balance-aware bank export/);
+const exportRow={id:'10000000-0000-4000-8000-000000000f01',reference_no:'PARTIAL20000',approved_amount:20000,
+  paid_amount:5000,credit_account:'123456789012',ifsc:'SBIN0000001'};
+const prepareExport=(row)=>db.query("select public.prepare_payment_request_bank_export($1,$2,$3::jsonb) result",
+  ['10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002',JSON.stringify([row])]);
+await assert.rejects(prepareExport({...exportRow,paid_amount:0}),/Payment balance or beneficiary changed/);
+await assert.rejects(prepareExport({...exportRow,ifsc:'HDFC0000001'}),/Payment balance or beneficiary changed/);
+assert.deepEqual((await prepareExport(exportRow)).rows[0].result,{prepared:1});
+assert.equal((await settleCredit(creditRow)).processed_rows,1);
+assert.equal((await db.query("select bank_paid_amount::text n from payment_requests where request_no='PARTIAL20000'")).rows[0].n,'5000.00');
+for(const changed of [{credit_account:'999999999999'},{ifsc:'HDFC0000001'},
+  {debit_amount_paise:500001},{debit_amount_paise:1500001,utr_cin:'PARTIAL-OVERPAY'},
+  {debit_amount_paise:0,utr_cin:'PARTIAL-ZERO'}]) {
+  assert.equal((await settleCredit({...creditRow,...changed})).error_rows,1);
+}
+await assert.rejects(db.exec("update payment_requests set bank_paid_amount=9999 where request_no='PARTIAL20000'"),/only through bank settlement/);
+await assert.rejects(db.exec("update payment_requests set status='processed',approval_status='PROCESSED' where request_no='PARTIAL20000'"),/partially paid/);
+await assert.rejects(db.exec("update payment_requests set amount=21000 where request_no='PARTIAL20000'"),/frozen/);
+await assert.rejects(db.exec("delete from payment_request_bank_settlements"),/immutable/);
+const cancelledCredit=await settleCredit({...creditRow,status:'CANCELLED',utr_cin:'',remarks:'Remaining attempt cancelled'});
+assert.equal(cancelledCredit.processed_rows,1);
+assert.deepEqual((await db.query("select status,bank_paid_amount::text from payment_requests where request_no='PARTIAL20000'")).rows[0],
+  {status:'processing',bank_paid_amount:'5000.00'});
+const finalCredit=await settleCredit({...creditRow,debit_amount_paise:1500000,utr_cin:'PARTIAL-CREDIT-2'});
+assert.equal(finalCredit.processed_rows,1);
+assert.deepEqual((await db.query("select amount::text,bank_paid_amount::text,status,bank_status from payment_requests where request_no='PARTIAL20000'")).rows[0],
+  {amount:'20000.00',bank_paid_amount:'20000.00',status:'processed',bank_status:'Paid'});
+assert.equal((await db.query("select count(*)::int n from payment_request_bank_settlements")).rows[0].n,2);
+assert.equal((await settleCredit(creditRow)).processed_rows,1,'Older credit remains an idempotent replay after full settlement');
+assert.equal((await settleCredit({...creditRow,utr_cin:'EXCESS-AFTER-FULL'})).error_rows,1);
+
+await db.exec(`insert into hr_payroll_bank_lines(id,company_id,run_id,worker_type,worker_id,reference,amount,credit_account,ifsc,debit_account_number,value_date,status)
+  values('10000000-0000-4000-8000-000000000f02','10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000050','employee','10000000-0000-4000-8000-000000000f03',
+    'HRPARTIAL20000',20000,'223456789012','HDFC0000001','333344445555','2026-10-17','processing')`);
+const payrollCredit={...rows.payroll[0],supports_partial_settlement:true,reference_no:'HRPARTIAL20000',debit_amount_paise:500000,utr_cin:'PAYROLL-PARTIAL-1',value_date:'2026-10-18'};
+const payrollPartial=(await partialCall({operationId:'10000000-0000-4000-8000-00000000ff01',fileHash:'f1'.repeat(32),payload:{payroll:[payrollCredit]}})).rows[0].result;
+assert.equal(payrollPartial.processed_rows,1);
+assert.deepEqual((await db.query("select amount::text,instruction_amount::text,status from hr_payroll_bank_lines where reference='HRPARTIAL20000'")).rows[0],
+  {amount:'5000.00',instruction_amount:'20000.00',status:'paid'});
+assert.equal((await partialCall({operationId:'10000000-0000-4000-8000-00000000ff02',fileHash:'f2'.repeat(32),payload:{payroll:[payrollCredit]}})).rows[0].result.processed_rows,1);
+assert.equal((await partialCall({operationId:'10000000-0000-4000-8000-00000000ff03',fileHash:'f3'.repeat(32),payload:{payroll:[{...payrollCredit,debit_amount_paise:600000}]}})).rows[0].result.error_rows,1);
+console.log('Partial bank credits: ₹20,000 → ₹5,000 + ₹15,000, immutable audit, repeated migration, replay, beneficiary/UTR/overpayment guards and actual People payroll credits passed.');
+
+// Use the actual Workforce/Helper finalizers and actual settlement-capture
+// triggers, rather than the mixed-router stub used by the earlier cases.
+for(const [index,ledger,personColumn,reference,account,ifsc] of [
+  [1,'workforce','workforce_id','WPPARTIAL102026V1','523456789012','SBIN0000002'],
+  [2,'helper','helper_id','HPPARTIAL102026V1','623456789012','SBIN0000003']
+]) {
+  const batch=`10000000-0000-4000-8000-${(0xfa00+index).toString(16).padStart(12,'0')}`;
+  const item=`10000000-0000-4000-8000-${(0xfb00+index).toString(16).padStart(12,'0')}`;
+  const person=`10000000-0000-4000-8000-${(0xfc00+index).toString(16).padStart(12,'0')}`;
+  await db.query(`insert into ${ledger==='workforce'?'workforce':'helpers'}(id,company_id) values($1,$2)`,[person,'10000000-0000-4000-8000-000000000001']);
+  await db.query(`insert into ${ledger}_payout_payment_batches(id,company_id,debit_account_no_snapshot,value_date,status)
+    values($1,$2,'111122223333','2026-10-17','processing')`,[batch,'10000000-0000-4000-8000-000000000001']);
+  await db.query(`insert into ${ledger}_payout_payment_items(id,company_id,batch_id,${personColumn},reference_no,instruction_amount,status,
+    bank_account_no_snapshot,ifsc_snapshot,period_start,period_end,payment_version)
+    values($1,$2,$3,$4,$5,20000,'processing',$6,$7,'2026-10-01','2026-10-31',1)`,
+    [item,'10000000-0000-4000-8000-000000000001',batch,person,reference,account,ifsc]);
+  let attempt=0;
+  const row={supports_partial_settlement:true,row_number:2,reference_no:reference,credit_account:account,ifsc,
+    value_date:'2026-10-18',debit_amount_paise:500000,status:'PAID',utr_cin:`PARTIAL-${ledger}`,remarks:'Paid'};
+  const finalize=async(response)=>{
+    const operation=`10000000-0000-4000-8000-${(0xfd00+index*20+attempt++).toString(16).padStart(12,'0')}`;
+    return (await db.query(`select public.${ledger}_finalize_payout_payment_response($1,$2,$3,$4,'partial-credit.xlsx',$5::jsonb) result`,
+      ['10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002',operation,
+        (index*100+attempt).toString(16).padStart(64,'0'),JSON.stringify([response])])).rows[0].result;
+  };
+  assert.equal((await finalize({...row,supports_partial_settlement:false})).rejected,1);
+  const paidResult=await finalize(row);
+  assert.equal(paidResult.paid,1,JSON.stringify(paidResult));
+  assert.deepEqual((await db.query(`select instruction_amount::text,settled_amount::text,status,response_value_date::text from ${ledger}_payout_payment_items where id=$1`,[item])).rows[0],
+    {instruction_amount:'20000.00',settled_amount:'5000.00',status:'paid',response_value_date:'2026-10-18'});
+  assert.equal((await finalize(row)).replayed_items,1);
+  assert.equal((await finalize({...row,debit_amount_paise:600000})).rejected,1);
+  assert.equal((await finalize({...row,debit_amount_paise:2000001})).rejected,1);
+  assert.equal((await finalize({...row,credit_account:'999999999999'})).rejected,1);
+  assert.equal((await db.query(`select 20000-coalesce(sum(settled_amount),0) remaining from ${ledger}_payout_payment_items where id=$1`,[item])).rows[0].remaining,'15000.00');
+}
+console.log('Real Workforce and Helper finalizers: actual ₹5,000 settlement, ₹15,000 balance, replay, changed-amount/beneficiary/overpayment guards and value-date evidence passed.');

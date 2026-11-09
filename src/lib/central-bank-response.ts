@@ -29,6 +29,7 @@ export function resolveCentralBankRowOwner(input: {
 }
 export function centralBankRpcRow(row: WorkforceFedOneResponseRow) {
   return {
+    supports_partial_settlement: true,
     row_number: row.rowNumber,
     reference_no: row.referenceNo,
     debit_account: row.debitAccount ?? "",

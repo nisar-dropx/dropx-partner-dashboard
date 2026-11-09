@@ -9,6 +9,7 @@ import QRCode from "qrcode";
 import { bankResponseCsv } from "@/lib/bank-response-guidance";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
+import { paymentBankBalance } from "@/lib/payment-bank-balance";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { formatApplyingMonth, formatWorkingDays } from "@/lib/pay-advance-worker-facts";
 
@@ -26,6 +27,7 @@ export type PaymentProcessRequest = {
   location_name: string | null;
   amount: number | null;
   amount_requested: number | null;
+  bank_paid_amount?: number | null;
   payment_mode: string | null;
   payment_portal: string | null;
   payment_reference: string | null;
@@ -53,7 +55,8 @@ export type PaymentProcessRequest = {
 };
 
 function amountValue(request: PaymentProcessRequest) {
-  return Number(request.amount ?? request.amount_requested ?? 0);
+  const balance = paymentBankBalance(request);
+  return balance.partial ? balance.remaining : balance.approved;
 }
 
 function rupees(value: number | null | undefined) {
@@ -100,6 +103,7 @@ function UpiPaymentQr({ request }: { request: PaymentProcessRequest }) {
 }
 
 function statusLabel(request: PaymentProcessRequest) {
+  if (paymentBankBalance(request).partial) return "Partial Payment";
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
   const status = String(request.status ?? "").toUpperCase();
   if (approvalStatus === "PROCESSED" || status === "PROCESSED") return "Processed";
@@ -436,7 +440,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
       if (fromDate && created < fromDate) return false;
       if (toDate && created > toDate) return false;
       const rowStatus = statusLabel(request).toLowerCase();
-      if (status !== "all" && rowStatus !== status) return false;
+      if (status !== "all" && rowStatus !== status && !(status === "approved" && rowStatus === "partial payment")) return false;
       if (!needle) return true;
       const haystack = [
         request.request_no,
@@ -542,6 +546,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
               <select className="field" onChange={(event) => setStatus(event.target.value)} value={status}>
                 <option value="approved">Approved</option>
                 <option value="processing">Processing</option>
+                <option value="partial payment">Partial Payment</option>
                 <option value="processed">Processed</option>
                 <option value="all">All approved</option>
               </select>
@@ -624,7 +629,11 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                   <td>{request.location_code}</td>
                   <td>{request.payment_head_name ?? "-"}</td>
                   <td>{paymentMethodLabel(request)}</td>
-                  <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
+                  <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                    {paymentBankBalance(request).partial ? <small className="subtle" style={{ display: "block" }}>
+                      Remaining · {rupees(paymentBankBalance(request).paid)} paid of {rupees(paymentBankBalance(request).approved)}
+                    </small> : null}
+                  </td>
                   <td><StatusPill status={statusLabel(request)} /></td>
                   <td>{displayDate(request.created_at)}</td>
                   <td>
@@ -649,7 +658,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
             <div className="panel-head">
               <div>
                 <h2>Finalize</h2>
-                <p className="subtle">Upload the bank transaction enquiry file to mark paid or cancelled requests.</p>
+                <p className="subtle">Upload the bank enquiry file to record the actual credited amount. Smaller credits leave a Partial Payment balance for the next bank file.</p>
               </div>
               <button className="modal-close" disabled={finalizePending} onClick={closeFinalize} type="button">x</button>
             </div>
@@ -871,12 +880,13 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                   <span>{processResult.error}</span>
                 </div>
               ) : null}
+              {paymentBankBalance(processRequest).partial ? <p className="subtle">Finalize the remaining bank credit through the bank response upload.</p> : null}
               <div className="form-actions modal-actions">
                 <button className="button secondary" onClick={() => setProcessRequest(null)} type="button">Cancel</button>
-                {statusKey(processRequest) !== "processing" && statusKey(processRequest) !== "processed" ? (
+                {statusKey(processRequest) !== "processing" && statusKey(processRequest) !== "processed" && !paymentBankBalance(processRequest).partial ? (
                   <ProcessActionButton className="secondary" value="processing">Processing</ProcessActionButton>
                 ) : null}
-                {statusKey(processRequest) !== "processed" ? (
+                {statusKey(processRequest) !== "processed" && !paymentBankBalance(processRequest).partial ? (
                   <ProcessActionButton className="payment-approve-button" value="processed">Processed</ProcessActionButton>
                 ) : null}
                 <ProcessActionButton className="payment-return-button" value="returned">

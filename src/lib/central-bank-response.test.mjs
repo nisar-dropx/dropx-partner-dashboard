@@ -226,6 +226,7 @@ test("central RPC rows preserve bank evidence and normalize canceled spelling", 
     utrCin: "",
     remarks: "Insufficient funds"
   }), {
+    supports_partial_settlement: true,
     row_number: 9,
     reference_no: "REQAB12",
     debit_account: "000011112222",

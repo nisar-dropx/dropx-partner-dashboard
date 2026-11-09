@@ -14,6 +14,39 @@ controls and source-host Google Drive/document previews. Full size expands insid
 opening the original file in a new window remains explicit. Restricted/unsupported source
 files retain a fallback link; preview never changes sharing or proxies files through a third party.
 
+## Actual bank credits and partial payments — 7 November 2026
+
+Central bank-response finalization matches the reference, beneficiary account and
+IFSC. A positive paid credit may be below the issued amount; it may not exceed
+the unpaid approved balance. Bank value/debit-account fields remain evidence,
+not identity matching fields. UTR uniqueness, tenant/station/processor access,
+approval, ledger locks and replay protection remain enforced.
+
+Regular requests retain their original amount. Immutable
+`payment_request_bank_settlements` rows hold each actual credit and UTR;
+`bank_paid_amount` is their guarded cumulative balance. A partial request keeps
+the internal `processing` / `PROCESSING` workflow state, while Process displays
+**Partial Payment**, paid-to-date and the remainder. Its next bank export pays
+only the remainder. Only a fully credited request becomes `processed` and sends
+the full-payment notification. A failed remaining attempt never erases earlier
+credits. Legacy processed requests with a NULL cumulative field retain their
+full-paid interpretation. The global UTR registry permits multiple UTRs for one
+request while retaining company/UTR uniqueness and one UTR per payroll line.
+
+Workforce and Helpers use their existing actual `settled_amount` and balance
+calculations. People payroll bank lines retain `instruction_amount` as the
+original instruction and use `amount` for the actual paid credit; the existing
+People bank exporter subtracts those actual credits from the approved net.
+Paid payroll evidence is immutable. No payroll earnings or approved request
+amount is changed by partial reconciliation.
+
+Migration `partial_bank_settlements` is additive and individually applied.
+New partial credits require the server-added `supports_partial_settlement`
+capability, so an older app cannot create them before its balance-aware export
+is deployed. Regression coverage is in `test:central-bank-response`, including
+the actual Workforce/Helper finalizers and evidence-capture triggers, repeated
+migration, ₹20,000 → ₹5,000 + ₹15,000, replay and overpayment/beneficiary guards.
+
 ## Legacy van bank-file export — 5 November 2026
 
 Completed payment details saved before the delivery-identity policy was enabled

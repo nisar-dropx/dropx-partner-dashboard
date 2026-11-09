@@ -28,6 +28,7 @@ type PaymentRequestRow = {
   payment_head_id: string;
   amount: number | null;
   amount_requested: number | null;
+  bank_paid_amount?: number | null;
   payment_mode: string | null;
   payment_portal: string | null;
   payment_reference: string | null;
@@ -194,7 +195,7 @@ async function loadPaymentProcess(
   // were invisible because ~1,800 processed rows filled the first page by created_at.
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
-    .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
+    .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_paid_amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
