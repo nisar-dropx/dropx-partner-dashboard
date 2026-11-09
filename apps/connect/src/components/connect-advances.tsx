@@ -1,7 +1,8 @@
 "use client";
 
 import { ChevronDown, IndianRupee, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {paymentRead,latestPaymentRead} from '@/lib/payment-read';
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; reference?: string | null; name?: string | null; role?: string | null; workspace?: "people" | "workforce" };
@@ -69,19 +70,21 @@ export function ConnectAdvances({ account, active = true, readOnly = false }: { 
   const [withdrawingId, setWithdrawingId] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
+  const paymentRequest = useRef(latestPaymentRead());
 
   const load = useCallback(async (background = false) => {
+    const request = paymentRequest.current.start();
     if (!background) setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const response = await fetch(`/api/connect/advances?${query}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load advance requests.");
+      const payload = await paymentRead(`/api/connect/advances?${query}`, {signal:request.signal,timeoutMs:45_000});
       if (typeof payload.account?.eligibleForAdvance !== "boolean") {
         throw new Error("Unable to verify advance eligibility. Please retry shortly.");
       }
-      setRows(payload.requests ?? []);
+      if (!request.isCurrent()) return;
+      if (!Array.isArray(payload.requests)) throw new Error('Unable to verify advance requests. Please retry.');
+      setRows(payload.requests);
       setEligibleForAdvance(payload.account?.eligibleForAdvance === true);
       setCapacity({
         outstandingPay: Number(payload.account?.outstandingPay ?? 0),
@@ -90,17 +93,19 @@ export function ConnectAdvances({ account, active = true, readOnly = false }: { 
         maxEligibleAmount: Number(payload.account?.maxEligibleAmount ?? 0)
       });
     } catch (reason) {
+      if (!request.isCurrent()) return;
       setEligibleForAdvance(null);
       setError(reason instanceof Error ? reason.message : "Unable to load advance requests.");
     } finally {
-      if (!background) setLoading(false);
-      markLoaded();
+      if (request.isCurrent()) { setLoading(false); markLoaded(); }
     }
   }, [account.id, account.profileType, markLoaded]);
   setReload(() => load(true));
 
   useEffect(() => {
+    setRows([]); setEligibleForAdvance(null); setShowForm(false);
     void load();
+    return () => paymentRequest.current.cancel();
   }, [load]);
 
   function closeForm() {

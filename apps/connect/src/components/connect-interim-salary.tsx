@@ -1,4 +1,5 @@
 "use client";
+import {paymentRead} from '@/lib/payment-read';
 import { RecoveryDetailButton } from "./connect-loss-recovery-detail";
 
 import { useEffect, useState } from "react";
@@ -45,10 +46,9 @@ export function ConnectInterimSalary({ account, onDocuments, onAttendance }: { a
     const controller = new AbortController();
     setRows([]); setLoading(true); setError("");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-    fetch(`/api/connect/salary?${query}`, { cache: "no-store", signal: controller.signal })
-      .then(async response => {
-        const body = await response.json();
-        if (!response.ok || !Array.isArray(body.salaries)) throw new Error(body.error || "Unable to load salary details.");
+    paymentRead(`/api/connect/salary?${query}`, { signal: controller.signal })
+      .then(body => {
+        if (!Array.isArray(body.salaries)) throw new Error(body.error || "Unable to load salary details.");
         if (!controller.signal.aborted) setRows(body.salaries);
       })
       .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load salary details."); })

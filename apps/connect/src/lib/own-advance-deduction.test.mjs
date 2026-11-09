@@ -36,7 +36,7 @@ test('verified empty personal advance ledger avoids a duplicate payout calculati
   const lookup = load(() => assert.fail('must not recalculate payout'), undefined, { data: [], error: null }, queries);
   assert.equal(await lookup('company', 'canonical-worker', '2026-11'), 0);
   assert.deepEqual(queries, [
-    { name: 'pay_advance_period_due', args: { p_company: 'company', p_period: '2026-11-01', p_target: 'workforce', p_run: null }, options: {get:true} },
+    { name: 'pay_advance_period_due', args: { p_company: 'company', p_period: '2026-11-01', p_target: 'workforce' }, options: {get:true} },
     { column: 'worker_id', value: 'canonical-worker' }, { limit: 1 }
   ]);
 });
@@ -66,6 +66,7 @@ test('real Supabase advance reads work through preview guard; financial writes r
     assert.equal(calls.at(-1).url.pathname,'/rest/v1/rpc/pay_advance_period_due');
     assert.equal(calls.at(-1).url.searchParams.get('worker_id'),'eq.worker');
     assert.equal(calls.at(-1).url.searchParams.get('p_company'),'company');
+    assert.equal(calls.at(-1).url.searchParams.has('p_run'),false,'use SQL default NULL, not a literal null UUID in a GET query');
   }
   preview=true;
   const count=calls.length;

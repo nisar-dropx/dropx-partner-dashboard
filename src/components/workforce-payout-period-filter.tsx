@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition, type FormEvent } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 type PayoutPeriodMode = "monthly" | "daily" | "range";
 
@@ -14,13 +15,25 @@ type WorkforcePayoutPeriodFilterProps = {
 };
 
 export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: initialMode, month, day, from, to }: WorkforcePayoutPeriodFilterProps) {
+  const router=useRouter(),pathname=usePathname();
+  const [pending,startTransition]=useTransition();
   const [mode, setMode] = useState<PayoutPeriodMode>(initialMode);
   const [selectedMonth, setSelectedMonth] = useState(month);
   const [selectedDay, setSelectedDay] = useState(day);
   const [selectedFrom, setSelectedFrom] = useState(from);
   const [selectedTo, setSelectedTo] = useState(to);
 
-  return <form className="payout-period-filter" method="get">
+  function applyPeriod(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();if(pending)return;
+    const query=new URLSearchParams();
+    new FormData(event.currentTarget).forEach((value,key)=>query.set(key,String(value)));
+    const target=`${pathname}?${query}`;
+    startTransition(()=>{
+      if(target===window.location.pathname+window.location.search)router.refresh();
+      else router.push(target);
+    });
+  }
+  return <form className="payout-period-filter" method="get" onSubmit={applyPeriod} aria-busy={pending}>
     <input name="audience" type="hidden" value={audience} />
     <label>
       View by
@@ -51,6 +64,6 @@ export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: init
     {mode !== "monthly" ? <input type="hidden" name="month" value={selectedMonth} /> : null}
     {mode !== "daily" ? <input type="hidden" name="day" value={selectedDay} /> : null}
     {mode !== "range" ? <><input type="hidden" name="from" value={selectedFrom} /><input type="hidden" name="to" value={selectedTo} /></> : null}
-    <button className="button secondary" type="submit">Apply period</button>
+    <button className="button secondary" type="submit" disabled={pending}>{pending?'Loading payout…':'Apply period'}</button>
   </form>;
 }
