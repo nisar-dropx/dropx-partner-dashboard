@@ -12,11 +12,15 @@ export function mayApprovePaymentRelease(auth: AuthorizationContext) {
   );
 }
 
+export function mayEditPaymentRelease(auth: AuthorizationContext) {
+  return !auth.readOnly && ["ops_losses", "workforce_payouts", "ops_workforce_payouts", "payment_process"].some(page => hasPermission(auth, page, "edit"));
+}
+
 export async function paymentReleaseAccess(edit = false, finance = false) {
   const auth = await getAuthorization();
   if (!auth || (edit && auth.readOnly)) throw Error("Sign in with permission to review payment release.");
   const financePermission = hasPermission(auth, "payment_process", edit ? "edit" : "view");
-  if (finance ? !financePermission : !["ops_losses", "workforce_payouts", "ops_workforce_payouts", "payment_process"].some(page => hasPermission(auth, page, "view"))) {
+  if (finance ? !financePermission : !["ops_losses", "workforce_payouts", "ops_workforce_payouts", "payment_process"].some(page => hasPermission(auth, page, edit ? "edit" : "view"))) {
     throw Error("You do not have access to this payment review.");
   }
   if (!supabaseAdmin) throw Error("Payment release checks are unavailable. Please retry.");
