@@ -44,7 +44,10 @@ export function PeopleFinancePayroll() {
   useEffect(() => { load().catch(e => setError(e.message)); }, [load]);
   useEffect(() => { setDetail(null); setReason(''); setReturnConfirm(false); if (selectedId) { loadDetail(selectedId); detailPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } return () => { detailVersion.current++; }; }, [selectedId, loadDetail]);
   const searched = useMemo(() => rows.filter(r => `${r.station} ${r.station_name} ${r.submitted_name}`.toLowerCase().includes(search.trim().toLowerCase())), [rows, search]);
-  const months = [...new Set(rows.map(r => r.run.period_start.slice(0, 7)))].sort().reverse();
+  const months = useMemo(() => [...new Set([
+    ...searched.filter(r => showAll || r.amountPaise > 0 || r.issues.length > 0).map(r => r.run.period_start.slice(0, 7)),
+    ...(month ? [month] : [])
+  ])].sort().reverse(), [searched, showAll, month]);
   const visible = searched.filter(r => (!month || r.run.period_start.startsWith(month)) && (showAll || r.amountPaise > 0 || r.issues.length > 0));
   const total = chosen.reduce((a, r) => a + r.amountPaise, 0) / 100;
   const actionLabel = overrides.length ? 'Override & download' : chosen.some(r => r.status === 'submitted') ? 'Approve & download' : 'Download bank file';
