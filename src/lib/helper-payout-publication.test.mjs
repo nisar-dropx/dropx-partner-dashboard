@@ -414,5 +414,5 @@ test("Helper publication reloads amounts and the full location set before freezi
   assert.match(payoutPage, /rpc\("helper_payout_dependency_state"/);
   assert.match(payoutPage, /publication\.dependencyHash === dependency\?\.dependencyHash/);
   assert.match(payoutPage, /publication\.sourceChangeId === dependency\?\.sourceChangeId/);
-  assert.match(payoutPage, /Republish required/);
+  assert.match(payoutPage, /helperNeedsPublication\s*\? "Ready for review"/);
 });

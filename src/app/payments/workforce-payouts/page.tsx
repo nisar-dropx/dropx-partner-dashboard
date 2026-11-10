@@ -394,7 +394,7 @@ async function withPayoutReviewStatuses(
         : workforcePublicationRefreshPending
           ? "Publication refresh pending"
           : helperNeedsPublication
-            ? "Republish required"
+            ? "Ready for review"
             : presentation.status === "Under Review" && subjectKey
               ? publishedStatus(publication?.status) ?? presentation.status
               : presentation.status;
