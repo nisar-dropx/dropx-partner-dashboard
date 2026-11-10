@@ -13,3 +13,30 @@ Changed losses, deductions, pay, run release state or bank details invalidate ap
 The database uses service-only RPCs, tenant/station/actor checks, append-only decision events and a shared company loss lock. Insert guards protect legacy generation paths. Server routes also gate both re-download paths. Failure to read loss clearance blocks downloads. Saved files already outside the system cannot be recalled; existing processing payments must be reconciled before another file is generated.
 
 Migration: `20261108142437_loss_payment_clearance_and_people_finance.sql`. Apply this single migration to the shared project; do not push unrelated migration history. Coordinate Finance, People and Dashboard releases. Tests: `pnpm run test:payment-release`, existing Workforce bank-format tests, People payroll bank/export/loss tests, and both products' release integrity checks. Synthetic tests never approve or issue production payroll.
+
+
+## Bulk payroll and accountable handoff — 10 November 2026
+
+People can select approved locations and send them together. Each station retains its own
+atomic submission and receipt; a later failure does not hide earlier successful submissions.
+Readiness includes the station release, rather than suggesting unapproved payroll is ready.
+
+Finance shows the next required step, current payable amount and excluded people per location.
+After independent approval, selected locations are issued in one database transaction and one
+Federal Bank workbook. Reviewed hashes, versions, person counts and amounts are checked again.
+If any station fails, none is issued. The stable operation ID and combined-file history support
+safe retry. Processing, blocked, fully held and fully paid people are omitted; partial balances
+remain payable. Cross-run payment history and duplicate people across selected payrolls block
+issuance. Downloading reserves instructions; it does not send money to the bank.
+
+Loss reviews can be assigned to an active authorised reviewer, with a due date and reason,
+and returned for correction. An override records an accountable recovery follow-up in the same
+queue and preserves losses and holds. Completing ordinary clearance resolves the handoff;
+revocation reopens it. A resolved handoff reappears if changed source data invalidates clearance.
+Source completeness must still be checked when there are no recorded loss cases. The override
+only clears the loss gate; it never substitutes for independent Finance approval.
+
+Migration: `20261110065135_people_payroll_bulk_handoff.sql` (apply individually).
+Tests: `pnpm run test:people-payroll-handoff`, `pnpm run test:payment-release`, Finance release
+suite, People submission API/component tests and release checks. All issuance/override tests use
+an isolated synthetic database. No production payroll decisions are made as a test.

@@ -15,3 +15,30 @@
 .workspace summary { font-weight: 600; cursor: pointer; }
 .workspace [role=alert] { padding: 12px; background: #fff3e4; border-left: 3px solid #c57719; color: #703f0a; }
 @media (max-width: 700px) { .workspace { padding: 14px; } .workspace label { max-width: 100%; } .workspace select { max-width: 280px; } .workspace table { display: block; overflow-x: auto; } }
+.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-start; margin:10px 0; }
+.toolbar > div:first-child { flex:1; }
+.workspace h3 { margin:8px 0; font-size:16px; }
+.workspace p { margin:8px 0; font-size:13px; }
+.workspace small { display:block; color:#617687; font-size:11px; margin-top:4px; line-height:1.5; }
+.metrics { display:flex; gap:12px; margin:16px 0; }
+.metrics > div { flex:1; border:1px solid #dfebef; border-radius:10px; padding:12px; background:#f6fafb; }
+.metrics strong { display:block; font-size:23px; color:#18566b; }
+.metrics span { font-size:12px; color:#526578; }
+.tableWrap { overflow-x:auto; }
+.tableWrap table { min-width:650px; }
+.selectedRow { background:#f1f9fa; }
+.badge,.goodBadge { display:inline-block; border-radius:12px; padding:3px 8px; background:#fff3dc; color:#81520c; font-size:11px; }
+.goodBadge { background:#e4f5ec; color:#12764c; }
+.downloadBar { display:flex; flex-wrap:wrap; gap:12px; align-items:end; padding:14px; border:1px solid #b9d6de; background:#edf6f8; border-radius:10px; }
+.downloadBar > div { flex:1; min-width:230px; font-size:14px; }
+.detail { margin-top:20px; border-top:2px solid #18566b; padding-top:16px; }
+.steps { display:flex; gap:12px; flex-wrap:wrap; margin:12px 0; font-size:12px; }
+.steps span { padding:7px 10px; background:#edf4f6; border-radius:7px; }
+.confirm { padding:16px; border:1px solid #7fb4bf; border-radius:10px; margin-top:12px; background:#f5fbfc; }
+.workspace .secondary { background:white; color:#18566b; border-color:#bed2da; }
+.decision { margin:16px 0; display:grid; gap:8px; }
+.success { background:#e4f5ec; padding:10px; border-radius:8px; color:#12764c !important; }
+.compact { padding:14px; margin:12px 0; background:#fbfdfe; }
+.inlineFields { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+.inlineFields label { flex:1; min-width:170px; }
+@media(max-width:700px) { .metrics { gap:6px; } .metrics > div { padding:8px; } .downloadBar { align-items:stretch; } .downloadBar label { flex:1; } .toolbar input { max-width:100%; } }
