@@ -174,7 +174,9 @@ function buildShareTable(
             : value
               ? "#eef2f6"
               : undefined;
-        return { text: value ? String(value) : "", bg, align: "right" as const };
+        // Always show 0 — empty cells made Overall inventory look "blank" even
+        // when KPIs already had the full EDD package total.
+        return { text: String(value), bg, align: "right" as const };
       }),
       { text: String(row.total), bold: true, bg: heatColor(row.total, Math.max(...pivot.rows.map((r) => r.total), 1)), align: "right" },
     ]);
@@ -744,6 +746,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     let cancelled = false;
     let polling = false;
     let failures = 0;
+    let completeClearTimer: number | undefined;
+    let completeBannerShown = false;
     const controller = new AbortController();
     async function poll() {
       if (cancelled || polling) return;
@@ -758,21 +762,47 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         failures = 0;
         setPayload(next);
         setRun(next.run);
-        setBackfillNote(boardRefreshStatus(next));
-        setBackfillProgress(next.refreshRunning && next.refreshTotal
+        const note = boardRefreshStatus(next);
+        const total = next.refreshTotal || 0;
+        const running = Boolean(next.refreshRunning && total);
+        setBackfillProgress(running
           ? {
               done: next.refreshDone || 0,
-              total: next.refreshTotal,
+              total,
               pulled: Math.max(next.refreshDone || 0, next.refreshPulled || 0),
             }
           : null);
+        if (running) {
+          completeBannerShown = false;
+          if (completeClearTimer) window.clearTimeout(completeClearTimer);
+          completeClearTimer = undefined;
+          setBackfillNote(note);
+        } else if (/^Refresh complete/i.test(note)) {
+          // Show completion once, then clear — do not re-flash every 15s poll.
+          if (!completeBannerShown) {
+            completeBannerShown = true;
+            setBackfillNote(note);
+            completeClearTimer = window.setTimeout(() => {
+              if (!cancelled) setBackfillNote((current) => (/^Refresh complete/i.test(current) ? "" : current));
+              completeClearTimer = undefined;
+            }, 6_000);
+          }
+        } else {
+          completeBannerShown = false;
+          setBackfillNote(note);
+        }
       } catch {
         if (!cancelled && ++failures >= 3) setBackfillNote('Refresh status unavailable · showing the last saved data. Reconnecting…');
       } finally { polling = false; }
     }
     void poll();
     const timer = window.setInterval(() => void poll(), 15_000);
-    return () => { cancelled = true; controller.abort(); window.clearInterval(timer); };
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(timer);
+      if (completeClearTimer) window.clearTimeout(completeClearTimer);
+    };
   }, [payload.businessDate]);
 
   async function onDownload() {
@@ -1141,7 +1171,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           </button></>}
         </div>
 
-        {backfillProgress || backfillNote ? (
+        {backfillProgress || busy === "refresh" || (backfillNote && !/^Refresh complete/i.test(backfillNote)) ? (
           <div className={s.sweep} role="status" aria-live="polite">
             <div className={s.track}>
               <span
@@ -1167,6 +1197,8 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                   : "Pulling board data…")}
             </span>
           </div>
+        ) : backfillNote ? (
+          <p className={s.note} role="status">{backfillNote}</p>
         ) : null}
         {error ? <p className={s.error} role="alert">{error}</p> : null}
       </div>
