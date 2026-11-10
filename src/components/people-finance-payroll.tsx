@@ -24,6 +24,7 @@ export function PeopleFinancePayroll() {
   const [reason, setReason] = useState(''), [bank, setBank] = useState('');
   const [date, setDate] = useState(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()));
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [detailLoading, setDetailLoading] = useState(false), [detailError, setDetailError] = useState('');
   const [detail, setDetail] = useState<Detail | null>(null), [confirm, setConfirm] = useState<FinanceSubmission[] | null>(null);
   const pending = useRef(false), detailVersion = useRef(0), operation = useRef<{ key: string; id: string } | null>(null);
   const selected = rows.find(r => r.id === selectedId);
@@ -34,9 +35,12 @@ export function PeopleFinancePayroll() {
     finally { setLoading(false); }
   }, []);
   const loadDetail = useCallback(async (id: string) => {
-    const version = ++detailVersion.current; setDetail(null);
-    const data = await (await request('/api/payments/people-payroll?request=' + id)).json();
-    if (version === detailVersion.current) setDetail(data);
+    const version = ++detailVersion.current; setDetail(null); setDetailLoading(true); setDetailError('');
+    try {
+      const data = await (await request('/api/payments/people-payroll?request=' + id)).json();
+      if (version === detailVersion.current) setDetail(data);
+    } catch (e) { if (version === detailVersion.current) setDetailError(e instanceof Error ? e.message : 'Payroll detail could not be loaded.'); }
+    finally { if (version === detailVersion.current) setDetailLoading(false); }
   }, []);
   useEffect(() => { load().catch(e => setError(e.message)); }, [load]);
   useEffect(() => { setDetail(null); setReason(''); if (selectedId) loadDetail(selectedId).catch(e => setError(e.message)); return () => { detailVersion.current++; }; }, [selectedId, loadDetail]);
@@ -101,7 +105,8 @@ export function PeopleFinancePayroll() {
     {selected && <section className={styles.detail} aria-label="Selected payroll review">
       <div className={styles.toolbar}><div><h2>{selected.station} · {selected.run.label}</h2><p>{selected.nextStep}</p></div><button className={styles.secondary} disabled={busy} onClick={() => setSelectedId('')}>Close review</button></div>
       <div className={styles.steps}><span>1 · People {selected.changed ? 'revision needed' : 'submitted'}</span><span>2 · Loss {selected.clearance ? 'cleared' : !selected.clearanceRequired ? 'gate disabled in Master' : 'review needed'}</span><span>3 · Finance {selected.status}</span></div>
-      {!detail && <p role="status">Loading payroll detail…</p>}
+      {detailLoading && <p role="status">Loading payroll detail…</p>}
+      {detailError && <div role="alert">{detailError} <button disabled={busy || detailLoading} onClick={() => loadDetail(selected.id)}>Retry payroll detail</button></div>}
       {detail && <details><summary>{detail.peopleCount} people · salary, holds and payment breakdown</summary><div className={styles.tableWrap}><table><thead><tr><th>Person</th><th>Net</th><th>Hold / loss</th><th>Paid</th><th>Pay now</th><th>Bank / status</th></tr></thead><tbody>{detail.people.map(p => <tr key={p.worker}><td>{p.name}</td><td>{money(p.net)}</td><td>{money(p.items.filter(x => x.code === 'SALARY_HOLD').reduce((a, x) => a + Number(x.amount), 0))}<small>Loss {money(p.items.filter(x => x.code === 'OPS_LOSS_RECOVERY').reduce((a, x) => a + Number(x.amount), 0))}</small></td><td>{money(p.paid)}</td><td>{money(p.payable)}</td><td>{p.bankLast4 ? '•••• ' + p.bankLast4 : 'Missing'}<small>{p.exclusion ?? 'Ready'}</small></td></tr>)}</tbody></table></div></details>}
       <PaymentReleaseReviewPanel key={selected.id} initialStation={selected.station_id} initialMonth={selected.run.period_start.slice(0, 7)} initialScope={`people:${selected.run_id}`} embedded onChange={() => load().catch(e => setError(e.message))} />
       {selected.review_note && <p>Finance note: {selected.review_note}</p>}
