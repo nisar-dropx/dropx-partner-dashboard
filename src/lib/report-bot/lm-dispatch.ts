@@ -3,7 +3,7 @@ import { summaryReportSvg, tableReportSvg, reportPngBase64 } from "./lm-report-i
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
 import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } from "@/lib/ops-pulse/station-board";
-import { dispatchReports, type ReportKey } from "./lm-dispatch-config";
+import { compareDispatchRows, dispatchReports, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
@@ -22,6 +22,11 @@ type Route = {
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; report_code?:string };
 type SourceStationRow = SourceStation & { is_ho:boolean|null; hide_from_location_list:boolean|null; location_models:{code:string|null}|Array<{code:string|null}>|null };
 type SendOutput = { key:string; body:Record<string,unknown> };
+type DispatchSnapshot = { rows: [string, string | number][]; asOf: string };
+
+function snapshotRowsFromEdd(value: TodayEddSnapshot): [string, string | number][] {
+  return value.stations.map(station => [`${station.stationCode} · Today EDD pending`, station.count]);
+}
 
 const projection = "*,group:report_bot_groups!inner(wa_group_id,location_id,company_id,workspace,is_enabled,bot_in_group,mode)";
 const linked = (group: Group, company: string) => group && group.company_id === company && group.workspace === "last_mile" && group.mode === "live" && group.is_enabled && group.bot_in_group;
@@ -186,6 +191,14 @@ async function claimRun(routeId:string,day:string,slot:string) {
   return existing.data as {id:string;status:string};
 }
 
+async function previousSnapshot(routeId: string, runId: string): Promise<DispatchSnapshot | null> {
+  const result = await reportBotDb().from("report_bot_lm_dispatch_runs")
+    .select("snapshot").eq("route_id", routeId).eq("status", "sent").neq("id", runId)
+    .not("snapshot", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  return (result.data?.snapshot as DispatchSnapshot | null) ?? null;
+}
+
 async function sendOutput(settings:ReportBotSettings,runId:string,groupId:string,output:SendOutput) {
   const db = reportBotDb();
   const inserted = await db.from("report_bot_lm_dispatch_run_outputs").insert({run_id:runId,output_key:output.key}).select("id,status").single();
@@ -225,6 +238,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
       if (!run) continue;
       claimed++;
       let status="skipped",detail="No pending items";
+      let sentSnapshot: DispatchSnapshot | null = null;
       try {
         const latest=await db.from("report_bot_lm_dispatch_routes").select(projection).eq("id",route.id).eq("enabled",true).eq("updated_at",route.updated_at).maybeSingle();
         if (latest.error) throw new Error(latest.error.message);
@@ -241,8 +255,13 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const header=`${scope} · Today EDD pending · ${asIst(snapshot.asOf)}`;
             const pendingSources=sources.filter(source=>snapshot.stations.some(station=>station.stationCode===source.station_code&&station.count>0));
             const mentionNumbers=await resolveRouteMentionNumbers(company,pendingSources,route,day);
-            const caption=[route.question,mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
+            const rows = snapshotRowsFromEdd(snapshot);
+            const prior = await previousSnapshot(route.id, run.id);
+            const delta = compareDispatchRows(rows, prior?.rows ?? null);
+            const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
+            const caption=[`As of ${asIst(snapshot.asOf)} · ${deltaText}`, route.question, mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
             outputs=await eddOutputs(route,snapshot,sources,header,caption,day,mentionNumbers);
+            sentSnapshot={rows,asOf:snapshot.asOf};
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
           }
         } else if (route.report==="eod") {
@@ -267,8 +286,13 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           if (!route.pending_only||pending) {
             const header=`${sources.map(row=>row.station_code).join(", ")} · ${dispatchReports[route.report]} · ${asIst(reports[0].asOf)}`;
             const rows=reports.flatMap((report,index)=>report.rows.map(([label,value]):[string,string|number]=>[sources.length>1?`${sources[index].station_code} · ${label}`:label,value]));
-            const caption=[route.question,route.mentions.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
-            outputs=await standardOutputs(route,header,rows,caption,day); detail=header;
+            const prior = await previousSnapshot(route.id, run.id);
+            const delta = compareDispatchRows(rows, prior?.rows ?? null);
+            const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
+            const mentionNumbers = await resolveRouteMentionNumbers(company, sources, route, day);
+            const caption=[`As of ${asIst(reports[0].asOf)} · ${deltaText}`, route.question,mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
+            outputs=await standardOutputs({...route,mentions:mentionNumbers},header,rows,caption,day); detail=header;
+            sentSnapshot={rows,asOf:reports[0].asOf};
           }
         }
         if (outputs.length) {
@@ -276,7 +300,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           status="sent";
         }
       } catch(error) { status="unavailable"; detail=error instanceof Error?error.message:"Report unavailable"; }
-      const saved=await db.from("report_bot_lm_dispatch_runs").update({status,detail:detail.slice(0,400)}).eq("id",run.id);
+      const saved=await db.from("report_bot_lm_dispatch_runs").update({status,detail:detail.slice(0,400),snapshot:status === "sent" ? sentSnapshot : null}).eq("id",run.id);
       if(saved.error) throw new Error(saved.error.message);
     }
   }

@@ -27,13 +27,31 @@ export function scheduleSlots(start: string, end: string, intervalMinutes: numbe
 
 export function suggestedTimes(key: ReportKey) {
   if (key === "eod") return ["23:30"];
-  if (key === "ageing") return ["10:00", "17:00"];
+  if (key === "ageing") return ["10:00"];
   if (key === "zero") return scheduleSlots("13:00", "21:00", 60);
-  return ["edd", "station", "dsr", "creturn"].includes(key) ? scheduleSlots("08:00", "21:00", 60) : [];
+  return ["edd", "station", "dsr", "creturn"].includes(key) ? scheduleSlots("07:00", "22:00", 60) : [];
 }
 export function parseSlots(raw: string, key: ReportKey) {
   const times = [...new Set(raw.split(",").map(x => x.trim()))].sort();
   if (!times.length || times.length > 96 || times.some(time => !CLOCK.test(time))) throw new Error("Enter between 1 and 96 times in HH:MM, separated by commas.");
   if (key === "zero" && times.some(time => time <= "12:00")) throw new Error("Choose times after noon for zero deliveries.");
   return times;
+}
+
+export type DispatchDelta = "increased" | "decreased" | "unchanged";
+
+/** Compares numeric report values by label so added/reordered detail rows do not break deltas. */
+export function compareDispatchRows(current: Array<[string, string | number]>, previous: Array<[string, string | number]> | null): DispatchDelta {
+  if (!previous) return "increased";
+  const before = new Map(previous.filter(([, value]) => typeof value === "number"));
+  let increased = false;
+  let decreased = false;
+  for (const [label, value] of current) {
+    if (typeof value !== "number" || !before.has(label)) continue;
+    const oldValue = before.get(label);
+    if (typeof oldValue !== "number") continue;
+    if (value > oldValue) increased = true;
+    if (value < oldValue) decreased = true;
+  }
+  return increased ? "increased" : decreased ? "decreased" : "unchanged";
 }

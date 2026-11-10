@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scheduleSlots, suggestedTimes } from "./lm-dispatch-config.ts";
+import { compareDispatchRows, scheduleSlots, suggestedTimes } from "./lm-dispatch-config.ts";
 
 test("dispatch windows are generated from master values rather than a fixed runtime list", () => {
   const slots = scheduleSlots("07:00", "22:00", 60);
@@ -20,4 +20,20 @@ test("dispatch windows reject invalid or excessive master configurations", () =>
 
 test("final EOD defaults to one configurable 23:30 slot", () => {
   assert.deepEqual(suggestedTimes("eod"), ["23:30"]);
+});
+
+test("Last Mile defaults match the hourly ops windows", () => {
+  assert.deepEqual(suggestedTimes("edd").slice(0, 2), ["07:00", "08:00"]);
+  assert.equal(suggestedTimes("edd").at(-1), "22:00");
+  assert.deepEqual(suggestedTimes("ageing"), ["10:00"]);
+  assert.equal(suggestedTimes("zero")[0], "13:00");
+  assert.ok(suggestedTimes("zero").every(time => time > "12:00"));
+});
+
+test("dispatch delta compares numeric values and preserves unchanged sends", () => {
+  const before = [["Pending", 10], ["Cash", 500]];
+  assert.equal(compareDispatchRows([["Pending", 12], ["Cash", 500]], before), "increased");
+  assert.equal(compareDispatchRows([["Pending", 8], ["Cash", 400]], before), "decreased");
+  assert.equal(compareDispatchRows([["Pending", 10], ["Cash", 500]], before), "unchanged");
+  assert.equal(compareDispatchRows([["Pending", 10]], null), "increased");
 });
