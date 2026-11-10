@@ -1,5 +1,5 @@
 "use client";
-import { boardRefreshStatus } from "@/lib/ops-pulse/board-refresh-status";
+import { boardRefreshReasonNote, boardRefreshStatus } from "@/lib/ops-pulse/board-refresh-status";
 import { boardSourceStatus, withBoardSourceStatus } from "@/lib/ops-pulse/board-source-status";
 import { RtsReport } from "./rts-report";
 import { formatAgeingPerformance, boardPerformanceTarget, performanceColour, formatBoardPerformance, type BoardTargets } from "@/lib/ops-pulse/board-report-format";
@@ -364,6 +364,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   const [error, setError] = useState<string | null>(null);
   const [whatsAppTarget, setWhatsAppTarget] = useState<WhatsAppTarget | null>(null);
   const [backfillNote, setBackfillNote] = useState("");
+  const [backfillReasonNote, setBackfillReasonNote] = useState("");
   const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number; pulled?: number } | null>(null);
   const [openStation, setOpenStation] = useState<string | null>(null);
   const [tids, setTids] = useState<TidRow[] | null>(null);
@@ -763,6 +764,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
         setPayload(next);
         setRun(next.run);
         const note = boardRefreshStatus(next);
+        const reasonNote = boardRefreshReasonNote(next.refreshFailedStations);
         const total = next.refreshTotal || 0;
         const running = Boolean(next.refreshRunning && total);
         setBackfillProgress(running
@@ -777,19 +779,25 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           if (completeClearTimer) window.clearTimeout(completeClearTimer);
           completeClearTimer = undefined;
           setBackfillNote(note);
+          setBackfillReasonNote(reasonNote);
         } else if (/^Refresh complete/i.test(note)) {
           // Show completion once, then clear — do not re-flash every 15s poll.
           if (!completeBannerShown) {
             completeBannerShown = true;
             setBackfillNote(note);
+            setBackfillReasonNote(reasonNote);
             completeClearTimer = window.setTimeout(() => {
-              if (!cancelled) setBackfillNote((current) => (/^Refresh complete/i.test(current) ? "" : current));
+              if (!cancelled) {
+                setBackfillNote((current) => (/^Refresh complete/i.test(current) ? "" : current));
+                setBackfillReasonNote("");
+              }
               completeClearTimer = undefined;
             }, 6_000);
           }
         } else {
           completeBannerShown = false;
           setBackfillNote(note);
+          setBackfillReasonNote(reasonNote);
         }
       } catch {
         if (!cancelled && ++failures >= 3) setBackfillNote('Refresh status unavailable · showing the last saved data. Reconnecting…');
@@ -1196,9 +1204,13 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     }`
                   : "Pulling board data…")}
             </span>
+            {backfillReasonNote ? <span className={s.note}>{backfillReasonNote}</span> : null}
           </div>
         ) : backfillNote ? (
-          <p className={s.note} role="status">{backfillNote}</p>
+          <>
+            <p className={s.note} role="status">{backfillNote}</p>
+            {backfillReasonNote ? <p className={s.note} role="status">{backfillReasonNote}</p> : null}
+          </>
         ) : null}
         {error ? <p className={s.error} role="alert">{error}</p> : null}
       </div>
