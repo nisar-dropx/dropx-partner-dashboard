@@ -42,3 +42,14 @@
 .inlineFields { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
 .inlineFields label { flex:1; min-width:170px; }
 @media(max-width:700px) { .metrics { gap:6px; } .metrics > div { padding:8px; } .downloadBar { align-items:stretch; } .downloadBar label { flex:1; } .toolbar input { max-width:100%; } }
+.payroll { padding:16px; }
+.payroll h2 { margin:0 0 4px; font-size:18px; }
+.payroll .toolbar { margin:8px 0; }
+.payroll td,.payroll th { padding:9px 10px; }
+.payroll table { margin:10px 0; }
+.payroll button { margin:2px; }
+.payroll .downloadBar { padding:12px; gap:10px; }
+.overrideBox { flex-basis:100% !important; background:#fff8eb; border:1px solid #efd6a4; border-radius:8px; padding:10px; }
+.overrideBox p { font-size:12px; margin:4px 0 8px; }
+.fullWidth { flex-basis:100%; }
+.payroll .detail { scroll-margin-top:90px; }

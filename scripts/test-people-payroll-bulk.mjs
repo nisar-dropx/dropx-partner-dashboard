@@ -126,4 +126,58 @@ assert.equal((await getQueue([otherStation]))[0].status,'review_again');
 assert.equal((await getQueue([])).length,0);
 assert.equal((await getQueue([station])).every(t=>t.station_id===station),true);
 console.log('PASS: atomic combined files, full rollback, stable retries, same-operation binding, exclusions, partial balances, independent approval, scoped handoffs, versions, override follow-up and audit privileges.');
+
+const simplifySql=fs.readFileSync('supabase/migrations/20261110082411_people_payroll_approve_download.sql','utf8');
+await db.exec(simplifySql);await db.exec(simplifySql);
+const resetForDownload=async()=>{
+ await db.exec("select set_config('app.people_finance_issue','allowed',false)");
+ await db.query("delete from hr_payroll_bank_lines where reference<>'EXISTING'");
+ await db.exec("select set_config('app.people_finance_issue','',false)");
+ await db.exec('truncate people_finance_bank_batches,people_finance_combined_batches');
+ await db.query("update people_finance_requests set status='submitted',version=10,reviewed_by=null,review_note='' where id=any($1)",[ids]);
+ for(const st of [station,otherStation])await approveLoss(st,'exception','Finance manager',tomorrow);
+};
+const reviewed=async()=>Object.fromEntries(await Promise.all([[station,requestA],[otherStation,requestB]].map(async([st,req])=>{
+ const p=await preview(st),r=(await db.query('select version from people_finance_requests where id=$1',[req])).rows[0];
+ return [req,{hash:p.hash,version:r.version,amountPaise:p.amountPaise,readyCount:p.readyCount}];
+})));
+const download=async({actor=manager,op=id(70),debitBank=bank,reason=null,expected,selected=ids}={})=>
+ db.query("select people_finance_approve_and_issue($1,$2,$3,$4,$5,'2026-11-10',$6,$7) r",[company,selected,actor,op,debitBank,expected??await reviewed(),reason]).then(r=>r.rows[0].r);
+await resetForDownload();
+await assert.rejects(()=>download({actor:submitter,reason:'I would like to override'}),/Managing Partner/);
+await assert.rejects(()=>download({expected:{}}),/figures changed/);
+await assert.rejects(()=>download({debitBank:id(999)}),/bank/i);
+assert.equal((await db.query("select count(*)::int n from people_finance_requests where status='approved'")).rows[0].n,0);
+assert.equal((await db.query('select count(*)::int n from people_finance_bank_batches')).rows[0].n,0);
+const combined=await download();assert.equal(combined.instructions.length,2);
+assert.equal((await db.query("select count(*)::int n from people_finance_requests where status='approved' and version=11")).rows[0].n,2);
+const approvalCount=(await db.query("select count(*)::int n from people_finance_events where action='approve'")).rows[0].n;
+assert.equal((await download()).replayed,true);
+assert.equal((await db.query("select count(*)::int n from people_finance_events where action='approve'")).rows[0].n,approvalCount);
+await resetForDownload();
+await db.query("insert into user_roles(id,is_active,code) values($1,true,'FINANCE_MANAGING_PARTNER')",[id(71)]);
+await db.query("insert into company_product_memberships values($1,$2,$3,true,'finance',false,array[$4,$5]::uuid[])",[company,submitter,id(71),station,otherStation]);
+await db.query("update people_finance_requests set status='returned',review_note='Accidental return',reviewed_by=$2 where id=$1",[requestA,submitter]);
+await assert.rejects(()=>download({actor:manager,reason:'Undo accidental return'}),/Managing Partner/);
+await assert.rejects(()=>download({actor:submitter}),/record why/);
+await assert.rejects(()=>download({actor:submitter,reason:'short'}),/record why/);
+await assert.rejects(()=>download({actor:submitter,reason:'Accidental return; release reviewed payroll',debitBank:id(999)}),/bank/i);
+assert.equal((await db.query("select status from people_finance_requests where id=$1",[requestA])).rows[0].status,'returned');
+assert.equal((await db.query("select count(*)::int n from people_finance_events where action='override_approve'")).rows[0].n,0);
+const override=await download({actor:submitter,reason:'Accidental return; release reviewed payroll'});
+assert.equal(override.instructions.length,2);assert.equal(override.instructions.reduce((a,i)=>a+i.amountPaise,0),300000);
+const overrideEvents=(await db.query("select snapshot,reason from people_finance_events where action='override_approve' order by request_id")).rows;
+assert.equal(overrideEvents.length,2);assert.ok(overrideEvents.every(e=>e.snapshot.selfApproval));
+assert.equal(overrideEvents.find(e=>e.snapshot.reversedReturn).snapshot.previous.review_note,'Accidental return');
+assert.equal((await download({actor:submitter})).replayed,true);
+const overrideWorkbook=XLSX.read(buildWorkforceFedOneWorkbook({debitAccountNumber:override.instructions[0].debitAccountNumber,valueDate:override.instructions[0].valueDate,referencePrefix:'HR',instructions:override.instructions}),{type:'buffer'});
+assert.equal(XLSX.utils.sheet_to_json(overrideWorkbook.Sheets[overrideWorkbook.SheetNames[0]]).length,2);
+assert.equal((await db.query('select people_finance_override_allowed($1,$2,$3) ok',[id(999),submitter,station])).rows[0].ok,false);
+await db.query('update profiles set is_active=false where id=$1',[submitter]);
+assert.equal((await db.query('select people_finance_override_allowed($1,$2,$3) ok',[company,submitter,station])).rows[0].ok,false);
+for(const f of ['people_finance_approve_and_issue(uuid,uuid[],uuid,uuid,uuid,date,jsonb,text)','people_finance_override_allowed(uuid,uuid,uuid)']) {
+ for(const role of ['anon','authenticated']) assert.equal((await db.query('select has_function_privilege($1,$2,\'execute\') ok',[role,f])).rows[0].ok,false);
+}
+console.log('PASS: one-step approval/download, all-location rollback, idempotent replay, MP-only explicit override, previous decision preserved, XLSX contents and service-only grants.');
+
 await db.close();

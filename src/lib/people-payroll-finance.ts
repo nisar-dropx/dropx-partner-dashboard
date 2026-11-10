@@ -8,7 +8,7 @@ export type FinanceSubmission = Omit<PayrollPreview, 'people'> & {
   id: string; station_id: string; station: string; station_name: string; run_id: string; status: string; version: number;
   submitted_by: string; submitted_name: string; submitted_at: string; review_note: string;
   run: { label: string; period_start: string }; clearance: boolean; lossPending: number; clearanceRequired: boolean;
-  canApprove: boolean; canDownload: boolean; nextStep: string;
+  canApprove: boolean; canDownload: boolean; canProcess: boolean; requiresOverride: boolean; canOverride: boolean; nextStep: string;
 };
 export function payrollNextStep(r: { changed: boolean; runApproved: boolean; status: string; clearance: boolean; clearanceRequired: boolean; readyCount: number; issues: {name:string;reason:string}[]; submitted_by: string; submitted_name: string }, actor: string) {
   if (r.changed) return 'People must resubmit revised payroll';

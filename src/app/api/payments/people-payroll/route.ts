@@ -58,7 +58,15 @@ export async function GET(request: Request) {
         const row = { ...r, ...summary, station: station?.station_code ?? "Unknown location", station_name: station?.station_name ?? "", run,
           submitted_name: profiles.data?.find(p => p.id === r.submitted_by)?.full_name || "Payroll submitter",
           clearance: Boolean(loss.data?.approval), clearanceRequired, lossPending: Number(loss.data?.pendingCount ?? 0) + Number(loss.data?.missingDeductionCount ?? 0) };
-        return { ...row, nextStep: payrollNextStep(row, auth.userId),
+        const requiresOverride = r.status === "returned" || (r.status === "submitted" && r.submitted_by === auth.userId);
+        let canOverride = false;
+        if (canEdit && requiresOverride) {
+          const allowed = await db.rpc("people_finance_override_allowed", { p_company: company, p_actor: auth.userId, p_station: r.station_id });
+          if (allowed.error) throw Error("Payroll override access could not be checked.");
+          canOverride = allowed.data === true;
+        }
+        const canProcess = canEdit && !row.changed && row.runApproved && (row.clearance || !clearanceRequired) && row.readyCount > 0 && !row.issues.length && (!requiresOverride || canOverride);
+        return { ...row, requiresOverride, canOverride, canProcess, nextStep: canProcess ? requiresOverride ? 'Managing Partner override available — reason required' : r.status === 'approved' ? 'Ready to download' : 'Approve and download together' : payrollNextStep(row, auth.userId),
           canApprove: canEdit && !row.changed && row.runApproved && r.status === "submitted" && r.submitted_by !== auth.userId && (row.clearance || !clearanceRequired),
           canDownload: canEdit && !row.changed && row.runApproved && r.status === "approved" && (row.clearance || !clearanceRequired) && row.readyCount > 0 && !row.issues.length };
       })));
@@ -73,15 +81,17 @@ export async function POST(request: Request) {
     if (request.headers.get("origin") && request.headers.get("origin") !== new URL(request.url).origin) throw Error("Invalid origin.");
     const { auth, company, db } = await paymentReleaseAccess(true, true);
     const body = await request.json();
-    const ids: string[] = body.action === "bank_file_combined" ? body.requestIds : [body.requestId];
+    const combined = ["bank_file_combined", "approve_download"].includes(body.action);
+    const ids: string[] = combined ? body.requestIds : [body.requestId];
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some(id => !uuid.test(String(id))) || new Set(ids).size !== ids.length) throw Error("Choose distinct payroll submissions (up to 100 locations).");
     const submissions = await db.from("people_finance_requests").select("id,station_id,run_id").eq("company_id", company).in("id", ids);
     if (submissions.error || submissions.data?.length !== ids.length) throw Error("A payroll submission was not found.");
     for (const s of submissions.data) await assertReleaseStation(auth, company, s.station_id);
-    if (["bank_file", "bank_file_combined"].includes(body.action)) {
+    if (["bank_file", "bank_file_combined", "approve_download"].includes(body.action)) {
       if (!uuid.test(String(body.operationId)) || !uuid.test(String(body.bankId)) || !/^20\d{2}-\d{2}-\d{2}$/.test(String(body.valueDate))) throw Error("Choose the bank and value date before downloading.");
-      const result = body.action === "bank_file_combined"
-        ? await db.rpc("people_finance_issue_many", { p_company: company, p_requests: ids, p_actor: auth.userId, p_operation: body.operationId, p_bank: body.bankId, p_value_date: body.valueDate, p_expected: body.expected ?? null })
+      const result = combined
+        ? await db.rpc(body.action === "approve_download" ? "people_finance_approve_and_issue" : "people_finance_issue_many", { p_company: company, p_requests: ids, p_actor: auth.userId, p_operation: body.operationId, p_bank: body.bankId, p_value_date: body.valueDate, p_expected: body.expected ?? null,
+          ...(body.action === "approve_download" ? { p_override_reason: typeof body.overrideReason === 'string' ? body.overrideReason : null } : {}) })
         : await db.rpc("people_finance_issue", { p_company: company, p_request: ids[0], p_actor: auth.userId, p_operation: body.operationId, p_bank: body.bankId, p_value_date: body.valueDate });
       if (result.error) throw Error(result.error.code === "P0001" ? result.error.message : "Bank file could not be created. Refresh before retrying.");
       const instructions = result.data.instructions;
@@ -89,7 +99,8 @@ export async function POST(request: Request) {
       const workbook = buildWorkforceFedOneWorkbook({ debitAccountNumber: instructions[0].debitAccountNumber, valueDate: instructions[0].valueDate, referencePrefix: "HR", instructions });
       return new Response(Buffer.from(workbook), { headers: { ...headers, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="people-payroll-${body.valueDate}-${body.operationId}.xlsx"` } });
     }
-    if (!["approve", "return"].includes(body.action) || !Number.isInteger(body.version) || typeof body.reason !== "string" || body.reason.trim().length < 10 || body.reason.length > 2000) throw Error("Record a Finance decision and review note (10–2000 characters).");
+    if (body.action === "approve" && !String(body.reason ?? '').trim()) body.reason = "Payroll reviewed and approved for payment.";
+    if (!["approve", "return"].includes(body.action) || !Number.isInteger(body.version) || typeof body.reason !== "string" || body.reason.trim().length < 10 || body.reason.length > 2000) throw Error("Record a correction reason (10–2000 characters).");
     const result = await db.rpc("people_finance_decide", { p_company: company, p_request: ids[0], p_actor: auth.userId, p_version: body.version, p_action: body.action, p_reason: body.reason });
     if (result.error) throw Error(result.error.code === "P0001" ? result.error.message : "Finance decision failed.");
     return Response.json({ ok: true }, { headers });
