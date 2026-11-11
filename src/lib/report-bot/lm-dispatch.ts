@@ -219,9 +219,14 @@ async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:st
     splitText(lines).forEach((value,index)=>outputs.push({key:`text_${String(index+1).padStart(3,"0")}`,body:{text:value}}));
   }
   if(formats.includes("excel")) {
-    const sheet=route.report==="dsr"?"Live DSR":"Live C-Return";
-    const buffer=workbookBuffer([{name:sheet,rows:tableRows}]);
-    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`${route.report}-${day}.xlsx`,caption:`${title} · detailed export`}});
+    const sheets=route.report==="dsr"
+      ? [
+          {name:"EDD at station",rows:boardTidSheetRows(digest.stationInventoryTracking.edd)},
+          {name:"Physical at station",rows:boardTidSheetRows(digest.stationInventoryTracking.physical)},
+        ]
+      : [{name:"Live C-Return",rows:tableRows}];
+    const buffer=workbookBuffer(sheets);
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`${route.report==="dsr"?"Live_DSR_Inventory":"Live_C-Return"}_${scopeLabel.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:route.report==="dsr"?`${title} · EDD at station and Physical at station tracking IDs`:`${title} · detailed export`}});
   }
   const snapshotRows=tableRows.filter(row=>row.Station!=="Grand total").map(row=>[`${row.Station} · ${percentage}`,row[percentage]] as [string,string|number]);
   return {outputs,snapshot:{rows:snapshotRows,asOf:digest.asOf}};
