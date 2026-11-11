@@ -18,7 +18,7 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     recon: "DA reconciliation remains pending after 8:00 PM. Please complete the cash reconciliation and confirm.",
     deposit: "Prepare Deposit remains pending after 9:00 PM. Please prepare the available cash and update the portal now.",
     bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Check the banker visit signal: use Banker Not Reported only when no remittance was updated today and the banker genuinely did not arrive.",
-    slip: "The COD slip is still missing more than 30 minutes after remittance submission. Please upload it now.",
+    slip: "Action required — TL and closing-shift SSA: the bank deposit slip is still not uploaded after remittance submission. Upload it now. Cluster Manager and Control Tower: for information.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
   return [lead[report], `Status: ${status}. As of ${asOf} IST.`, question, mentions.length ? mentions.map(number => "@" + number).join(" ") : ""].filter(Boolean).join("\n");
@@ -27,6 +27,9 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
 /** Gemini wording is advisory; a stable operational caption is always available as a fallback. */
 export async function dispatchCaption(settings: ReportBotSettings, report: ReportKey, reportName: string, status: string, asOf: string, totals: string, question: string, mentions: string[]) {
   const base = fallback(report, status, asOf, question, mentions);
+  // COD controls are factual workflow decisions. Deterministic wording keeps
+  // pickup-cycle logic exact and avoids spending model credits on every chase.
+  if (["cod","recon","deposit","bank","slip"].includes(report)) return base;
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key || !settings.ai_model) return base;
   const controller = new AbortController();

@@ -11,7 +11,7 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
-import { overdueRemittancesAfterGrace, scrubAlertState, slipUploadOverdue, submittedRemittanceAt } from "./lm-cod-alerts";
+import { overdueRemittancesAfterGrace, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
@@ -187,8 +187,9 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     const remittances=s.remittances;
     if(!remittances.data||remittances.state!=="ok") throw new Error("Remittance status unavailable for slip timing.");
     const asOf=fresh(remittances.checkedAt,day),latest=remittances.data.latestSubmitted;
-    const pending=r.pending&&slipUploadOverdue(latest,new Date(),30),submittedAt=submittedRemittanceAt(latest);
-    return { asOf, pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Latest remittance", latest?.code||"Not submitted"], ["Remittance submitted", submittedAt?new Date(submittedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"—"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
+    const reminder=slipReminderState(latest,new Date(),30,60,30),submittedAt=submittedRemittanceAt(latest);
+    const pending=r.pending&&reminder.due;
+    return { asOf, pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Latest remittance", latest?.code||"Not submitted"], ["Remittance submitted", submittedAt?new Date(submittedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"—"], ["Waiting for slip",submittedAt?`${reminder.elapsedMinutes} minutes`:"—"], ["Reminder",reminder.stage<=1?"First follow-up · 30 minutes":"Repeat follow-up · hourly"], ["Action owner","TL + closing-shift SSA"], ["For information","Cluster Manager + Control Tower"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
   }
   if (["cod", "recon", "deposit", "bank"].includes(key)) {
     const s = await fetchCodStatus(code);

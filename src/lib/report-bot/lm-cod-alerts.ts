@@ -30,6 +30,19 @@ export function slipUploadOverdue(row:CodRemittance|null,now=new Date(),graceMin
   return submittedAt!==null && now.getTime()>=submittedAt+graceMinutes*60000;
 }
 
+/** COD slip reminders run from a 30-minute scheduler without spamming every
+ * slot: first reminder after 30 minutes, then one reminder per hour. The
+ * half-hour window ensures exactly one eligible scheduler slot per stage. */
+export function slipReminderState(row:CodRemittance|null,now=new Date(),firstMinutes=30,repeatMinutes=60,schedulerWindowMinutes=30) {
+  const submittedAt=submittedRemittanceAt(row);
+  if(submittedAt===null) return {due:false,stage:0,elapsedMinutes:0,submittedAt:null};
+  const elapsedMinutes=Math.floor((now.getTime()-submittedAt)/60000);
+  if(elapsedMinutes<firstMinutes) return {due:false,stage:0,elapsedMinutes,submittedAt};
+  const afterFirst=elapsedMinutes-firstMinutes;
+  const stage=1+Math.floor(afterFirst/repeatMinutes);
+  return {due:afterFirst%repeatMinutes<schedulerWindowMinutes,stage,elapsedMinutes,submittedAt};
+}
+
 export function scrubAlertState(day:string,now:Date,inStationChecks:number,onRoadChecks:number,stationDue="13:00",roadDue="22:00") {
   const stationOverdue=now.getTime()>=dayAt(day,stationDue);
   const roadOverdue=now.getTime()>=dayAt(day,roadDue);
