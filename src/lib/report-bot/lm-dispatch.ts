@@ -7,7 +7,7 @@ import { compareDispatchRows, dispatchReports, type EodSection, type ReportKey }
 import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveBankReminderMentions, resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
-import { bankReminderText } from "./lm-bank-message";
+import { bankMentionNumbers, bankReminderText } from "./lm-bank-message";
 import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
 import { EOD_DOT_PERCENTAGE_COLUMNS, EOD_DOT_VISIBLE_COLUMNS, eodDotTotalRow } from "./lm-eod-dot";
 import { reportBotDb, type ReportBotSettings } from "./settings";
@@ -456,7 +456,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
               // its own actionable message and its own scoped TL/manager tags.
               outputs=await Promise.all(sources.flatMap((source,index)=>reports[index].pending?[{source,report:reports[index]}]:[]).map(async({source,report})=>{
                 const groups=await resolveBankReminderMentions(company,[source],route,day);
-                const mentions=[...new Set(Object.values(groups).flat())].map(number=>number+"@s.whatsapp.net");
+                const mentions=bankMentionNumbers(groups).map(number=>number+"@s.whatsapp.net");
                 return {key:`bank_${source.id}`,body:{text:bankReminderText(`${source.station_code} · Bank remittance · ${asIst(report.asOf)}`,report.rows,groups),mentions}};
               }));
             } else if(route.report==="recon") {

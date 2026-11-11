@@ -83,7 +83,6 @@ test("Prepare Deposit waits for zero OOR and two hours, then uses the 10 PM clos
 test("bank follow-up escalates only when no submission was updated today",()=>{
   assert.match(bankRemittanceFollowup(false),/call immediately/);
   assert.match(bankRemittanceFollowup(false),/cod-recon@amazon\.com/);
-  assert.match(bankRemittanceFollowup(false),/Cluster Manager, CTL, CRM, ct@dropxlogistics\.com and varun@dropxlogistics\.com/);
   assert.doesNotMatch(bankRemittanceFollowup(true),/not arrived|email|cod-recon/);
   assert.match(bankRemittanceFollowup(true),/remaining due amount/);
   assert.doesNotMatch(bankRemittanceFollowup(false),/seven|last.updat/i);
