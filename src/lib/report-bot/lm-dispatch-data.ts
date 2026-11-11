@@ -11,7 +11,7 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
-import { bankRemittanceFollowup, observedBankerWindow, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
+import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = {
   asOf: string;
@@ -259,10 +259,13 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
         if(setting.error) throw new Error(setting.error.message);
         if(!c.data.complete) throw new Error("Remittance source check is incomplete.");
         const now=new Date();
+        if(observedNonPickupWeekday(c.data.rows,s.remittanceWindow,now)) return {asOf,pending:false,rows:[["Status","Recurring non-pickup day · reminder skipped"]]};
         const observed=observedBankerWindow(c.data.rows,now);
         if(!observed) throw new Error("Banker reporting window unavailable: fewer than three days of submitted-remittance last-updated history in the previous seven days.");
         const policy=pickupPolicy({...setting.data,pickup_window_start:observed.start,pickup_window_end:observed.end});
         if(!policy) throw new Error("COD pickup timing is not configured for this station.");
+        // A carried balance after a non-pickup day waits for today's CMS window.
+        if(now.getTime()<Date.parse(`${day}T${observed.end}:00+05:30`)+30*60000) return {asOf,pending:false,rows:[["Status","Within today's CMS reporting window"]]};
         const overdue=overdueRemittancesAfterGrace(c.data.rows,c.data.latestSubmitted,policy,now,30);
         const overdueAmount=overdue.reduce((sum,item)=>sum+Math.max(0,Number(item.row.expectedAmount)||0),0);
         const bankerVisitAt=Math.max(0,...c.data.rows.filter(row=>row.status.toUpperCase()==="SUBMITTED").map(row=>Number(row.updatedAt)||0));

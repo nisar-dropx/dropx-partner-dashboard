@@ -6,7 +6,8 @@ import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } fro
 import { compareDispatchRows, dispatchReports, type EodSection, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
-import { resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
+import { resolveBankReminderMentions, resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
+import { bankReminderText } from "./lm-bank-message";
 import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
 import { EOD_DOT_PERCENTAGE_COLUMNS, EOD_DOT_VISIBLE_COLUMNS, eodDotTotalRow } from "./lm-eod-dot";
 import { reportBotDb, type ReportBotSettings } from "./settings";
@@ -442,15 +443,23 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
         } else {
           const reports=await Promise.all(sources.map(source=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day)));
           const pending=reports.some(row=>row.pending);
-          if (!route.pending_only||pending) {
+          if ((route.report==="bank" ? pending : !route.pending_only||pending)) {
             const header=`${sources.map(row=>row.station_code).join(", ")} · ${dispatchReports[route.report]} · ${asIst(reports[0].asOf)}`;
             const rows=reports.flatMap((report,index)=>report.rows.map(([label,value]):[string,string|number]=>[sources.length>1?`${sources[index].station_code} · ${label}`:label,value]));
             const prior = await previousSnapshot(route.id, run.id);
             const delta = compareDispatchRows(rows, prior?.rows ?? null);
             const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
-            const mentionNumbers = await resolveRouteMentionNumbers(company, sources, route, day);
+            const mentionNumbers = route.report==="bank"?[]:await resolveRouteMentionNumbers(company, sources, route, day);
             const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(reports[0].asOf), rows.map(([label,value])=>`${label}: ${value}`).join("; "), route.question, mentionNumbers);
-            if(route.report==="recon") {
+            if(route.report==="bank") {
+              // Parent/XPT groups can contain several source stations. Each gets
+              // its own actionable message and its own scoped TL/manager tags.
+              outputs=await Promise.all(sources.flatMap((source,index)=>reports[index].pending?[{source,report:reports[index]}]:[]).map(async({source,report})=>{
+                const groups=await resolveBankReminderMentions(company,[source],route,day);
+                const mentions=[...new Set(Object.values(groups).flat())].map(number=>number+"@s.whatsapp.net");
+                return {key:`bank_${source.id}`,body:{text:bankReminderText(`${source.station_code} · Bank remittance · ${asIst(report.asOf)}`,report.rows,groups),mentions}};
+              }));
+            } else if(route.report==="recon") {
               const firstTable=reports.find(report=>report.table)?.table;
               const tableRows=reports.flatMap((report,index)=>(report.table?.rows||[]).map(row=>sources.length>1?[sources[index].station_code,...row]:row));
               const columns=firstTable ? (sources.length>1?["Station",...firstTable.columns]:firstTable.columns) : ["DA","Last delivery","90-min due","Pending ₹","TIDs","Age","Status"];

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bankRemittanceFollowup, observedBankerWindow, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
+import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
 
 const at=value=>Date.parse(value+"+05:30");
 const row=(created,status="CREATED")=>({id:created,code:"AC1",status,expectedAmount:100,actualAmount:100,variance:0,createdAt:at(created),updatedAt:at(created),submittedAt:status==="SUBMITTED"?at(created):null,createdBy:"station",submittedBy:status==="SUBMITTED"?"station":null});
@@ -87,4 +87,15 @@ test("bank follow-up escalates only when no submission was updated today",()=>{
   assert.doesNotMatch(bankRemittanceFollowup(true),/not arrived|email|cod-recon/);
   assert.match(bankRemittanceFollowup(true),/remaining due amount/);
   assert.doesNotMatch(bankRemittanceFollowup(false),/seven|last.updat/i);
+});
+
+test("recurring Sunday skips require both previous Sundays and neighbouring pickups",()=>{
+  const now=new Date(at("2026-11-15T15:00:00"));
+  const window={startTime:at("2026-10-31T00:00:00"),endTime:at("2026-11-15T23:59:59")};
+  const rows=["2026-10-31","2026-11-02","2026-11-07","2026-11-09"].map(day=>row(day+"T10:45:00","SUBMITTED"));
+  assert.equal(observedNonPickupWeekday(rows,window,now),true);
+  assert.equal(observedNonPickupWeekday(rows.slice(1),window,now),false,"inactive or missing day is not proof");
+  assert.equal(observedNonPickupWeekday(rows,{...window,startTime:at("2026-11-01T00:00:00")},now),false,"short source window");
+  assert.equal(observedNonPickupWeekday([...rows,row("2026-11-08T10:45:00","SUBMITTED")],window,now),false,"one missed Sunday is insufficient");
+  assert.equal(observedNonPickupWeekday([...rows,row("2026-11-15T10:45:00","SUBMITTED")],window,now),false,"today's actual pickup overrides the pattern");
 });

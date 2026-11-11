@@ -47,6 +47,24 @@ export function bankRemittanceFollowup(updatedToday:boolean) {
     : "Why is today's due remittance still pending? If the CMS person has not arrived, call immediately. If there is no response, email cod-recon@amazon.com; CC your Cluster Manager, CTL, CRM, ct@dropxlogistics.com and varun@dropxlogistics.com.";
 }
 
+/** Infer a recurring non-pickup weekday only from a complete history window.
+ * Both preceding occurrences must have no submitted update, with actual updates
+ * on their neighbouring days. This excludes inactivity/source gaps; any pickup
+ * on that weekday (including today) overrides the inferred pattern. */
+export function observedNonPickupWeekday(rows:CodRemittance[],window:{startTime:number;endTime:number},now=new Date()) {
+  const today=new Date(now.getTime()+330*60000).toISOString().slice(0,10);
+  const midnight=dayAt(today,"00:00");
+  const day=(at:number)=>new Date(at+330*60000).toISOString().slice(0,10);
+  const updates=new Set(rows.filter(row=>row.status.toUpperCase()==="SUBMITTED"&&typeof row.updatedAt==="number"&&Number.isFinite(row.updatedAt)&&row.updatedAt<=now.getTime()).map(row=>day(row.updatedAt!)));
+  if(updates.has(today)||!Number.isFinite(window.startTime)||!Number.isFinite(window.endTime)) return false;
+  for(const weeksAgo of [1,2]) {
+    const at=midnight-weeksAgo*7*86400000;
+    if(window.startTime>at-86400000 || window.endTime<at+2*86400000-1) return false;
+    if(updates.has(day(at)) || !updates.has(day(at-86400000)) || !updates.has(day(at+86400000))) return false;
+  }
+  return true;
+}
+
 /** Retain the station's pickup cycle with the observed reporting window. The
  * extra grace gives the station 30 minutes after its end to update the portal. */
 export function overdueRemittancesAfterGrace(rows:CodRemittance[],latest:CodRemittance|null,policy:PickupPolicy|null,now=new Date(),graceMinutes=30):OverdueRemittance[] {

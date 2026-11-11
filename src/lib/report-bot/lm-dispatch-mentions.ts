@@ -120,3 +120,26 @@ export async function resolveTeamLeaderMentionNumbers(companyId: string, sources
   const directory = await loadCodTeamDirectory(companyId, locationIds, [], day);
   return teamLeaderMentionNumbers(directory, locationIds);
 }
+
+/** Bank reminders address station TLs first; managers and explicitly configured
+ * central CT contacts are FYI only. Never expand roles to all company staff. */
+export async function resolveBankReminderMentions(companyId:string,sources:MentionSource[],route:MentionRouteConfig,day:string) {
+  const locations=sources.map(source=>source.id);
+  const hierarchy=await loadPeopleOperationalHierarchy(companyId,locations,{includeStationResponsibilities:true,asOf:day});
+  if(hierarchy.error) throw new Error(hierarchy.error);
+  const clusterIds=new Set<string>(),aomIds=new Set<string>();
+  if(route.mention_manager_policy==="cluster_then_aom") for(const source of sources) {
+    const station=hierarchy.byLocation.get(source.id);
+    if(station?.clusterManagers.length) station.clusterManagers.forEach(person=>clusterIds.add(person.personId));
+    else station?.areaOperationsManagers.forEach(person=>aomIds.add(person.personId));
+  }
+  const directory=await loadCodTeamDirectory(companyId,locations,[...clusterIds,...aomIds],day);
+  const numbers=(people:typeof directory)=>[...new Set(people.map(person=>normalizeWhatsAppNumber(person.phone)).filter((number):number is string=>Boolean(number)))];
+  const roles=new Set(route.mention_designation_codes||[]);
+  return {
+    tl:roles.has("TL")?teamLeaderMentionNumbers(directory,locations):[],
+    ct:[...new Set([...(route.mentions||[]).map(normalizeWhatsAppNumber).filter((number):number is string=>Boolean(number)),...numbers(directory.filter(person=>roles.has(person.roleCode)&&["CT","CONTROL_TOWER_ASSOCIATE"].includes(person.roleCode)))])],
+    cluster:numbers(directory.filter(person=>clusterIds.has(person.personId))),
+    aom:numbers(directory.filter(person=>aomIds.has(person.personId))),
+  };
+}
