@@ -19,7 +19,12 @@ alter table public.report_bot_lm_dispatch_routes add column if not exists cod_re
 create index if not exists report_bot_cod_observations_retention on public.report_bot_cod_observations(observed_at);
 create index if not exists report_bot_cod_route_cache_retention on public.report_bot_cod_route_cache(expires_at);
 -- Bounded operational retention; scheduling happens in the backend, not ChatGPT.
-select cron.schedule('report-bot-cod-evidence-retention','17 22 * * *',$$delete from public.report_bot_cod_observations where observed_at < now()-interval '8 days'; delete from public.report_bot_cod_route_cache where expires_at < now()-interval '1 day';$$);
+create or replace function public.purge_cod_report_evidence() returns void language sql security invoker set search_path=public,pg_temp as $$
+ delete from public.report_bot_cod_observations where observed_at < now()-interval '8 days';
+ delete from public.report_bot_cod_route_cache where expires_at < now()-interval '1 day';
+$$;
+revoke all on function public.purge_cod_report_evidence() from public,anon,authenticated;
+grant execute on function public.purge_cod_report_evidence() to service_role;
 
 create table if not exists public.cod_shortfall_ledger (
  id uuid primary key default gen_random_uuid(), company_id uuid not null, location_id uuid not null,

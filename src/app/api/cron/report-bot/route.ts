@@ -37,6 +37,11 @@ export async function GET(request: Request) {
   if (!isEddCronHost(new URL(request.url).hostname)) return NextResponse.json({ skipped: "Report Bot runs on OpsPulse only" });
   const deadline = Date.now() + 280_000;
   const db = reportBotDb();
+  const clock=new Date();
+  if(clock.getUTCHours()===22&&clock.getUTCMinutes()===17){
+    const cleanup=await db.rpc('purge_cod_report_evidence');
+    if(cleanup.error)console.error('[report-bot] COD retention failed',cleanup.error.message);
+  }
   await keepWorkersAwake();
   const companies = await db.from("report_bot_settings").select("*").neq("mode", "off");
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
