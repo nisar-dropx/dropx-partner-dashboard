@@ -15,8 +15,8 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     zero: "Some DAs have zero deliveries. Please confirm whether they are at the station or out on road and take action.",
     scrub: "Please complete the overdue scrub stage now. At-station scrub is due by 1:00 PM and on-road scrub by 10:00 PM.",
     cod: "COD pending requires immediate station action. Please update the status and confirm.",
-    recon: "DA reconciliation remains pending after 8:00 PM. Please complete the cash reconciliation and confirm.",
-    deposit: "Prepare Deposit remains pending after 9:00 PM. Please prepare the available cash and update the portal now.",
+    recon: "The listed DA reconciliation remains pending after the 90-minute grace or the 10:00 PM closing sweep. Complete it now and confirm.",
+    deposit: "Out on road is zero and Prepare Deposit remains pending after the operational grace. Complete it now and confirm.",
     bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Check the banker visit signal: use Banker Not Reported only when no remittance was updated today and the banker genuinely did not arrive.",
     slip: "Action required — TL and closing-shift SSA: the bank deposit slip is still not uploaded after remittance submission. Upload it now. Cluster Manager and Control Tower: for information.",
     eod: "Please review the EOD report and close all remaining operational gaps."

@@ -11,7 +11,7 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
-import { overdueRemittancesAfterGrace, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
+import { overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
@@ -44,23 +44,41 @@ function fresh(stamp: string | null, day: string) {
 }
 const money = (value: number) => "₹" + value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
-function reconciliationAlertRows(data:NonNullable<Awaited<ReturnType<typeof fetchCodStatus>>["reconciliation"]["data"]>,day:string) {
+function reconciliationAlertRows(data:NonNullable<Awaited<ReturnType<typeof fetchCodStatus>>["reconciliation"]["data"]>,day:string,now=new Date()) {
   const dayMs=Date.parse(`${day}T00:00:00Z`);
   const drivers=(data.drivers || []).filter(driver=>Math.abs(Number(driver.pendingAmount)||0)>=0.01).map(driver=>{
     const dated=(driver.packages || []).map(pkg=>collectionDay(pkg.collectedAt)).filter((value):value is string=>Boolean(value));
     const oldestDays=dated.length ? Math.max(...dated.map(value=>Math.max(0,Math.floor((dayMs-Date.parse(`${value}T00:00:00Z`))/86400000)))) : null;
-    return {...driver,oldestDays};
-  }).sort((a,b)=>(b.oldestDays??-1)-(a.oldestDays??-1)||Math.abs(b.pendingAmount)-Math.abs(a.pendingAmount));
+    const lastDeliveryAt=Math.max(0,...(driver.packages||[]).map(pkg=>Number(pkg.collectedAt)||0))||null;
+    return {...driver,oldestDays,lastDeliveryAt,alert:reconciliationDriverAlert(lastDeliveryAt,now,90,"22:00")};
+  }).filter(driver=>driver.alert.due).sort((a,b)=>(b.oldestDays??-1)-(a.oldestDays??-1)||Math.abs(b.pendingAmount)-Math.abs(a.pendingAmount));
   const priorDayDrivers=drivers.filter(driver=>(driver.oldestDays??0)>=1);
   return [
-    ["DAs pending",data.pendingCount] as [string,string|number],
-    ["Cash pending",money(data.pendingAmount)] as [string,string|number],
+    ["DAs requiring reconciliation",drivers.length] as [string,string|number],
+    ["Cash with listed DAs",money(drivers.reduce((sum,driver)=>sum+Number(driver.pendingAmount||0),0))] as [string,string|number],
+    ["Rule",drivers.some(driver=>driver.alert.fullSweep)?"10 PM closing sweep · all pending DAs":"90 minutes after last COD delivery"] as [string,string|number],
     ...(priorDayDrivers.length ? [["Prior-day DAs",priorDayDrivers.length] as [string,string|number]] : []),
     ...drivers.map(driver=>[
       `${driver.name || driver.id}${driver.oldestDays===null?" · age unknown":driver.oldestDays>=1?` · ${driver.oldestDays}d ageing`:" · today"}`,
-      `${money(driver.pendingAmount)} · ${(driver.packages || []).length} TID${(driver.packages || []).length===1?"":"s"}`,
+      `${driver.lastDeliveryAt?new Date(driver.lastDeliveryAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" last delivery":"last delivery unverified"} · ${money(driver.pendingAmount)} · ${(driver.packages || []).length} TID${(driver.packages || []).length===1?"":"s"}`,
     ] as [string,string|number]),
   ];
+}
+
+async function prepareDepositOperations(code:string,day:string,pendingAmount:number,now=new Date()) {
+  const board=await fetchLoadFlashBoard(day,[code]);
+  const station=board.stations.find(row=>row.stationCode===code&&row.businessDate===day&&row.hasSnapshot);
+  if(!station) throw new Error("Current station OOR snapshot unavailable for Prepare Deposit timing.");
+  const outOnRoad=station.board.daDsr.reduce((sum,row)=>sum+Number(row.oor||0),0);
+  let closureAt:number|null=null;
+  if(outOnRoad===0) {
+    const rows=await fetchLoadFlashTracking(day,[code]);
+    const terminal=new Set(["DELIVERED","DELIVERY_ATTEMPTED","DELIVERY_FAILED","DELIVERY_REJECTED","REJECTED"]);
+    const updates=rows.filter(row=>row.stationCode===code&&row.edd===day&&(row.delivered||terminal.has(row.state.toUpperCase())))
+      .map(row=>Date.parse(row.lastUpdatedAt||"")).filter(Number.isFinite);
+    closureAt=updates.length?Math.max(...updates):null;
+  }
+  return {outOnRoad,alert:prepareDepositAlertState(outOnRoad,closureAt,pendingAmount,now,120,"22:00")};
 }
 
 /**
@@ -201,15 +219,20 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
       const c = s.reconciliation;
       if (!c.data || c.state !== "ok") throw new Error("DA reconciliation unavailable.");
       fresh(c.checkedAt, day);
-      rows.push(...reconciliationAlertRows(c.data,day));
-      pending ||= c.data.pendingAmount > 0 || c.data.pendingCount > 0;
+      const alertRows=reconciliationAlertRows(c.data,day,new Date());
+      rows.push(...alertRows);
+      pending ||= Number(alertRows[0]?.[1]||0)>0;
     }
     if (key === "cod" || key === "deposit") {
       const c = s.prepareDeposit;
       if (!c.data || c.state !== "ok") throw new Error("Deposit balance unavailable.");
       fresh(c.checkedAt, day);
+      if(key==="deposit") {
+        const operations=await prepareDepositOperations(code,day,c.data.actualAmount,new Date());
+        rows.push(["Out on road",operations.outOnRoad],["OOR closure",operations.alert.closureAt?new Date(operations.alert.closureAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"Not verified"],["Rule",operations.alert.fullSweep?"10 PM closing sweep · OOR must be zero":"2 hours after OOR reached zero"]);
+        pending ||= operations.alert.due;
+      } else pending ||= c.data.actualAmount > 0;
       rows.push(["Expected cash",money(c.data.expectedAmount)],["Cash to prepare", money(c.data.actualAmount)],["Difference",money(c.data.variance)]);
-      pending ||= c.data.actualAmount > 0;
     }
     if (key === "cod" || key === "bank") {
       const c = s.remittances;

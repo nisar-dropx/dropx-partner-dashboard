@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { overdueRemittancesAfterGrace, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
+import { overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
 
 const at=value=>Date.parse(value+"+05:30");
 const row=(created,status="CREATED")=>({id:created,code:"AC1",status,expectedAmount:100,actualAmount:100,variance:0,createdAt:at(created),updatedAt:at(created),submittedAt:status==="SUBMITTED"?at(created):null,createdBy:"station",submittedBy:status==="SUBMITTED"?"station":null});
@@ -44,4 +44,22 @@ test("scrub deadlines are independent",()=>{
   assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T15:00:00")),1,0).pending,false);
   assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T22:00:00")),1,0).pending,true);
   assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T22:00:00")),1,1).pending,false);
+});
+
+test("DA reconciliation waits 90 minutes, then changes to a full closing sweep at 10 PM",()=>{
+  const lastDelivery=at("2026-11-11T18:00:00");
+  assert.equal(reconciliationDriverAlert(lastDelivery,new Date(at("2026-11-11T19:29:00"))).due,false);
+  assert.equal(reconciliationDriverAlert(lastDelivery,new Date(at("2026-11-11T19:30:00"))).due,true);
+  const closing=reconciliationDriverAlert(null,new Date(at("2026-11-11T22:00:00")));
+  assert.equal(closing.due,true);
+  assert.equal(closing.fullSweep,true);
+});
+
+test("Prepare Deposit waits for zero OOR and two hours, then uses the 10 PM closing sweep",()=>{
+  const closure=at("2026-11-11T18:00:00");
+  assert.equal(prepareDepositAlertState(1,closure,100,new Date(at("2026-11-11T21:00:00"))).due,false);
+  assert.equal(prepareDepositAlertState(0,closure,100,new Date(at("2026-11-11T19:59:00"))).due,false);
+  assert.equal(prepareDepositAlertState(0,closure,100,new Date(at("2026-11-11T20:00:00"))).due,true);
+  assert.equal(prepareDepositAlertState(0,null,100,new Date(at("2026-11-11T22:00:00"))).due,true);
+  assert.equal(prepareDepositAlertState(0,null,0,new Date(at("2026-11-11T22:00:00"))).due,false);
 });
