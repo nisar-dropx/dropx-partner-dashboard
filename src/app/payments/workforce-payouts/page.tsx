@@ -742,6 +742,37 @@ async function withPayoutSourcePaymentHolds(
 }
 
 export const dynamic = "force-dynamic";
+// Closed months run worksheet + review + payment preview in one request.
+// Keep enough headroom so enrichment can degrade instead of blanking the page.
+export const maxDuration = 120;
+
+async function settleEnrichment<T>(work: Promise<T>, fallback: T, label: string, timeoutMs = 0) {
+  const timed = timeoutMs > 0
+    ? Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        setTimeout(() => {
+          console.error(`[workforce-payouts] ${label} timed out after ${timeoutMs}ms`);
+          if (fallback && typeof fallback === "object" && "error" in (fallback as object)) {
+            resolve({ ...(fallback as object), error: `${label} timed out. Showing the worksheet without that enrichment.` } as T);
+            return;
+          }
+          resolve(fallback);
+        }, timeoutMs);
+      })
+    ])
+    : work;
+  try {
+    return await timed;
+  } catch (caught) {
+    const detail = caught instanceof Error ? caught.message : "unexpected failure";
+    console.error(`[workforce-payouts] ${label} failed:`, detail);
+    if (fallback && typeof fallback === "object" && "error" in (fallback as object)) {
+      return { ...(fallback as object), error: `${label} unavailable. ${detail}` } as T;
+    }
+    return fallback;
+  }
+}
 
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const period = resolvePeriod(searchParams);
@@ -780,39 +811,60 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && authorization.hasAllLocationAccess
     && period.mode === "monthly"
     && period.fromDate === `${period.month}-01`;
+  const emptyUnlocks = {
+    unlocks: [] as WorkforcePayoutMappingUnlock[],
+    impactedWorkforceIds: new Set<string>(),
+    error: null as string | null
+  };
   const [loaded, mappingLocks, bankResult, stationReleases, financeRequests] = await Promise.all([
-    audience === "helpers"
-      ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
-        .then((result) => ({ ...result, dependencyHash: "" }))
-      : loadStablePayoutWorksheet({
-        loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
-        loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate),
-        allowProvisionalOnChurn: true
-      }),
-    canManageMappingLocks
-      ? loadOpenMappingUnlocks(companyId, period.fromDate, period.toDate)
-      : Promise.resolve({
-        unlocks: [] as WorkforcePayoutMappingUnlock[],
-        impactedWorkforceIds: new Set<string>(),
-        error: null as string | null
-      }),
-    loadWorkforcePayoutBanks(companyId, canProcessPayments),
-    period.mode === "monthly"
-      ? loadWorkforceStationReleaseStates({
-        companyId,
-        audience,
-        periodStart: period.fromDate,
-        periodEnd: period.toDate
-      })
-      : Promise.resolve({ releases: [], error: null as string | null }),
-    period.mode === "monthly"
-      ? loadWorkforceStationFinanceRequests({
-        companyId,
-        audience,
-        periodStart: period.fromDate,
-        periodEnd: period.toDate
-      })
-      : Promise.resolve({ requests: [], error: null as string | null })
+    settleEnrichment(
+      audience === "helpers"
+        ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
+          .then((result) => ({ ...result, dependencyHash: "" as string | null }))
+        : loadStablePayoutWorksheet({
+          loadRows: () => loadWorkforcePayoutRows(companyId, authorization, period.fromDate, period.toDate),
+          loadDependency: () => workforcePayoutDependencyHash(companyId, period.fromDate, period.toDate),
+          allowProvisionalOnChurn: true
+        }),
+      { rows: [] as WorkforcePayoutRow[], error: "Payout worksheet unavailable.", dependencyHash: null as string | null },
+      "Worksheet"
+    ),
+    settleEnrichment(
+      canManageMappingLocks
+        ? loadOpenMappingUnlocks(companyId, period.fromDate, period.toDate)
+        : Promise.resolve(emptyUnlocks),
+      emptyUnlocks,
+      "Mapping unlocks"
+    ),
+    settleEnrichment(
+      loadWorkforcePayoutBanks(companyId, canProcessPayments),
+      { banks: [] as Awaited<ReturnType<typeof loadWorkforcePayoutBanks>>["banks"], error: null as string | null },
+      "Bank catalogue"
+    ),
+    settleEnrichment(
+      period.mode === "monthly"
+        ? loadWorkforceStationReleaseStates({
+          companyId,
+          audience,
+          periodStart: period.fromDate,
+          periodEnd: period.toDate
+        })
+        : Promise.resolve({ releases: [], error: null as string | null }),
+      { releases: [], error: null as string | null },
+      "Station releases"
+    ),
+    settleEnrichment(
+      period.mode === "monthly"
+        ? loadWorkforceStationFinanceRequests({
+          companyId,
+          audience,
+          periodStart: period.fromDate,
+          periodEnd: period.toDate
+        })
+        : Promise.resolve({ requests: [], error: null as string | null }),
+      { requests: [], error: null as string | null },
+      "Finance requests"
+    )
   ]);
   const provisional = audience === "workforce"
     && isProvisionalPayoutDependencyHash(loaded.dependencyHash);
@@ -820,22 +872,34 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     ? loaded.error || mappingLocks.error || "Payout worksheet version is unavailable."
     : null;
   const [reviewed, paymentEnriched] = await Promise.all([
-    loadError
-      ? Promise.resolve({ rows: loaded.rows, error: loadError })
-      : withPayoutReviewStatuses(
-        companyId,
-        audience,
-        period.fromDate,
-        period.toDate,
-        loaded.rows,
-        audience === "workforce" ? loaded.dependencyHash ?? "" : "",
-        mappingLocks.impactedWorkforceIds
-      ),
-    loadError || !canLoadPaymentSummaries
-      ? Promise.resolve({ rows: loaded.rows, error: loadError })
-      : withPayoutPaymentSummaries(companyId, audience, period.fromDate, period.toDate, loaded.rows, {
-        includeProcessingActionDetails: canProcessPayments
-      })
+    settleEnrichment(
+      loadError
+        ? Promise.resolve({ rows: loaded.rows, error: loadError })
+        : withPayoutReviewStatuses(
+          companyId,
+          audience,
+          period.fromDate,
+          period.toDate,
+          loaded.rows,
+          audience === "workforce" ? loaded.dependencyHash ?? "" : "",
+          mappingLocks.impactedWorkforceIds
+        ),
+      { rows: loaded.rows, error: loadError || "Review status unavailable." },
+      "Review status",
+      45000
+    ),
+    settleEnrichment(
+      loadError || !canLoadPaymentSummaries
+        ? Promise.resolve({ rows: loaded.rows, error: loadError })
+        : withPayoutPaymentSummaries(companyId, audience, period.fromDate, period.toDate, loaded.rows, {
+          // Exact processing-item actions are optional. Skip on large closed
+          // months so the worksheet can still render within the route budget.
+          includeProcessingActionDetails: canProcessPayments && loaded.rows.length <= 400
+        }),
+      { rows: loaded.rows, error: loadError || "Payment status unavailable." },
+      "Payment status",
+      45000
+    )
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
   const publicationSelfHealRows = audience === "workforce"
@@ -863,17 +927,21 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       ? mergeWorkforcePayoutPaymentState(row, paymentRow, audience)
       : row;
   });
-  const sourceHeld = loadError || !canLoadPaymentSummaries
-    ? { rows: reviewedPaymentRows, error: loadError }
-    : await withPayoutSourcePaymentHolds(
-      companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows
-    );
+  const sourceHeld = await settleEnrichment(
+    loadError || !canLoadPaymentSummaries
+      ? Promise.resolve({ rows: reviewedPaymentRows, error: loadError })
+      : withPayoutSourcePaymentHolds(
+        companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows
+      ),
+    { rows: reviewedPaymentRows, error: loadError || "Source payment holds unavailable." },
+    "Source holds"
+  );
   const rows = sourceHeld.rows;
-  // Worksheet + review are required. Payment preview, source holds and bank
-  // catalogue are enrichment: their failure must not blank the page or force
-  // another full recalculation just to inspect stations.
-  const error = reviewed.error;
+  // Worksheet rows are required. Review/payment/bank enrichment must degrade to a
+  // warning when they fail so a heavy closed month cannot blank the page.
+  const error = loaded.rows.length ? null : (loadError || reviewed.error);
   const lifecycleWarning = [
+    loaded.rows.length ? reviewed.error : null,
     paymentEnriched.error,
     sourceHeld.error,
     bankResult.error,
