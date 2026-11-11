@@ -188,9 +188,14 @@ export function isWorkforcePayoutPaymentBalanceAvailable(
 
 export function workforcePayoutPaymentEligibilityLabel(
   summary: Pick<WorkforcePayoutPaymentSummary, "eligible" | "eligibilityCode">
+    & Partial<Pick<WorkforcePayoutPaymentSummary, "eligibilityMessage">>
 ) {
   if (summary.eligible !== false) return null;
-  switch (String(summary.eligibilityCode ?? "").trim().toLowerCase()) {
+  const code = String(summary.eligibilityCode ?? "").trim().toLowerCase();
+  if (code === "payment_processing") return null;
+  const message = summary.eligibilityMessage?.trim();
+  if (message) return message;
+  switch (code) {
     case "publication_refresh_pending":
       return "Publication refresh pending";
     case "publication_missing":
@@ -212,8 +217,6 @@ export function workforcePayoutPaymentEligibilityLabel(
       return "Payment details required";
     case "current_location_missing":
       return "Current location required";
-    case "payment_processing":
-      return null;
     case "payment_on_hold":
       return "Payment on hold";
     case "payout_dispute_open":

@@ -394,6 +394,14 @@ test("stale and pending publications expose an unavailable balance with an actio
   const stale = { eligible: false, eligibilityCode: "publication_stale_or_incomplete" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(stale), false);
   assert.equal(workforcePayoutPaymentEligibilityLabel(stale), "Republish required");
+  assert.equal(workforcePayoutPaymentEligibilityLabel({
+    ...stale, eligibilityMessage: "KANA · Route distance pending"
+  }), "KANA · Route distance pending");
+  assert.equal(workforcePayoutPaymentEligibilityLabel({
+    eligible: false,
+    eligibilityCode: "payment_history_allocation_reassignment_required",
+    eligibilityMessage: "Reassign the payment history to the current locations."
+  }), "Reassign the payment history to the current locations.");
 
   const pending = { eligible: false, eligibilityCode: "publication_refresh_pending" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(pending), false);
