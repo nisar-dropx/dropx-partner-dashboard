@@ -28,6 +28,10 @@ import { WorkforcePayoutChecks } from "@/components/workforce-payout-checks";
 import { WorkforcePayoutStationBoard } from "@/components/workforce-payout-station-board";
 import { loadPayoutPaymentPreviews } from "@/lib/payout-payment-preview-batching";
 import {
+  loadWorkforceStationFinanceRequests,
+  loadWorkforceStationReleaseStates
+} from "@/lib/workforce-payout-station-finance";
+import {
   mergeWorkforcePayoutPaymentState,
   workforcePayoutPublicationRefreshPending,
   type WorkforcePayoutPaymentSummary
@@ -748,11 +752,12 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
-  // Ops has its own Workforce Payouts page permission and does not expose the
-  // Finance-only Payment Process page. Keep that extra permission on the other
-  // surfaces, while allowing Ops editors to use the mirrored payment actions.
-  const canUsePaymentActions = accessSurface === "ops"
-    || hasPermission(authorization, "payment_process", "edit");
+  // Bank download and enquiry live on Finance after station confirmation.
+  // Ops confirms stations and sends them to Finance; it does not issue bank files.
+  const canUsePaymentActions = accessSurface !== "ops"
+    && (hasPermission(authorization, "payment_process", "edit")
+      || accessSurface === "finance"
+      || accessSurface === "dashboard");
   // Payout rows and every submitted row identity are already restricted to the
   // signed-in user's locations. Location scope must not turn a page editor into
   // a viewer; the mutation endpoints independently recheck the same boundary.
@@ -760,6 +765,12 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && canEdit
     && canUsePaymentActions
     && !authorization.readOnly;
+  const canConfirmStations = period.mode === "monthly" && canEdit && !authorization.readOnly;
+  const canSubmitFinance = canConfirmStations;
+  const canDecideFinance = period.mode === "monthly"
+    && !authorization.readOnly
+    && accessSurface !== "ops"
+    && (hasPermission(authorization, "payment_process", "edit") || accessSurface === "finance");
   // Payment lifecycle is read-only worksheet data. Every authorised viewer
   // must see Paid / Partially Paid / Processing, while the sensitive action
   // identifiers below remain restricted by includeProcessingActionDetails.
@@ -769,7 +780,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && authorization.hasAllLocationAccess
     && period.mode === "monthly"
     && period.fromDate === `${period.month}-01`;
-  const [loaded, mappingLocks, bankResult] = await Promise.all([
+  const [loaded, mappingLocks, bankResult, stationReleases, financeRequests] = await Promise.all([
     audience === "helpers"
       ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
         .then((result) => ({ ...result, dependencyHash: "" }))
@@ -785,7 +796,23 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         impactedWorkforceIds: new Set<string>(),
         error: null as string | null
       }),
-    loadWorkforcePayoutBanks(companyId, canProcessPayments)
+    loadWorkforcePayoutBanks(companyId, canProcessPayments),
+    period.mode === "monthly"
+      ? loadWorkforceStationReleaseStates({
+        companyId,
+        audience,
+        periodStart: period.fromDate,
+        periodEnd: period.toDate
+      })
+      : Promise.resolve({ releases: [], error: null as string | null }),
+    period.mode === "monthly"
+      ? loadWorkforceStationFinanceRequests({
+        companyId,
+        audience,
+        periodStart: period.fromDate,
+        periodEnd: period.toDate
+      })
+      : Promise.resolve({ requests: [], error: null as string | null })
   ]);
   const provisional = audience === "workforce"
     && isProvisionalPayoutDependencyHash(loaded.dependencyHash);
@@ -846,10 +873,21 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   // catalogue are enrichment: their failure must not blank the page or force
   // another full recalculation just to inspect stations.
   const error = reviewed.error;
-  const lifecycleWarning = [paymentEnriched.error, sourceHeld.error, bankResult.error]
+  const lifecycleWarning = [
+    paymentEnriched.error,
+    sourceHeld.error,
+    bankResult.error,
+    stationReleases.error,
+    financeRequests.error
+  ]
     .filter((message): message is string => Boolean(message))
     .filter((message, index, list) => list.indexOf(message) === index)
     .join(" ");
+  const releaseByStation = new Map(stationReleases.releases.map((row) => [row.stationId.toLowerCase(), row]));
+  const financeRequestRows = financeRequests.requests.map((request) => ({
+    ...request,
+    changed: releaseByStation.get(request.stationId.toLowerCase())?.worksheetHash !== request.worksheetHash
+  }));
   const advancePageCode = accessSurface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
@@ -891,6 +929,14 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
             rows={rows}
             paymentReleaseHref={paymentReleaseHref}
             lifecycleWarning={lifecycleWarning || null}
+            audience={audience}
+            periodStart={period.fromDate}
+            periodEnd={period.toDate}
+            canConfirmStations={canConfirmStations}
+            canSubmitFinance={canSubmitFinance}
+            canDecideFinance={canDecideFinance}
+            releases={stationReleases.releases}
+            financeRequests={financeRequestRows}
             renderWorksheet={({ locations, onLocationsChange }) => <section className="panel">
               <div className="panel-head payout-period-head">
                 <h2>{period.title}</h2>

@@ -8,6 +8,7 @@ import { getAuthorization, hasPermission, type AuthorizationContext } from "@/li
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { buildWorkforceFedOneWorkbook } from "@/lib/workforce-payout-bank-file";
+import { assertWorkforceStationsFinanceReady } from "@/lib/workforce-payout-station-finance";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -123,8 +124,13 @@ async function authorize(audience: PayoutAudience) {
   const authorization = await getAuthorization();
   if (!authorization) return { error: errorResponse(`Sign in to re-download ${label} bank files.`, 401) } as const;
   const accessSurface = currentAdminAccessSurface();
-  const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-  const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+  if (accessSurface === "ops") {
+    return { error: errorResponse("Re-download bank files from Finance after station confirmation and Finance approval.", 403) } as const;
+  }
+  const payoutPageCode = "workforce_payouts";
+  const canUsePaymentActions = hasPermission(authorization, "payment_process", "edit")
+    || accessSurface === "finance"
+    || accessSurface === "dashboard";
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
   }
@@ -228,6 +234,17 @@ export async function POST(request: Request) {
 
     const groups = new Map<string, RedownloadItem[]>();
     await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id)), periodStart.slice(0, 7), audience);
+    try {
+      await assertWorkforceStationsFinanceReady({
+        companyId: access.companyId,
+        audience,
+        periodStart,
+        periodEnd,
+        stationIds: items.map((item) => String(item.location_id))
+      });
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : "Station Finance approval is required before bank download.", 409);
+    }
     items.forEach((item) => {
       const batchId = String(item.batch_id ?? "").trim().toLowerCase();
       if (!UUID.test(batchId) || !UUID.test(String(item.payment_item_id ?? ""))) {

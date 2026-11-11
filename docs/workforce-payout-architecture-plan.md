@@ -58,11 +58,11 @@ Enquiry upload should create an import record containing file hash, operation id
 ## Delivery sequence
 
 1. Instrument query timings, row counts, RPC duration, timeout/retry, and database error class (no personal or bank values in logs).
-2. Ship the station review UI and read-only summary that filters the worksheet station-by-station, and degrade payment-preview failures instead of blanking the page (**this change**).
-3. Add the station review table/RPC (`workforce_payout_station_releases` patterned on `hr_payroll_station_releases`) and Finance handoff RPCs in the shared Supabase project, one migration at a time with repeat tests.
-4. Move authoritative bank download + enquiry upload UX fully onto Finance Workforce Payouts; Ops keeps station review, publish, and loss-clearance entry points.
-5. Convert enquiry processing to resumable batches and add an import diagnostics download.
-6. Move expensive payout detail and evidence behind lazy expansion; add load tests for 1, 5, 25, and 100 stations.
+2. Station review UI filters the worksheet station-by-station and degrades payment-preview failures instead of blanking the page.
+3. Station release + Finance handoff migration/RPCs: `20261111180000_workforce_payout_station_finance_handoff.sql` (apply alone to shared Supabase).
+4. Ops confirms/reopens/sends stations; Finance approves/returns; bank download + enquiry are Finance-only and require Finance approval + loss clearance.
+5. Enquiry processing is resumable in ≤20-row batches via `workforce_payout_enquiry_imports` with client resume polling.
+6. Next: move expensive payout detail/evidence behind lazy expansion; add load tests for 1, 5, 25, and 100 stations; export enquiry diagnostics workbook.
 
 ## Acceptance checks
 

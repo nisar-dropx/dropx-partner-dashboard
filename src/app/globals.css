@@ -23880,7 +23880,9 @@ td strong,
 }
 .workforce-station-card {
   display: grid;
-  gap: 2px;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
   width: 100%;
   min-height: 84px;
   padding: 10px 12px;
@@ -23889,7 +23891,32 @@ td strong,
   background: #fff;
   color: inherit;
   text-align: left;
+}
+.workforce-station-card-main {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
+}
+.workforce-station-pick {
+  display: inline-flex;
+  margin-top: 2px;
+}
+.workforce-station-workflow,
+.workforce-station-finance-decide {
+  display: grid;
+  gap: 8px;
+}
+.workforce-station-finance-decide label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
 }
 .workforce-station-card strong {
   font-size: 13px;
@@ -23919,6 +23946,9 @@ td strong,
   border-color: #e7b08a;
   background: #fff8f3;
   box-shadow: inset 0 0 0 1px #e7b08a;
+}
+.workforce-station-card.is-released {
+  border-color: #cfe8da;
 }
 .workforce-station-hint { margin: 0; }
 .payout-page-titlebar {

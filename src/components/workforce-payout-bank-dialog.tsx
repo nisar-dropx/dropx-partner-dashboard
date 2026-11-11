@@ -171,14 +171,25 @@ export function WorkforcePayoutBankDialog({
       body.set("audience", audience);
       body.set("bank_response_file", responseFile);
       body.set("operation_id", responseOperationIdRef.current);
-      const response = await fetch("/api/payments/workforce-payouts/bank-response", { method: "POST", body });
+      let response = await fetch("/api/payments/workforce-payouts/bank-response", { method: "POST", body });
       if (!response.ok) throw new Error(await responseError(response, `Unable to finalize the ${subjectLabel} bank response.`));
-      const payload = await response.json();
+      let payload = await response.json() as Record<string, unknown>;
+      while (payload.resumable === true && payload.done !== true && payload.importId) {
+        setNotice(`Processing enquiry… ${Number(payload.cursorRow ?? 0).toLocaleString("en-IN")} of ${Number(payload.totalRows ?? 0).toLocaleString("en-IN")} rows.`);
+        response = await fetch("/api/payments/workforce-payouts/bank-response", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ importId: payload.importId })
+        });
+        if (!response.ok) throw new Error(await responseError(response, `Unable to resume the ${subjectLabel} bank enquiry.`));
+        payload = await response.json() as Record<string, unknown>;
+      }
       responseOperationIdRef.current = "";
       setResponseFile(null);
       const finalizedCount = Number(payload.paid ?? 0) + Number(payload.cancelled ?? 0);
       const unresolvedCount = Number(payload.rejected ?? 0) + Number(payload.unknown ?? 0);
       const skippedCount = Number(payload.skipped ?? 0);
+      const alreadyCount = Number(payload.already ?? 0);
       const issueSummary = Array.isArray(payload.rows)
         ? payload.rows
           .filter((row: Record<string, unknown>) => ["rejected", "unknown"].includes(String(row?.outcome ?? "")))
@@ -187,7 +198,7 @@ export function WorkforcePayoutBankDialog({
           .join("; ")
         : "";
       setNotice(
-        `Finalized ${Number(payload.paid ?? 0)} paid and ${Number(payload.cancelled ?? 0)} cancelled payment${finalizedCount === 1 ? "" : "s"}.${skippedCount ? ` Skipped ${skippedCount} unrelated bank reference${skippedCount === 1 ? "" : "s"}.` : ""}${unresolvedCount ? ` ${unresolvedCount} DropX response row${unresolvedCount === 1 ? " was" : "s were"} not finalized; correct those rows and upload a new response file.${issueSummary ? ` ${issueSummary}` : ""}` : ""}`
+        `Finalized ${Number(payload.paid ?? 0)} paid and ${Number(payload.cancelled ?? 0)} cancelled payment${finalizedCount === 1 ? "" : "s"}.${alreadyCount ? ` ${alreadyCount} already recorded.` : ""}${skippedCount ? ` Skipped ${skippedCount} unrelated bank reference${skippedCount === 1 ? "" : "s"}.` : ""}${unresolvedCount ? ` ${unresolvedCount} DropX response row${unresolvedCount === 1 ? " was" : "s were"} not finalized; correct those rows and upload a new response file.${issueSummary ? ` ${issueSummary}` : ""}` : ""}`
       );
       router.refresh();
     } catch (caught) {

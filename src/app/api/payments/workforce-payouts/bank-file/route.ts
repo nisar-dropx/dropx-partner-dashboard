@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { assertPaymentRelease } from "@/lib/payment-release-access";
+import { assertWorkforceStationsFinanceReady } from "@/lib/workforce-payout-station-finance";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
@@ -163,8 +164,13 @@ async function authorize(audience: PayoutAudience) {
   const authorization = await getAuthorization();
   if (!authorization) return { error: errorResponse(`Sign in to process ${label} payments.`, 401) } as const;
   const accessSurface = currentAdminAccessSurface();
-  const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-  const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+  if (accessSurface === "ops") {
+    return { error: errorResponse("Download bank files from Finance after station confirmation and Finance approval.", 403) } as const;
+  }
+  const payoutPageCode = "workforce_payouts";
+  const canUsePaymentActions = hasPermission(authorization, "payment_process", "edit")
+    || accessSurface === "finance"
+    || accessSurface === "dashboard";
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
   }
@@ -266,6 +272,17 @@ export async function GET(request: Request) {
       return errorResponse("This payment batch includes a location outside your location scope.", 403);
     }
     await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id_snapshot)), String(batch.period_start).slice(0, 7), audience);
+    try {
+      await assertWorkforceStationsFinanceReady({
+        companyId: access.companyId,
+        audience,
+        periodStart: String(batch.period_start).slice(0, 10),
+        periodEnd: String(batch.period_end).slice(0, 10),
+        stationIds: items.map((item) => String(item.location_id_snapshot))
+      });
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : "Station Finance approval is required before bank download.", 409);
+    }
     return workbookResponse({
       batch_id: batch.id,
       period_start: batch.period_start,
@@ -329,6 +346,17 @@ export async function POST(request: Request) {
     );
     if (scopeError) return scopeError;
     await assertPaymentRelease(access.companyId, payoutRows.map(row => row.stationId), periodStart.slice(0, 7), audience);
+    try {
+      await assertWorkforceStationsFinanceReady({
+        companyId: access.companyId,
+        audience,
+        periodStart,
+        periodEnd,
+        stationIds: payoutRows.map((row) => row.stationId)
+      });
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : "Station Finance approval is required before bank download.", 409);
+    }
 
     // Idempotency belongs to the user's normalized request, not to the live
     // calculation snapshot used by the first-execution safety gate. Keep this

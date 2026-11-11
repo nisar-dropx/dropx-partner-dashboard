@@ -29,7 +29,9 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /sameOrigin\(request\)/);
   assert.match(bankFileRoute, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(bankFileRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(bankFileRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankFileRoute, /accessSurface === "ops"/);
+  assert.match(bankFileRoute, /Download bank files from Finance after station confirmation and Finance approval/);
+  assert.match(bankFileRoute, /assertWorkforceStationsFinanceReady/);
   assert.match(bankFileRoute, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(bankFileRoute, /authorization\.hasAllLocationAccess/);
   assert.doesNotMatch(bankFileRoute, /bank processing requires all-location access/i);
@@ -132,7 +134,9 @@ test("bank response import is privileged, bounded and subset-hash idempotent", (
   assert.match(bankResponseRoute, /sameOrigin\(request\)/);
   assert.match(bankResponseRoute, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(bankResponseRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(bankResponseRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(bankResponseRoute, /Upload bank enquiry files from Finance after station confirmation and Finance approval/);
+  assert.match(bankResponseRoute, /workforce_payout_enquiry_import_begin/);
+  assert.match(bankResponseRoute, /workforce_payout_enquiry_import_process/);
   assert.match(bankResponseRoute, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(bankResponseRoute, /authorization\.hasAllLocationAccess/);
   assert.doesNotMatch(bankResponseRoute, /bank finalization requires all-location access/i);
@@ -167,12 +171,13 @@ test("bank response import is privileged, bounded and subset-hash idempotent", (
   assert.match(bankResponseRoute, /from\(lookup\.table\)[\s\S]*?\.eq\("company_id", companyId\)[\s\S]*?\.in\("reference_no", lookup\.references\)/);
   assert.match(bankResponseRoute, /parsePreparedDropxFedOneResponse\(prepared, ownedReferences, rowReferenceAliases\)/);
   assert.match(bankResponseRoute, /rpc\("finalize_owned_payout_payment_response"/);
-  assert.match(bankResponseRoute, /p_workforce_rows: normalizedRows\(parsed\.workforceRows\)/);
-  assert.match(bankResponseRoute, /p_helper_rows: normalizedRows\(parsed\.helperRows\)/);
+  assert.match(bankResponseRoute, /normalizedRows\(parsed\.workforceRows\)\.map\(\(row\) => \(\{ \.\.\.row, audience: "workforce" \}\)\)/);
+  assert.match(bankResponseRoute, /normalizedRows\(parsed\.helperRows\)\.map\(\(row\) => \(\{ \.\.\.row, audience: "helpers" \}\)\)/);
   assert.match(bankResponseRoute, /skipped: parsed\.skippedRows\.length/);
   assert.match(bankResponseRoute, /skipped: responseRowCount/);
   assert.match(bankDialog, /Matching Workforce and Helper references are finalized together from either tab/);
   assert.match(bankDialog, /Skipped \$\{skippedCount\} unrelated bank reference/);
+  assert.match(bankDialog, /method: "PUT"/);
 });
 
 test("bank response import identity is stable per permitted mixed subset and distinct across subsets", () => {
@@ -378,11 +383,15 @@ test("selected processing rows can be cancelled atomically with one mandatory re
 test("the UI pays only eligible location rows and displays row-specific ledger balances", () => {
   assert.match(page, /"helper_preview_payout_payment_rows"[\s\S]{0,100}"workforce_preview_payout_payment_rows"/);
   assert.match(page, /`\$\{String\(preview\.workforce_id\)\.toLowerCase\(\)\}\|\$\{String\(preview\.station_id\)\.toLowerCase\(\)\}`/);
-  assert.match(page, /const canLoadPaymentSummaries = period\.mode === "monthly"[\s\S]*?&& canEdit/);
+  assert.match(page, /const canLoadPaymentSummaries = period\.mode === "monthly"/);
   assert.match(page, /loadError \|\| !canLoadPaymentSummaries/);
   assert.match(page, /includeProcessingActionDetails: canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
-  assert.match(page, /const canUsePaymentActions = accessSurface === "ops"[\s\S]*?hasPermission\(authorization, "payment_process", "edit"\)/);
+  assert.match(page, /const canUsePaymentActions = accessSurface !== "ops"/);
+  assert.match(page, /canConfirmStations/);
+  assert.match(page, /canDecideFinance/);
+  assert.match(page, /loadWorkforceStationReleaseStates/);
+  assert.match(page, /loadWorkforceStationFinanceRequests/);
   const paymentPermissionBlock = page.slice(
     page.indexOf("const canProcessPayments"),
     page.indexOf("const canLoadPaymentSummaries")

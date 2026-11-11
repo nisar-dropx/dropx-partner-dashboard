@@ -3,6 +3,10 @@
 import { useState, type ReactNode } from "react";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { WorkforcePayoutStationReview } from "@/components/workforce-payout-station-review";
+import type {
+  WorkforceStationFinanceRequest,
+  WorkforceStationReleaseState
+} from "@/lib/workforce-payout-station-finance-types";
 
 /**
  * Owns the station→worksheet location filter so station review and the payout
@@ -12,11 +16,27 @@ export function WorkforcePayoutStationBoard({
   rows,
   paymentReleaseHref,
   lifecycleWarning,
+  audience,
+  periodStart,
+  periodEnd,
+  canConfirmStations,
+  canSubmitFinance,
+  canDecideFinance,
+  releases,
+  financeRequests,
   renderWorksheet
 }: {
   rows: WorkforcePayoutRow[];
   paymentReleaseHref?: string | null;
   lifecycleWarning?: string | null;
+  audience: "workforce" | "helpers";
+  periodStart: string;
+  periodEnd: string;
+  canConfirmStations: boolean;
+  canSubmitFinance: boolean;
+  canDecideFinance: boolean;
+  releases: WorkforceStationReleaseState[];
+  financeRequests: WorkforceStationFinanceRequest[];
   renderWorksheet: (api: {
     locations: string[];
     onLocationsChange: (locations: string[]) => void;
@@ -30,6 +50,14 @@ export function WorkforcePayoutStationBoard({
       selectedStations={locations}
       onSelectedStationsChange={setLocations}
       paymentReleaseHref={paymentReleaseHref}
+      audience={audience}
+      periodStart={periodStart}
+      periodEnd={periodEnd}
+      canConfirmStations={canConfirmStations}
+      canSubmitFinance={canSubmitFinance}
+      canDecideFinance={canDecideFinance}
+      releases={releases}
+      financeRequests={financeRequests}
     />
     {lifecycleWarning
       ? <section className="panel message-panel warn" role="status">

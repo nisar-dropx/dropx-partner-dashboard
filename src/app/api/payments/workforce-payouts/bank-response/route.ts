@@ -192,8 +192,13 @@ export async function POST(request: Request) {
     const authorization = await getAuthorization();
     if (!authorization) return errorResponse("Sign in to finalize Workforce payments.", 401);
     const accessSurface = currentAdminAccessSurface();
-    const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
-    const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+    if (accessSurface === "ops") {
+      return errorResponse("Upload bank enquiry files from Finance after station confirmation and Finance approval.", 403);
+    }
+    const payoutPageCode = "workforce_payouts";
+    const canUsePaymentActions = hasPermission(authorization, "payment_process", "edit")
+      || accessSurface === "finance"
+      || accessSurface === "dashboard";
     if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
       return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
@@ -260,28 +265,119 @@ export async function POST(request: Request) {
       hasAllLocationAccess: authorization.hasAllLocationAccess,
       includedReferences: ownedReferences
     });
-    const rpcBase = {
-      p_company_id: companyId,
-      p_actor_user_id: authorization.userId,
-      p_operation_id: operationId,
+    const workforceRows = normalizedRows(parsed.workforceRows).map((row) => ({ ...row, audience: "workforce" }));
+    const helperRows = normalizedRows(parsed.helperRows).map((row) => ({ ...row, audience: "helpers" }));
+    const begun = await supabaseAdmin.rpc("workforce_payout_enquiry_import_begin", {
+      p_company: companyId,
+      p_actor: authorization.userId,
+      p_operation: operationId,
       p_file_sha256: importIdentity,
-      p_file_name: file.name.slice(0, 240)
-    };
-    // The same Federal Bank response can contain Workforce, Helper and unrelated
-    // company payments. One database transaction finalizes both owned ledgers,
-    // regardless of which payout tab opened the dialog.
-    const finalized = await supabaseAdmin.rpc("finalize_owned_payout_payment_response", {
-      ...rpcBase,
-      p_workforce_rows: normalizedRows(parsed.workforceRows),
-      p_helper_rows: normalizedRows(parsed.helperRows)
+      p_file_name: file.name.slice(0, 240),
+      p_workforce_rows: workforceRows,
+      p_helper_rows: helperRows
     });
-    if (finalized.error) return errorResponse(finalized.error.message, databaseStatus(finalized.error.message));
+    if (begun.error) {
+      // Migration not applied yet: fall back to the existing atomic finalizer.
+      if (/workforce_payout_enquiry_import_begin|schema cache|does not exist/i.test(begun.error.message)) {
+        const finalized = await supabaseAdmin.rpc("finalize_owned_payout_payment_response", {
+          p_company_id: companyId,
+          p_actor_user_id: authorization.userId,
+          p_operation_id: operationId,
+          p_file_sha256: importIdentity,
+          p_file_name: file.name.slice(0, 240),
+          p_workforce_rows: workforceRows,
+          p_helper_rows: helperRows
+        });
+        if (finalized.error) return errorResponse(finalized.error.message, databaseStatus(finalized.error.message));
+        return Response.json({
+          ...resultRecord(finalized.data),
+          skipped: parsed.skippedRows.length,
+          resumable: false
+        }, { headers: noStore });
+      }
+      return errorResponse(begun.error.message, databaseStatus(begun.error.message));
+    }
+
+    const importId = String(resultRecord(begun.data).id ?? "");
+    const deadline = Date.now() + 240_000;
+    let latest = resultRecord(begun.data);
+    while (!latest.done && Date.now() < deadline) {
+      const processed = await supabaseAdmin.rpc("workforce_payout_enquiry_import_process", {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_import: importId,
+        p_limit: 20
+      });
+      if (processed.error) return errorResponse(processed.error.message, databaseStatus(processed.error.message));
+      latest = resultRecord(processed.data);
+      if (latest.done) break;
+    }
+
     return Response.json({
-      ...resultRecord(finalized.data),
-      skipped: parsed.skippedRows.length
+      importId,
+      status: latest.status,
+      paid: Number(latest.updatedCount ?? 0),
+      cancelled: 0,
+      rejected: Number(latest.attentionCount ?? 0),
+      unknown: Number(latest.unmatchedCount ?? 0),
+      already: Number(latest.alreadyCount ?? 0),
+      cursorRow: Number(latest.cursorRow ?? 0),
+      totalRows: Number(latest.totalRows ?? 0),
+      done: latest.done === true,
+      skipped: parsed.skippedRows.length,
+      resumable: true,
+      rows: []
     }, { headers: noStore });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to finalize the Workforce bank response.";
     return errorResponse(message, /cannot be processed|headers|worksheet|response rows|payment references|duplicate/i.test(message) ? 400 : 500);
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    if (!sameOrigin(request)) return errorResponse("Invalid request origin.", 403);
+    const authorization = await getAuthorization();
+    if (!authorization) return errorResponse("Sign in to resume Workforce bank enquiry processing.", 401);
+    const accessSurface = currentAdminAccessSurface();
+    if (accessSurface === "ops") {
+      return errorResponse("Resume bank enquiry processing from Finance.", 403);
+    }
+    if (authorization.readOnly || !hasPermission(authorization, "workforce_payouts", "edit")) {
+      return errorResponse("Edit access to Workforce Payouts is required.", 403);
+    }
+    if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
+    const companyId = requireCompanyId(authorization);
+    const body = await request.json() as Record<string, unknown>;
+    const importId = String(body.importId ?? "").trim().toLowerCase();
+    if (!UUID.test(importId)) return errorResponse("A valid enquiry import ID is required.", 400);
+    const deadline = Date.now() + 240_000;
+    let latest: Record<string, unknown> = { done: false };
+    while (Date.now() < deadline) {
+      const processed = await supabaseAdmin.rpc("workforce_payout_enquiry_import_process", {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_import: importId,
+        p_limit: 20
+      });
+      if (processed.error) return errorResponse(processed.error.message, databaseStatus(processed.error.message));
+      latest = resultRecord(processed.data);
+      if (latest.done) break;
+    }
+    return Response.json({
+      importId,
+      status: latest.status,
+      paid: Number(latest.updatedCount ?? 0),
+      cancelled: 0,
+      rejected: Number(latest.attentionCount ?? 0),
+      unknown: Number(latest.unmatchedCount ?? 0),
+      already: Number(latest.alreadyCount ?? 0),
+      cursorRow: Number(latest.cursorRow ?? 0),
+      totalRows: Number(latest.totalRows ?? 0),
+      done: latest.done === true,
+      resumable: true
+    }, { headers: noStore });
+  } catch (error) {
+    return errorResponse(error instanceof Error ? error.message : "Unable to resume bank enquiry processing.", 400);
   }
 }

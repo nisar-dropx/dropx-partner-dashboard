@@ -572,6 +572,21 @@ for every gate, so a wider list never gives anyone extra approval rights.
 - **Data quality.** Amazon assigned counts remain unavailable from source files. Flipkart assigned counts
   are imported. Scorecard shows delivery success % only when assigned > 0.
 
+## Workforce station Finance handoff — 11 November 2026
+
+Ops confirms stations on Workforce Payouts, then sends them to Finance. Finance
+approves or returns each station, then downloads the bank file and uploads the
+enquiry. Ops no longer issues Workforce/Helper bank files. Loss clearance remains
+a separate gate. Enquiry imports process in ≤20-row batches and can resume.
+
+Migration (apply alone after app tests):
+`supabase/migrations/20261111180000_workforce_payout_station_finance_handoff.sql`
+
+```text
+supabase db query --linked -f supabase/migrations/20261111180000_workforce_payout_station_finance_handoff.sql
+supabase migration repair --status applied 20261111180000 --linked
+```
+
 ## Migration runbook (shared Supabase — never blanket push)
 
 Apply one file at a time after tests pass:
