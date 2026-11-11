@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { assertPaymentRelease } from "@/lib/payment-release-access";
-import { assertWorkforceStationsFinanceReady } from "@/lib/workforce-payout-station-finance";
 
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
@@ -267,17 +266,6 @@ export async function GET(request: Request) {
       return errorResponse("This payment batch includes a location outside your location scope.", 403);
     }
     await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id_snapshot)), String(batch.period_start).slice(0, 7), audience);
-    try {
-      await assertWorkforceStationsFinanceReady({
-        companyId: access.companyId,
-        audience,
-        periodStart: String(batch.period_start).slice(0, 10),
-        periodEnd: String(batch.period_end).slice(0, 10),
-        stationIds: items.map((item) => String(item.location_id_snapshot))
-      });
-    } catch (error) {
-      return errorResponse(error instanceof Error ? error.message : "Station Finance approval is required before bank download.", 409);
-    }
     return workbookResponse({
       batch_id: batch.id,
       period_start: batch.period_start,
@@ -341,17 +329,6 @@ export async function POST(request: Request) {
     );
     if (scopeError) return scopeError;
     await assertPaymentRelease(access.companyId, payoutRows.map(row => row.stationId), periodStart.slice(0, 7), audience);
-    try {
-      await assertWorkforceStationsFinanceReady({
-        companyId: access.companyId,
-        audience,
-        periodStart,
-        periodEnd,
-        stationIds: payoutRows.map((row) => row.stationId)
-      });
-    } catch (error) {
-      return errorResponse(error instanceof Error ? error.message : "Station Finance approval is required before bank download.", 409);
-    }
 
     // Idempotency belongs to the user's normalized request, not to the live
     // calculation snapshot used by the first-execution safety gate. Keep this

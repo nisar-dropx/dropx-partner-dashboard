@@ -7,10 +7,8 @@ import { DEFAULT_PAYOUT_DISPUTE_HOURS, MAX_PAYOUT_DISPUTE_HOURS, PAYOUT_DISPUTE_
 import { groupWorkforceDeductionDisplay } from "@/lib/workforce-loss-recovery";
 import { isKilometreField, routePendingLabel, type DailyRouteFuel } from "@/lib/workforce-route-distance";
 import { ChevronDown, Search } from "lucide-react";
-import { useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { WorkforcePayoutLocationContext } from "@/components/workforce-payout-location-context";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useWorkforcePaymentStatus } from "@/components/use-workforce-payment-status";
-import { summarizeWorkforcePayoutStations } from "@/lib/workforce-payout-station-review";
 import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import {
@@ -446,11 +444,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState(initialSearch);
   const [uncontrolledLocations, setUncontrolledLocations] = useState<string[]>([]);
-  const stationScope = useContext(WorkforcePayoutLocationContext);
-  const updateStations = stationScope?.onStationsChange;
-  useEffect(() => { updateStations?.(summarizeWorkforcePayoutStations(rows)); }, [rows, updateStations]);
-  const locations = controlledLocations ?? stationScope?.locations ?? uncontrolledLocations;
-  const setLocations = onLocationsChange ?? stationScope?.onLocationsChange ?? setUncontrolledLocations;
+  const locations = controlledLocations ?? uncontrolledLocations;
+  const setLocations = onLocationsChange ?? setUncontrolledLocations;
   const [designations, setDesignations] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
   const [methods, setMethods] = useState<string[]>([]);

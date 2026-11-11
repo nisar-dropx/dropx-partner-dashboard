@@ -30,7 +30,7 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /hasPermission\(authorization, payoutPageCode, "edit"\)/);
   assert.match(bankFileRoute, /hasPermission\(authorization, "payment_process", "edit"\)/);
   assert.match(bankFileRoute, /accessSurface === "ops" \|\| hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(bankFileRoute, /assertWorkforceStationsFinanceReady/);
+  assert.doesNotMatch(bankFileRoute, /assertWorkforceStationsFinanceReady/);
   assert.match(bankFileRoute, /!hasPermission\(authorization, payoutPageCode, "edit"\) \|\| !canUsePaymentActions/);
   assert.match(bankFileRoute, /authorization\.hasAllLocationAccess/);
   assert.doesNotMatch(bankFileRoute, /bank processing requires all-location access/i);
@@ -388,10 +388,8 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
   assert.match(page, /const canUsePaymentActions = accessSurface === "ops"/);
   assert.match(page, /\|\| hasPermission\(authorization, "payment_process", "edit"\)/);
-  assert.match(page, /canConfirmStations/);
-  assert.match(page, /canDecideFinance/);
-  assert.match(page, /loadWorkforceStationReleaseStates/);
-  assert.match(page, /loadWorkforceStationFinanceRequests/);
+  assert.doesNotMatch(page, /canConfirmStations|canDecideFinance/);
+  assert.match(bankFileRoute, /await assertPaymentRelease\(/);
   const paymentPermissionBlock = page.slice(
     page.indexOf("const canProcessPayments"),
     page.indexOf("const canLoadPaymentSummaries")

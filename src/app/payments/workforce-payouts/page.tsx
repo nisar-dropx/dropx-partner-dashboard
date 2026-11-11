@@ -25,13 +25,7 @@ import {
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { WorkforcePayoutChecks } from "@/components/workforce-payout-checks";
-import { WorkforcePayoutStationBoard } from "@/components/workforce-payout-station-board";
 import { loadPayoutPaymentPreviews } from "@/lib/payout-payment-preview-batching";
-import {
-  loadWorkforceStationFinanceRequests,
-  loadWorkforceStationReleaseStates
-} from "@/lib/workforce-payout-station-finance";
-import { summarizeWorkforcePayoutStations } from "@/lib/workforce-payout-station-review";
 import {
   mergeWorkforcePayoutPaymentState,
   workforcePayoutPublicationRefreshPending,
@@ -794,7 +788,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   // Ops has its own Workforce Payouts page permission and does not expose the
   // Finance-only Payment Process page. Keep that extra permission on the other
   // surfaces, while allowing Ops editors to use the mirrored payment actions.
-  // Bank creation still requires Finance-approved station handoff in the API.
   const canUsePaymentActions = accessSurface === "ops"
     || hasPermission(authorization, "payment_process", "edit");
   // Payout rows and every submitted row identity are already restricted to the
@@ -804,12 +797,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     && canEdit
     && canUsePaymentActions
     && !authorization.readOnly;
-  const canConfirmStations = period.mode === "monthly" && canEdit && !authorization.readOnly;
-  const canSubmitFinance = canConfirmStations;
-  const canDecideFinance = period.mode === "monthly"
-    && !authorization.readOnly
-    && accessSurface !== "ops"
-    && (hasPermission(authorization, "payment_process", "edit") || accessSurface === "finance");
   // Payment lifecycle is read-only worksheet data. Every authorised viewer
   // must see Paid / Partially Paid / Processing, while the sensitive action
   // identifiers below remain restricted by includeProcessingActionDetails.
@@ -824,7 +811,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     impactedWorkforceIds: new Set<string>(),
     error: null as string | null
   };
-  const [loaded, mappingLocks, bankResult, stationReleases, financeRequests] = await Promise.all([
+  const [loaded, mappingLocks, bankResult] = await Promise.all([
     settleEnrichment(
       audience === "helpers"
         ? loadHelperPayoutRows(companyId, authorization, period.fromDate, period.toDate)
@@ -848,30 +835,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       loadWorkforcePayoutBanks(companyId, canProcessPayments),
       { banks: [] as Awaited<ReturnType<typeof loadWorkforcePayoutBanks>>["banks"], error: null as string | null },
       "Bank catalogue"
-    ),
-    settleEnrichment(
-      period.mode === "monthly"
-        ? loadWorkforceStationReleaseStates({
-          companyId,
-          audience,
-          periodStart: period.fromDate,
-          periodEnd: period.toDate
-        })
-        : Promise.resolve({ releases: [], error: null as string | null }),
-      { releases: [], error: null as string | null },
-      "Station releases"
-    ),
-    settleEnrichment(
-      period.mode === "monthly"
-        ? loadWorkforceStationFinanceRequests({
-          companyId,
-          audience,
-          periodStart: period.fromDate,
-          periodEnd: period.toDate
-        })
-        : Promise.resolve({ requests: [], error: null as string | null }),
-      { requests: [], error: null as string | null },
-      "Finance requests"
     )
   ]);
   const provisional = audience === "workforce"
@@ -961,20 +924,11 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     loaded.rows.length ? reviewed.error : null,
     paymentEnriched.error,
     sourceHeld.error,
-    bankResult.error,
-    stationReleases.error,
-    financeRequests.error
+    bankResult.error
   ]
     .filter((message): message is string => Boolean(message))
     .filter((message, index, list) => list.indexOf(message) === index)
     .join(" ");
-  const releaseByStation = new Map(stationReleases.releases.map((row) => [row.stationId.toLowerCase(), row]));
-  const financeRequestRows = financeRequests.requests.map((request) => ({
-    ...request,
-    changed: releaseByStation.get(request.stationId.toLowerCase())?.worksheetHash !== request.worksheetHash
-  }));
-  // Compact station cards for the client board — never re-send the full worksheet.
-  const stationSummaries = summarizeWorkforcePayoutStations(rows);
   const advancePageCode = accessSurface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
@@ -1012,19 +966,13 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <WorkforcePayoutStationBoard
-            stations={stationSummaries}
-            paymentReleaseHref={paymentReleaseHref}
-            lifecycleWarning={lifecycleWarning || null}
-            audience={audience}
-            periodStart={period.fromDate}
-            periodEnd={period.toDate}
-            canConfirmStations={canConfirmStations}
-            canSubmitFinance={canSubmitFinance}
-            canDecideFinance={canDecideFinance}
-            releases={stationReleases.releases}
-            financeRequests={financeRequestRows}
-          >
+        : <>
+            {lifecycleWarning ? <section className="panel message-panel warn" role="status">
+              <div className="panel-body">
+                <strong>Worksheet loaded with limited payment status</strong>
+                <p className="subtle">{lifecycleWarning}</p>
+              </div>
+            </section> : null}
             <section className="panel">
               <div className="panel-head payout-period-head">
                 <h2>{period.title}</h2>
@@ -1047,7 +995,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
                 rows={rows}
               />
             </section>
-          </WorkforcePayoutStationBoard>}
+          </>}
     </div>
   </AppShell>;
 }

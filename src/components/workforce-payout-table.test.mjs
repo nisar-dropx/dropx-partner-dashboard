@@ -5,15 +5,11 @@ import test from "node:test";
 const source = readFileSync(new URL("./workforce-payout-table.tsx", import.meta.url), "utf8");
 const pageSource = readFileSync(new URL("../app/payments/workforce-payouts/page.tsx", import.meta.url), "utf8");
 
-test("server payout page passes a worksheet slot without non-serializable render callbacks", () => {
-  const board = readFileSync(new URL("./workforce-payout-station-board.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(pageSource, /renderWorksheet=|onLocationsChange=\{/);
-  assert.match(pageSource, /<WorkforcePayoutStationBoard[\s\S]*<WorkforcePayoutTable[\s\S]*<\/WorkforcePayoutStationBoard>/);
-  assert.match(board, /WorkforcePayoutLocationContext\.Provider/);
-  assert.match(board, /\{children\}/);
-  assert.match(source, /useContext\(WorkforcePayoutLocationContext\)/);
-  assert.match(source, /stationScope\?\.locations/);
-  assert.match(source, /stationScope\?\.onLocationsChange/);
+test("payout worksheet has its own location filter and omits the station Finance panel", () => {
+  assert.match(pageSource, /<WorkforcePayoutTable/);
+  assert.doesNotMatch(pageSource, /WorkforcePayoutStationBoard|loadWorkforceStationFinanceRequests|loadWorkforceStationReleaseStates/);
+  assert.match(source, /const locations = controlledLocations \?\? uncontrolledLocations/);
+  assert.match(source, /label="Location" onChange=\{\(values\) => \{ setLocations\(values\)/);
 });
 
 test("payout breakup identifies an aggregate attendance value by quantity and effective range", () => {
