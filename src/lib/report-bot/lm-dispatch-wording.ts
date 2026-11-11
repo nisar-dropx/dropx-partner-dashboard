@@ -13,12 +13,12 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     creturn: "Please complete the pending C-Return pickups and improve pickup performance toward the 90% target.",
     ageing: "Ageing is pending. Please prioritize the oldest shipments and confirm clearance progress.",
     zero: "Some DAs have zero deliveries. Please confirm whether they are at the station or out on road and take action.",
-    scrub: "Please complete both in-station and on-road scrubs and confirm the reason for any miss.",
+    scrub: "Please complete the overdue scrub stage now. At-station scrub is due by 1:00 PM and on-road scrub by 10:00 PM.",
     cod: "COD pending requires immediate station action. Please update the status and confirm.",
-    recon: "DA reconciliation is pending. Please complete the cash reconciliation and confirm.",
-    deposit: "Please prepare the deposit and update the portal immediately.",
-    bank: "Please update the bank remittance status. If the banker has not arrived, mark Banker Not Come.",
-    slip: "The deposit slip is still pending. Please upload it immediately and confirm.",
+    recon: "DA reconciliation remains pending after 8:00 PM. Please complete the cash reconciliation and confirm.",
+    deposit: "Prepare Deposit remains pending after 9:00 PM. Please prepare the available cash and update the portal now.",
+    bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Confirm the remittance, or mark Banker Not Reported with the required mail details.",
+    slip: "The COD slip is still missing more than 30 minutes after remittance submission. Please upload it now.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
   return [lead[report], `Status: ${status}. As of ${asOf} IST.`, question, mentions.length ? mentions.map(number => "@" + number).join(" ") : ""].filter(Boolean).join("\n");

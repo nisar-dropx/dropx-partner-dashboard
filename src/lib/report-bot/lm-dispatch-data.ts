@@ -3,12 +3,14 @@ import { fetchLoadFlashBoard, fetchLoadFlashTracking, fetchEddStation, fetchScru
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
+import { pickupPolicy } from "@/lib/ops-pulse/cod-pickup";
 import { AGEING_DAY_BUCKETS, CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
 import { stationDotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
+import { overdueRemittancesAfterGrace, scrubAlertState, slipUploadOverdue, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
@@ -156,9 +158,17 @@ export async function loadAgeingDigest(stationCodes:string[],day:string):Promise
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {
   if (key === "eod") throw new Error("Final EOD is generated from its configured multi-station scope.");
   if (key === "slip") {
-    const [r] = await loadCodPendingReport(reportBotDb(), company, [location], false, day);
+    const [r,s] = await Promise.all([
+      loadCodPendingReport(reportBotDb(), company, [location], false, day).then(rows=>rows[0]),
+      fetchCodStatus(code),
+    ]);
     if (!r) throw new Error("No COD slip report for this station.");
-    return { asOf: new Date().toISOString(), pending: r.pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
+    if(s.date!==day||s.stationCode!==code) throw new Error("COD snapshot did not match the requested station and date.");
+    const remittances=s.remittances;
+    if(!remittances.data||remittances.state!=="ok") throw new Error("Remittance status unavailable for slip timing.");
+    const asOf=fresh(remittances.checkedAt,day),latest=remittances.data.latestSubmitted;
+    const pending=r.pending&&slipUploadOverdue(latest,new Date(),30),submittedAt=submittedRemittanceAt(latest);
+    return { asOf, pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Latest remittance", latest?.code||"Not submitted"], ["Remittance submitted", submittedAt?new Date(submittedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"—"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
   }
   if (["cod", "recon", "deposit", "bank"].includes(key)) {
     const s = await fetchCodStatus(code);
@@ -182,8 +192,21 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     if (key === "cod" || key === "bank") {
       const c = s.remittances;
       if (!c.data || c.state !== "ok") throw new Error("Remittance balance unavailable.");
-      fresh(c.checkedAt, day); rows.push(["Open remittances", c.data.openCount], ["Open amount", money(c.data.openAmount)]);
-      pending ||= c.data.openCount > 0;
+      fresh(c.checkedAt, day);
+      if(key==="bank") {
+        const setting=await reportBotDb().from("cod_station_settings").select("pickup_configured,pickup_rule,pickup_window_start,pickup_window_end,next_day_preparation_from").eq("company_id",company).eq("location_id",location).eq("is_active",true).maybeSingle();
+        if(setting.error) throw new Error(setting.error.message);
+        const policy=pickupPolicy(setting.data);
+        if(!policy) throw new Error("COD pickup timing is not configured for this station.");
+        const overdue=overdueRemittancesAfterGrace(c.data.rows,c.data.latestSubmitted,policy,new Date(),30);
+        const overdueAmount=overdue.reduce((sum,item)=>sum+Math.max(0,Number(item.row.expectedAmount)||0),0);
+        rows.push(["Pickup rule",policy.rule],["Pickup window",`${policy.start}–${policy.end} IST`],["Overdue remittances",overdue.length],["Overdue amount",money(overdueAmount)]);
+        if(overdue[0]) rows.push(["Reason",overdue[0].reason]);
+        pending ||= overdue.length>0;
+      } else {
+        rows.push(["Open remittances", c.data.openCount], ["Open amount", money(c.data.openAmount)]);
+        pending ||= c.data.openCount > 0;
+      }
     }
     return { asOf, pending, rows };
   }
@@ -192,7 +215,8 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     if (!s || s.inStation.error || s.onRoad.error) throw new Error("Scrub activity unavailable.");
     const today = (items: { at: string }[]) => items.filter(item => istDay(new Date(item.at)) === day).length;
     const station = today(s.inStation.invocations), road = today(s.onRoad.invocations);
-    return { asOf: fresh(s.fetchedAt, day), pending: !station || !road, rows: [["In-station checks", station], ["On-road checks", road]] };
+    const alert=scrubAlertState(day,new Date(),station,road);
+    return { asOf: fresh(s.fetchedAt, day), pending: alert.pending, rows: alert.rows };
   }
   if (key === "edd" || key === "station") {
     if (key === "edd") {

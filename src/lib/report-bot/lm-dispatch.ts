@@ -111,7 +111,7 @@ async function routeSources(route:Route, company:string):Promise<SourceStation[]
     .map(({is_ho: _isHo,hide_from_location_list: _hidden,location_models: _models,...row})=>row);
   if (!stations.length) throw new Error("Configured source has no active stations");
   if (scopeType === "station" && stations.length !== ids.length) throw new Error("One or more configured source stations are inactive or unavailable");
-  if (["cod","recon","deposit","bank"].includes(route.report)) {
+  if (["cod","recon","deposit","bank","slip"].includes(route.report)) {
     const mapped = await db.from("cod_station_settings")
       .select("location_id,portal_station_code")
       .eq("company_id",company)
