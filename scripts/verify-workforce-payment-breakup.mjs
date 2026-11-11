@@ -92,11 +92,11 @@ assert.match(globalStyles, /\.workforce-payout-table \.payout-money\s*\{\s*text-
 assert.doesNotMatch(workforcePage, /Deduction Heads|PendingLink/, "The payout page must not show the Deduction Heads shortcut");
 assert.doesNotMatch(workforceTable, /showFilters|aria-controls="payout-filter-panel"/, "Payout filters must remain visible without a Filters toggle");
 assert.match(workforceTable, /<div aria-label="Payout filters" className="payout-filter-panel"/, "The payout filter panel must always be rendered");
-assert.equal((workforceTable.match(/<PayoutMultiFilter /g) ?? []).length, 6, "Location, designation, provider, payment method, mapping status, and payout status must each use a searchable multi-select");
+assert.equal((workforceTable.match(/<PayoutMultiFilter /g) ?? []).length, 12, "All twelve payout dimensions, including payment status, holds and bank readiness, must use searchable multi-selects");
 assert.match(workforceTable, /placeholder=\{`Search \$\{label\.toLowerCase\(\)\}`\}/, "Every payout multi-select must expose option search");
 assert.match(workforceTable, /label="Designation"/, "The payout worksheet must expose a searchable Designation filter");
-assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, deferredSearch, \{ locations, designations, providers, methods, mappingStatuses, statuses \}\)/, "Visible rows must use the shared multi-select predicate");
-assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, search, \{ locations, designations, providers, methods, mappingStatuses, statuses \}\)/, "CSV export must use the same multi-select predicate over all filtered rows");
+assert.match(workforceTable, /facetRows\(displayRows,[\s\S]*matchesWorkforcePayoutFilters\(row, deferredSearch,[\s\S]*const filtered = facets\.rows/, "Visible rows must use the complete dependent-filter dataset and shared search predicate");
+assert.match(workforceTable, /matchesWorkforcePayoutFilters\(row, search, \{ locations, designations, providers, methods, mappingStatuses, statuses, paymentStatuses, holds, readiness, profiles, models, bankFiles \}\)/, "CSV export must apply all twelve multi-select dimensions over all filtered rows");
 assert.match(workforceTable, /const \[size, setSize\] = useState\("50"\)/, "Payout pagination must default to at least 50 rows");
 assert.match(workforceTable, /\["50","100","500","1000","all"\]/, "Payout pagination must start at 50 and omit the 20-row option");
 assert.doesNotMatch(workforceTable, /\["20","50"/, "The 20-row payout option must remain removed");
