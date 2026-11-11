@@ -434,6 +434,26 @@ async function sendToGroup(body) {
   return result;
 }
 
+/** Retract one message previously sent by this linked account. The caller must
+ * supply both the enabled group and the exact WhatsApp message id recorded by
+ * the portal, so this cannot be used to delete arbitrary chat history. */
+async function deleteFromGroup(body) {
+  const to = typeof body?.to === "string" ? body.to : "";
+  const id = typeof body?.id === "string" ? body.id.trim() : "";
+  if (!GROUP_JID.test(to) || !config.groups.includes(to)) {
+    throw Object.assign(new Error("This group is not enabled in the portal."), { status: 422 });
+  }
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(id)) {
+    throw Object.assign(new Error("A valid sent WhatsApp message id is required."), { status: 422 });
+  }
+  if (!session.sock || session.state !== "open") {
+    throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
+  }
+  await session.sock.sendMessage(to, { delete: { remoteJid: to, fromMe: true, id } });
+  botMessageIds.set(id, true);
+  return { ok: true, id };
+}
+
 /** Image bytes: from the local cache, otherwise downloaded from WhatsApp using the saved record. */
 async function mediaBytes(ref, record) {
   const file = path.join(MEDIA_DIR, `${ref}.bin`);
@@ -520,6 +540,14 @@ async function handle(req, res) {
     const invalid = validateSend(body, config);
     if (invalid) return json(res, 422, { error: invalid });
     return json(res, 200, await sendToGroup(body));
+  }
+  if (req.method === "POST" && url.pathname === "/delete") {
+    const body = await readBody(req);
+    try {
+      return json(res, 200, await deleteFromGroup(body));
+    } catch (error) {
+      return json(res, Number(error?.status) || 500, { error: error instanceof Error ? error.message : "Unable to delete the message." });
+    }
   }
   if (req.method === "POST" && url.pathname === "/media") {
     // The record arrives JSON-encoded inside this body, where escaping can triple its size.
