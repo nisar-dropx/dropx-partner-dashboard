@@ -412,6 +412,11 @@ test("computed balances remain visible when a separate payment constraint blocks
   const processing = { eligible: false, eligibilityCode: "payment_processing" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(processing), true);
   assert.equal(workforcePayoutPaymentEligibilityLabel(processing), null);
+  assert.equal(workforcePayoutPaymentEligibilityLabel({
+    eligible: false,
+    eligibilityCode: "no_positive_balance",
+    eligibilityMessage: "The selected payout row for Workforce ID DF1205 has no positive balance payable."
+  }), null);
 
   const invalidBankDetails = { eligible: false, eligibilityCode: "beneficiary_bank_details_missing" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(invalidBankDetails), true);

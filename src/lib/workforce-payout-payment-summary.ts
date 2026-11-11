@@ -192,7 +192,7 @@ export function workforcePayoutPaymentEligibilityLabel(
 ) {
   if (summary.eligible !== false) return null;
   const code = String(summary.eligibilityCode ?? "").trim().toLowerCase();
-  if (code === "payment_processing") return null;
+  if (code === "payment_processing" || code === "no_positive_balance") return null;
   const message = summary.eligibilityMessage?.trim();
   if (message) return message;
   switch (code) {
@@ -208,8 +208,6 @@ export function workforcePayoutPaymentEligibilityLabel(
       return "Payment profile unavailable";
     case "profile_not_active":
       return "Active profiles only";
-    case "no_positive_balance":
-      return "No positive balance";
     case "beneficiary_bank_details_missing":
     case "beneficiary_bank_account_invalid":
     case "beneficiary_ifsc_invalid":
