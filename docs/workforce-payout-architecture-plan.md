@@ -6,14 +6,24 @@ The payout page is a single blocking server render. It calculates the complete p
 
 Bank-file generation has a second expensive path: it refreshes selected publications synchronously and then calls the transactional batch RPC. Enquiry upload parses the workbook, resolves legacy references, loads owned references in 50-row chunks for both ledgers, and finalizes all rows in one request. A timeout can therefore look like a rejection even after an earlier database batch has committed.
 
-## Target workflow
+A flat 700+ row worksheet with no station control plane also forces operators to hunt blockers row-by-row. That matches what production shows on OpsPulse today: publication-missing banners, PAN/bank blockers and mixed statuses in one dense table.
+
+## Target workflow (People-shaped)
+
+Mirror People payroll (`dropx-hrms` station release → Finance submission → bank/enquiry), not Final P&L:
 
 1. Workforce calculates a versioned station worksheet for a closed period.
 2. Station reviewers see one station card with payable count, balance, paid/processing amount, blockers, and last calculation time.
 3. Reviewer confirms only that station. Confirmation creates an immutable station review with worksheet hash, row count, amount, actor, and version.
-4. Finance sees only confirmed station reviews at `fin.dropxlogistics.com/finance/final-pnl` and can download a bank file for one or more confirmed stations.
-5. Finance uploads the bank enquiry file. The import is an idempotent job, processed in bounded batches, with row diagnostics and resumable progress.
-6. Payment state is reconciled from the immutable payment ledger. A partial credit pays only the remaining balance; a retry cannot create a duplicate UTR or second instruction.
+4. Ops/People sends confirmed stations to Finance. Finance works them on `fin.dropxlogistics.com/payments/workforce-payouts` (same product surface as today), not inside Final P&L. Final P&L may continue to *read* published payout snapshots for statements, but bank issue and enquiry stay on the payment ledger.
+5. Finance downloads a bank file for one or more confirmed stations, after loss-clearance / payment-release gates remain satisfied.
+6. Finance uploads the bank enquiry file. The import is an idempotent job, processed in bounded batches, with row diagnostics and resumable progress.
+7. Payment state is reconciled from the immutable payment ledger. A partial credit pays only the remaining balance; a retry cannot create a duplicate UTR or second instruction.
+
+People reference paths:
+- Station approve/reopen: `dropx-hrms` `PayrollStationRelease` + `hr_payroll_station_releases`
+- Send to Finance: `PayrollFinanceSubmission` + `people_finance_submit`
+- Bank/enquiry: Finance people-payroll / payment process; People keeps reconciliation/withdrawal tools
 
 ## Required state machine
 
@@ -29,6 +39,7 @@ Rejected rows remain visible with a reason and source row. A station can be reop
 - Add covering indexes for company/period/station on payout facts, payment items, publication rows, review submissions, and enquiry reference lookup. Confirm with `EXPLAIN (ANALYZE, BUFFERS)` before applying.
 - Keep payment preview and source-hold enrichment asynchronous or on-demand. A failure there must not hide the calculated worksheet; show a degraded status and retry action.
 - Put hard limits on row count, workbook size, selected stations, and job duration. Never retry a timed-out bank operation blindly; use the operation id and replay-safe RPC.
+- Bank download must skip synchronous publication refresh when selected rows already have a current publication hash; refresh only queued/stale targets.
 
 ## Bank-file and enquiry design
 
@@ -41,15 +52,17 @@ Enquiry upload should create an import record containing file hash, operation id
 - stale calculation/publication hash, reopened station, changed bank details, inactive profile, missing PAN/Aadhaar, duplicate beneficiary, duplicate UTR, partial payment, overpayment, processing batch, conflicting station scope, legacy bare DropX references, unrelated rows, malformed workbook, and timeout after a committed batch;
 - selected zero-match filters must remain selected and removable; available station/filter values must derive from the permission-scoped dataset after other filters;
 - no bank file may be generated from a provisional or unconfirmed station;
-- no error message may suggest changing bank amounts when the failure is authorization, ownership, timeout, or database availability.
+- no error message may suggest changing bank amounts when the failure is authorization, ownership, timeout, or database availability;
+- loss clearance / payment release remains a separate gate from station review.
 
 ## Delivery sequence
 
 1. Instrument query timings, row counts, RPC duration, timeout/retry, and database error class (no personal or bank values in logs).
-2. Ship the station review UI and read-only summary (this change), then validate with real permission scopes and empty/error states.
-3. Add the station review table/RPC and Finance final-pnl integration in the shared Supabase project, one migration at a time with repeat tests.
-4. Convert enquiry processing to resumable batches and add an import diagnostics download.
-5. Move expensive payout detail and evidence behind lazy expansion; add load tests for 1, 5, 25, and 100 stations.
+2. Ship the station review UI and read-only summary that filters the worksheet station-by-station, and degrade payment-preview failures instead of blanking the page (**this change**).
+3. Add the station review table/RPC (`workforce_payout_station_releases` patterned on `hr_payroll_station_releases`) and Finance handoff RPCs in the shared Supabase project, one migration at a time with repeat tests.
+4. Move authoritative bank download + enquiry upload UX fully onto Finance Workforce Payouts; Ops keeps station review, publish, and loss-clearance entry points.
+5. Convert enquiry processing to resumable batches and add an import diagnostics download.
+6. Move expensive payout detail and evidence behind lazy expansion; add load tests for 1, 5, 25, and 100 stations.
 
 ## Acceptance checks
 

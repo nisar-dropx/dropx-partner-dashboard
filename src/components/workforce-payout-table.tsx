@@ -431,12 +431,14 @@ function PayoutActionMenu({ children, label }: { children: ReactNode; label: str
   </details>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, initialSearch = "", mappingUnlocks = [], periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; initialSearch?: string; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, initialSearch = "", locations: controlledLocations, mappingUnlocks = [], onLocationsChange, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; initialSearch?: string; locations?: string[]; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; onLocationsChange?: (locations: string[]) => void; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState(initialSearch);
-  const [locations, setLocations] = useState<string[]>([]);
+  const [uncontrolledLocations, setUncontrolledLocations] = useState<string[]>([]);
+  const locations = controlledLocations ?? uncontrolledLocations;
+  const setLocations = onLocationsChange ?? setUncontrolledLocations;
   const [designations, setDesignations] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
@@ -480,6 +482,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     setSearch(initialSearch);
     setPage(1);
   }, [initialSearch]);
+  const locationFilterKey = locations.join("\u0001");
+  useEffect(() => {
+    setPage(1);
+  }, [locationFilterKey]);
   const calendarMonthEnd = useMemo(() => {
     if (!/^\d{4}-\d{2}-01$/.test(periodStart)) return "";
     const date = new Date(`${periodStart}T00:00:00Z`);

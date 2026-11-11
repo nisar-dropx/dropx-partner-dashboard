@@ -25,7 +25,7 @@ import {
 import { workforcePayoutDependencyHash } from "@/lib/workforce-payout-dependency";
 import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { WorkforcePayoutChecks } from "@/components/workforce-payout-checks";
-import { WorkforcePayoutStationReview } from "@/components/workforce-payout-station-review";
+import { WorkforcePayoutStationBoard } from "@/components/workforce-payout-station-board";
 import { loadPayoutPaymentPreviews } from "@/lib/payout-payment-preview-batching";
 import {
   mergeWorkforcePayoutPaymentState,
@@ -842,11 +842,19 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows
     );
   const rows = sourceHeld.rows;
-  const error = reviewed.error || paymentEnriched.error || sourceHeld.error || bankResult.error;
+  // Worksheet + review are required. Payment preview, source holds and bank
+  // catalogue are enrichment: their failure must not blank the page or force
+  // another full recalculation just to inspect stations.
+  const error = reviewed.error;
+  const lifecycleWarning = [paymentEnriched.error, sourceHeld.error, bankResult.error]
+    .filter((message): message is string => Boolean(message))
+    .filter((message, index, list) => list.indexOf(message) === index)
+    .join(" ");
   const advancePageCode = accessSurface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
     && hasPermission(authorization, advancePageCode, "edit");
+  const paymentReleaseHref = `${accessSurface === "ops" ? "/team-ops/losses/payment-release" : "/payments/loss-clearance"}?month=${period.month}&scope=${audience}`;
   const audienceHref = (nextAudience: "workforce" | "helpers") => {
     const params = new URLSearchParams({
       audience: nextAudience,
@@ -864,7 +872,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     <div className="workforce-payout-page">
       <div className="payout-page-titlebar">
         <PageHead title="Workforce & Helper Payments" />
-        <Link href={`${accessSurface === "ops" ? "/team-ops/losses/payment-release" : "/payments/loss-clearance"}?month=${period.month}&scope=${audience}`}>Review payment release</Link>
+        <Link href={paymentReleaseHref}>Review payment release</Link>
         <nav aria-label="Payment population" className="performance-tabs">
           <Link className={audience === "workforce" ? "active" : undefined} href={audienceHref("workforce")}>Workforce</Link>
           <Link className={audience === "helpers" ? "active" : undefined} href={audienceHref("helpers")}>Helpers</Link>
@@ -879,7 +887,36 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         : null}
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
-        : <><WorkforcePayoutStationReview rows={rows} /><section className="panel"><div className="panel-head payout-period-head"><h2>{period.title}</h2><WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} /></div>{period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}<WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`} audience={audience} banks={bankResult.banks} canDeductAdvances={false && canDeductAdvances} canEdit={canEdit} canManageMappingLocks={canManageMappingLocks} canProcessPayments={canProcessPayments} canPublishNotifications={canEdit} hasAllLocationAccess={authorization.hasAllLocationAccess} initialSearch={initialSearch} mappingUnlocks={mappingLocks.unlocks} periodStart={period.fromDate} periodEnd={period.toDate} rows={rows} /></section></>}
+        : <WorkforcePayoutStationBoard
+            rows={rows}
+            paymentReleaseHref={paymentReleaseHref}
+            lifecycleWarning={lifecycleWarning || null}
+            renderWorksheet={({ locations, onLocationsChange }) => <section className="panel">
+              <div className="panel-head payout-period-head">
+                <h2>{period.title}</h2>
+                <WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} />
+              </div>
+              {period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}
+              <WorkforcePayoutTable
+                key={`${audience}-${period.fromDate}-${period.toDate}`}
+                audience={audience}
+                banks={bankResult.banks}
+                canDeductAdvances={false && canDeductAdvances}
+                canEdit={canEdit}
+                canManageMappingLocks={canManageMappingLocks}
+                canProcessPayments={canProcessPayments}
+                canPublishNotifications={canEdit}
+                hasAllLocationAccess={authorization.hasAllLocationAccess}
+                initialSearch={initialSearch}
+                locations={locations}
+                mappingUnlocks={mappingLocks.unlocks}
+                onLocationsChange={onLocationsChange}
+                periodStart={period.fromDate}
+                periodEnd={period.toDate}
+                rows={rows}
+              />
+            </section>}
+          />}
     </div>
   </AppShell>;
 }

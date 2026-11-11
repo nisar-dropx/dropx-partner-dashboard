@@ -23806,6 +23806,121 @@ td strong,
   gap: 8px;
   margin-top: -8px;
 }
+.workforce-station-review-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+.workforce-station-review-head .subtle {
+  max-width: 78ch;
+  margin: 4px 0 0;
+}
+.workforce-station-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.workforce-station-search .field {
+  min-height: 34px;
+  height: 34px;
+  width: min(220px, 42vw);
+  font-size: 12px;
+}
+.workforce-station-review-body {
+  display: grid;
+  gap: 12px;
+}
+.workforce-station-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workforce-station-chips .bank-chip,
+.workforce-station-chips > .bank-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 96px;
+  padding: 8px 10px;
+  border: 1px solid #e4e8ee;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workforce-station-chips .bank-chip strong {
+  font-size: 14px;
+  line-height: 1.1;
+}
+.workforce-station-chips .bank-chip span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.workforce-station-chips .bank-chip.zero {
+  opacity: 0.55;
+}
+.workforce-station-chips .bank-chip.bad { border-color: #f0c7c7; background: #fff6f6; }
+.workforce-station-chips .bank-chip.warn { border-color: #f0d7a8; background: #fff9ef; }
+.workforce-station-chips .bank-chip.info { border-color: #c9daf0; background: #f5f9ff; }
+.workforce-station-chips .bank-chip.good { border-color: #cfe8da; background: #f4fbf7; }
+.workforce-station-chips .bank-chip.muted { cursor: default; }
+.workforce-station-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+}
+.workforce-station-card {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 84px;
+  padding: 10px 12px;
+  border: 1px solid #e4e8ee;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workforce-station-card strong {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.workforce-station-card em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 750;
+}
+.workforce-station-card span,
+.workforce-station-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.workforce-station-card small { font-size: 10px; }
+.workforce-station-card.tone-bad { border-color: #f0c7c7; background: #fff6f6; }
+.workforce-station-card.tone-bad em { color: #9b2c2c; }
+.workforce-station-card.tone-warn { border-color: #f0d7a8; background: #fff9ef; }
+.workforce-station-card.tone-warn em { color: #9a6700; }
+.workforce-station-card.tone-info { border-color: #c9daf0; background: #f5f9ff; }
+.workforce-station-card.tone-info em { color: #1d4f91; }
+.workforce-station-card.tone-good { border-color: #cfe8da; background: #f4fbf7; }
+.workforce-station-card.tone-good em { color: #1f6f51; }
+.workforce-station-card.tone-muted em { color: var(--muted); }
+.workforce-station-card.is-picked {
+  border-color: #e7b08a;
+  background: #fff8f3;
+  box-shadow: inset 0 0 0 1px #e7b08a;
+}
+.workforce-station-hint { margin: 0; }
 .payout-page-titlebar {
   display: flex;
   align-items: center;
