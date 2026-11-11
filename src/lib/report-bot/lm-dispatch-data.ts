@@ -15,7 +15,7 @@ export type TodayEddStation = { stationCode: string; count: number; trackingIds:
 export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
 export type EodDsrRow = { Station:string; "Verified total":number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "DSR %":string };
 export type EodCReturnRow = { Station:string; Total:number; "Picked up":number; "Pending pickup":number; "Pickup %":string };
-export type EodDigest = { asOf:string; missingStations:string[]; dsr:EodDsrRow[]; dot:EodDotRow[]; creturn:EodCReturnRow[] };
+export type EodDigest = { asOf:string; missingStations:string[]; stationInventory:Record<string,{eddAtStation:number|null;physicalAtStation:number|null}>; dsr:EodDsrRow[]; dot:EodDotRow[]; creturn:EodCReturnRow[] };
 export type AgeingCell = { count:number; amount:number };
 export type AgeingDigest = {
   asOf:string;
@@ -76,6 +76,7 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
   const dsr:EodDsrRow[] = [];
   const dot:EodDotRow[] = [];
   const creturn:EodCReturnRow[] = [];
+  const stationInventory:Record<string,{eddAtStation:number|null;physicalAtStation:number|null}> = Object.fromEntries(stations.map(row=>[row.stationCode,{eddAtStation:null,physicalAtStation:null}]));
   const stamps:string[] = [];
   for (const station of stations.sort((a,b)=>a.stationCode.localeCompare(b.stationCode))) {
     stamps.push(fresh(station.fetchedAt, day));
@@ -89,9 +90,25 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
     creturn.push({Station:station.stationCode,Total:total,"Picked up":picked,"Pending pickup":Math.max(0,total-picked),"Pickup %":total ? `${(picked/total*100).toFixed(1)}%` : "—"});
   }
   if (!stations.length) throw new Error("No current station snapshots are available for this region.");
+  try {
+    const inventory=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.EDD,BOARD_TID.PHYSICAL]});
+    const unique=new Map<string,{edd:Set<string>;physical:Set<string>}>();
+    for(const station of stations) unique.set(station.stationCode,{edd:new Set(),physical:new Set()});
+    for(const row of inventory) {
+      const bucket=unique.get(row.stationCode);
+      if(!bucket||!row.trackingId) continue;
+      if(row.bucket===BOARD_TID.EDD) bucket.edd.add(row.trackingId);
+      if(row.bucket===BOARD_TID.PHYSICAL) bucket.physical.add(row.trackingId);
+    }
+    for(const [stationCode,counts] of unique) stationInventory[stationCode]={eddAtStation:counts.edd.size,physicalAtStation:counts.physical.size};
+  } catch {
+    // Keep the live DSR available when the package-level inventory endpoint is
+    // temporarily unavailable; its two inventory columns will show em dashes.
+  }
   return {
     asOf: stamps.sort().at(-1) || network.asOf,
     missingStations,
+    stationInventory,
     dsr: orderEodDsrRows(dsr),
     dot: orderEodDotRows(dot),
     creturn: orderEodCReturnRows(creturn),

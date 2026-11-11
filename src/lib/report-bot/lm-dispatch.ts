@@ -195,8 +195,16 @@ async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:st
   let tableRows:Array<Record<string,string|number>>, columns:string[], percentage:string, tone:PercentageTone, title:string;
   if(route.report==="dsr") {
     const total=sumNumeric(digest.dsr,"Verified total"), delivered=sumNumeric(digest.dsr,"Delivered");
-    tableRows=[...digest.dsr,{Station:"Grand total","Verified total":total,Delivered:delivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":total?`${(delivered/total*100).toFixed(1)}%`:"—"}];
-    columns=["Station","Verified total","Delivered","Delivery failed","Rejected","On road","DSR %"];
+    const inventoryRows=digest.dsr.map(row=>({
+      Station:row.Station,
+      "EDD at station":digest.stationInventory[row.Station]?.eddAtStation??"—",
+      "Physical at station":digest.stationInventory[row.Station]?.physicalAtStation??"—",
+      Assigned:row["Verified total"],Delivered:row.Delivered,Failed:row["Delivery failed"],Rejected:row.Rejected,"On road":row["On road"],"DSR %":row["DSR %"],
+    }));
+    const inventoryValues=Object.values(digest.stationInventory);
+    const eddAvailable=inventoryValues.every(row=>row.eddAtStation!==null),physicalAvailable=inventoryValues.every(row=>row.physicalAtStation!==null);
+    tableRows=[...inventoryRows,{Station:"Grand total","EDD at station":eddAvailable?inventoryValues.reduce((sum,row)=>sum+Number(row.eddAtStation||0),0):"—","Physical at station":physicalAvailable?inventoryValues.reduce((sum,row)=>sum+Number(row.physicalAtStation||0),0):"—",Assigned:total,Delivered:delivered,Failed:sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":total?`${(delivered/total*100).toFixed(1)}%`:"—"}];
+    columns=["Station","EDD at station","Physical at station","Assigned","Delivered","Failed","Rejected","On road","DSR %"];
     percentage="DSR %"; tone="performance"; title=`Live DSR Report · ${dateLabel} · ${scopeLabel} · ${stamp}`;
   } else {
     const total=sumNumeric(digest.creturn,"Total"), picked=sumNumeric(digest.creturn,"Picked up");
