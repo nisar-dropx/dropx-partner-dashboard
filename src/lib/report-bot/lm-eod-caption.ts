@@ -52,7 +52,7 @@ export function eodDsrPerformanceCaption(
     `*${title}*`,
     "",
     ...sections,
-    recognitionTags ? `👏 *Great performance — TL & Cluster/AOM*: ${recognitionTags}` : "",
+    recognitionTags ? `👏 *Great performance — Team Leaders*: ${recognitionTags}` : "",
     focusTags ? `🎯 *Needs focus — TL & Cluster/AOM*: ${focusTags}` : "",
   ].filter((line, index, lines) => line || (index > 0 && lines[index - 1])).join("\n");
 }

@@ -6,7 +6,7 @@ import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } fro
 import { compareDispatchRows, dispatchReports, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
-import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
+import { resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
 import { EOD_DOT_PERCENTAGE_COLUMNS, EOD_DOT_VISIBLE_COLUMNS, eodDotTotalRow } from "./lm-eod-dot";
 import { reportBotDb, type ReportBotSettings } from "./settings";
@@ -396,7 +396,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           const focusSources=mentionStations.focus.map(code=>sourceByCode.get(code)).filter((source):source is SourceStation=>Boolean(source));
           const dynamicRoute={...route,mentions:[]};
           const [recognitionNumbers,focusNumbers,staticNumbers]=await Promise.all([
-            recognitionSources.length?resolveRouteMentionNumbers(company,recognitionSources,dynamicRoute,day):Promise.resolve([]),
+            recognitionSources.length?resolveTeamLeaderMentionNumbers(company,recognitionSources,day):Promise.resolve([]),
             focusSources.length?resolveRouteMentionNumbers(company,focusSources,dynamicRoute,day):Promise.resolve([]),
             resolveRouteMentionNumbers(company,[],route,day),
           ]);

@@ -54,6 +54,6 @@ test("EOD DSR caption follows the configured performance bands", () => {
   assert.match(caption, /Good \/ watch \(88–93%\).*WATCH 90\.0%/);
   assert.match(caption, /Needs focus \(83–<88%\).*FOCUS 85\.0%/);
   assert.match(caption, /Immediate focus \(<83%\).*URGENT 82\.0%/);
-  assert.match(caption, /Great performance — TL & Cluster\/AOM.*@919111111111/);
+  assert.match(caption, /Great performance — Team Leaders.*@919111111111/);
   assert.match(caption, /Needs focus — TL & Cluster\/AOM.*@919222222222/);
 });

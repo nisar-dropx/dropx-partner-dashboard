@@ -7,6 +7,7 @@ import {
   attendanceWorkerKey,
   normalizeWhatsAppNumber,
   presentWorkerKeys,
+  teamLeaderMentionNumbers,
   type PresencePunch,
 } from "./lm-dispatch-mentions-core";
 
@@ -105,4 +106,11 @@ export async function resolveRouteMentionNumbers(
     }
   }
   return [...new Set([...staticNumbers, ...dynamicNumbers])];
+}
+
+export async function resolveTeamLeaderMentionNumbers(companyId: string, sources: MentionSource[], day: string) {
+  const locationIds = [...new Set(sources.map(source => source.id))];
+  if (!locationIds.length) return [];
+  const directory = await loadCodTeamDirectory(companyId, locationIds, [], day);
+  return teamLeaderMentionNumbers(directory, locationIds);
 }

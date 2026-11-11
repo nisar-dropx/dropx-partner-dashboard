@@ -51,3 +51,19 @@ export function presentWorkerKeys(punches: PresencePunch[], expectedLocationByWo
 export function attendanceWorkerKey(workerType: "employee" | "contractor", workerId: string) {
   return workerKey(workerType, workerId);
 }
+
+/** Recognition follows People station assignments, independent of current attendance. */
+export function teamLeaderMentionNumbers(
+  directory: { role: string; roleCode: string; locationId: string | null; phone: string | null }[],
+  locationIds: string[],
+) {
+  const locations = new Set(locationIds);
+  const normalizeRole = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const teamLeadRoles = new Set(["TL", "TEAMLEAD", "TEAMLEADER"]);
+  return [...new Set(directory.flatMap(person => {
+    if (!person.locationId || !locations.has(person.locationId)) return [];
+    if (!teamLeadRoles.has(normalizeRole(person.roleCode)) && !teamLeadRoles.has(normalizeRole(person.role))) return [];
+    const number = normalizeWhatsAppNumber(person.phone);
+    return number ? [number] : [];
+  }))];
+}
