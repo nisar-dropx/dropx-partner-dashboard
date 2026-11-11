@@ -10,6 +10,7 @@ import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-disp
 import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
 import { reportBotDb, type ReportBotSettings } from "./settings";
 import { workerRequest } from "./worker-client";
+import { dispatchCaption } from "./lm-dispatch-wording";
 
 type Group = { wa_group_id: string; location_id: string|null; company_id: string; workspace: string; is_enabled: boolean; bot_in_group: boolean; mode: string };
 type Route = {
@@ -259,7 +260,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const prior = await previousSnapshot(route.id, run.id);
             const delta = compareDispatchRows(rows, prior?.rows ?? null);
             const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
-            const caption=[`As of ${asIst(snapshot.asOf)} · ${deltaText}`, route.question, mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
+            const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(snapshot.asOf), `${rows.reduce((sum, [, value]) => sum + (typeof value === "number" ? value : 0), 0)} pending`, route.question, mentionNumbers);
             outputs=await eddOutputs(route,snapshot,sources,header,caption,day,mentionNumbers);
             sentSnapshot={rows,asOf:snapshot.asOf};
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
@@ -290,7 +291,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const delta = compareDispatchRows(rows, prior?.rows ?? null);
             const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
             const mentionNumbers = await resolveRouteMentionNumbers(company, sources, route, day);
-            const caption=[`As of ${asIst(reports[0].asOf)} · ${deltaText}`, route.question,mentionNumbers.map(number=>"@"+number).join(" ")].filter(Boolean).join("\n");
+            const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(reports[0].asOf), rows.map(([label,value])=>`${label}: ${value}`).join("; "), route.question, mentionNumbers);
             outputs=await standardOutputs({...route,mentions:mentionNumbers},header,rows,caption,day); detail=header;
             sentSnapshot={rows,asOf:reports[0].asOf};
           }
