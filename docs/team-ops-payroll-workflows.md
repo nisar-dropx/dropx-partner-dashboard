@@ -930,6 +930,13 @@ Validation: `pnpm test:loss-period-close`; full recovery regression suite.
 - Paid/in-flight bank instructions, a competing correction on the same original payout, changed evidence and unsupported sources remain for independent processing. No bank history is changed and no case closes on approval alone. Manual processing remains the fallback; source-applied cases cannot return to initial review and reapply.
 - Migration: `20261107150000_dispute_source_application.sql`. Synthetic regression: `scripts/test-payout-dispute-processing-migration.mjs` invokes `test-dispute-source-application.mjs` for both balance decisions, source rollback, repeat application, exact publication verification, bank guards and access controls. Do not approve production disputes for testing.
 
+### BUG-021 legacy-returned disputes with bank already issued — 11 November 2026
+
+- On 9 Nov a guided-recalculation repair returned non-schema-3 proposals from final/processing stages back to `open`, including tickets Finance had already approved while October bank instructions were `processing`/`paid`.
+- OpsPulse therefore still listed them under Initial review / pending (Akshay’s KTUO/KOZA/QLDA cohort).
+- Idempotent closure `20261111124500_close_legacy_returned_bank_issued_disputes.sql` resolves exactly those returned-open tickets that already have a matching bank line. History is retained; no payout amount or UTR is changed. Safe to re-run after the ten closure events exist.
+- Ops copy: `scripts/operations/20261111-close-legacy-returned-bank-issued-disputes.sql`.
+
 ### Payment-specific associate disputes — 10 November 2026
 
 - One preserves the published per-date payment codes and counts in its dispute API response. Previously the response discarded those inputs, so the form showed `Not in payout` despite available Delivery, C-return and MFN records. The projection includes only codes/counts, not provider identities or internal calculation metadata.
