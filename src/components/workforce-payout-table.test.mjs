@@ -56,7 +56,7 @@ test("every monthly viewer receives payment status while bank action details sta
 
 test("payout workspace keeps search and every filter directly visible while grouping secondary actions", () => {
   assert.match(source, /className="payout-search-strip"[\s\S]*?type="search"/);
-  assert.match(source, /className="payout-filter-panel"[\s\S]*?label="Location"[\s\S]*?label="Designation"[\s\S]*?label="Provider"[\s\S]*?label="Payment method"[\s\S]*?label="Mapping status"[\s\S]*?label="Status"/);
+  assert.match(source, /className="payout-filter-panel"[\s\S]*?label="Location"[\s\S]*?label="Designation"[\s\S]*?label="Provider"[\s\S]*?label="Payment method"[\s\S]*?label="Mapping status"[\s\S]*?label="Review status"/);
   assert.match(source, /<PayoutActionMenu label="Bank & payment">/);
   assert.match(source, /className="payout-selection-bar"/);
   assert.match(source, /className="payout-selection-hint"/);

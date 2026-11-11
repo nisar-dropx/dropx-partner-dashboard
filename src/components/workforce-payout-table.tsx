@@ -14,7 +14,10 @@ import {
   WORKFORCE_PAYOUT_FILTER_NONE,
   matchesWorkforcePayoutFilters,
   toggleWorkforcePayoutFilterOption,
-  workforcePayoutFacetValues
+  workforcePayoutFacetValues,
+  workforcePayoutPaymentStatus,
+  workforcePayoutHoldStatus,
+  workforcePayoutReadiness
 } from "@/lib/workforce-payout-filters";
 import {
   buildWorkforcePayoutBankSelectionIndex,
@@ -444,6 +447,12 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const [methods, setMethods] = useState<string[]>([]);
   const [mappingStatuses, setMappingStatuses] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
+  const [paymentStatuses, setPaymentStatuses] = useState<string[]>([]);
+  const [holds, setHolds] = useState<string[]>([]);
+  const [readiness, setReadiness] = useState<string[]>([]);
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [bankFiles, setBankFiles] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState("50");
   const [expandedId, setExpandedId] = useState("");
@@ -499,29 +508,38 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const canManuallyEdit = canEdit;
   const canManageLocks = canManageMappingLocks && audience === "workforce";
   const showSelection = canPublish || canDeductAdvances || canManuallyEdit || canManageLocks || canProcessPayments;
+  const preliminaryBankBalances = useMemo(
+    () => buildWorkforcePayoutPreliminaryBalanceIndex(rows),
+    [rows]
+  );
   const displayRows = useMemo(() => rows.map((row) => {
     const status = payoutDisplayStatus(row.status);
-    return status === row.status ? row : { ...row, status };
-  }), [rows]);
+    const bankEligible = canCreateBankPayment(row, audience, preliminaryBankBalances.get(row.id) ?? 0);
+    const bankFileStatus = !row.paymentSummary ? "Not available"
+      : bankEligible ? publicationRefreshPending(row) ? "Refresh required" : "Available" : "Blocked";
+    return { ...row, status, bankFileStatus };
+  }), [rows, audience, preliminaryBankBalances]);
   const facets = useMemo(() => facetRows(displayRows, {
     location: { selected: locations, values: row => workforcePayoutFacetValues(row.location) },
     designation: { selected: designations, values: row => row.designation },
     provider: { selected: providers, values: row => workforcePayoutFacetValues(row.provider) },
     mappingStatus: { selected: mappingStatuses, values: row => row.mappingStatus },
     status: { selected: statuses, values: row => row.status },
+    paymentStatus: { selected: paymentStatuses, values: workforcePayoutPaymentStatus },
+    hold: { selected: holds, values: workforcePayoutHoldStatus },
+    readiness: { selected: readiness, values: workforcePayoutReadiness },
+    profile: { selected: profiles, values: row => row.dropxStatus },
+    model: { selected: models, values: row => workforcePayoutFacetValues(row.model) },
+    bankFile: { selected: bankFiles, values: row => row.bankFileStatus },
     method: { selected: methods, values: row => row.paymentMethodBreakdown.map(item => item.label) }
-  }, row => matchesWorkforcePayoutFilters(row, deferredSearch, { locations: [], designations: [], providers: [], methods: [], mappingStatuses: [], statuses: [] })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
+  }, row => matchesWorkforcePayoutFilters(row, deferredSearch, { locations: [], designations: [], providers: [], methods: [], mappingStatuses: [], statuses: [] })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses, paymentStatuses, holds, readiness, profiles, models, bankFiles]);
   const locationOptions = facets.values("location").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const designationOptions = facets.values("designation").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const providerOptions = facets.values("provider").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const mappingStatusOptions = facets.values("mappingStatus").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const statusOptions = facets.values("status").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
   const methodOptions = facets.values("method").filter(value => value !== WORKFORCE_PAYOUT_FILTER_NONE);
-  const filtered = useMemo(() => displayRows.filter(row => matchesWorkforcePayoutFilters(row, deferredSearch, { locations, designations, providers, methods, mappingStatuses, statuses })), [displayRows, deferredSearch, locations, designations, providers, methods, mappingStatuses, statuses]);
-  const preliminaryBankBalances = useMemo(
-    () => buildWorkforcePayoutPreliminaryBalanceIndex(rows),
-    [rows]
-  );
+  const filtered = facets.rows;
   const bankActionableIds = useMemo(() => new Set(rows
     .filter((row) => canCreateBankPayment(
       row,
@@ -640,7 +658,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const hasAdvanceSelectionConflict = advanceSelectionConflictIds.size > 0;
   const skippedReviewSelectionCount = selectedRows.length - reviewSelectedRows.length;
   const actionSelectionFull = selectable.length > 0 && selectable.every((row) => selected.has(row.id));
-  const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length;
+  const activeFilterCount = locations.length + designations.length + providers.length + methods.length + mappingStatuses.length + statuses.length + paymentStatuses.length + holds.length + readiness.length + profiles.length + models.length + bankFiles.length;
   const tableColumnCount = showSelection ? 11 : 10;
   const actionBusy = reviewState.busy || advanceState.busy || mappingState.busy || bankBusy || redownloadBusy || cancellationBusy || holdBusy || individualHoldBusy;
 
@@ -791,7 +809,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   }, [expandedId, filtered.length, safePage, visible.length]);
 
   function clearFilters() {
-    setLocations([]); setDesignations([]); setProviders([]); setMethods([]); setMappingStatuses([]); setStatuses([]); setPage(1);
+    setLocations([]); setDesignations([]); setProviders([]); setMethods([]); setMappingStatuses([]); setStatuses([]);
+    setPaymentStatuses([]); setHolds([]); setReadiness([]); setProfiles([]); setModels([]); setBankFiles([]); setPage(1);
   }
 
   function toggleBreakup(rowId: string, button: HTMLButtonElement) {
@@ -802,7 +821,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   }
 
   function exportRows() {
-    const exportableRows = rows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, designations, providers, methods, mappingStatuses, statuses }));
+    const exportableRows = displayRows.filter((row) => matchesWorkforcePayoutFilters(row, search, { locations, designations, providers, methods, mappingStatuses, statuses, paymentStatuses, holds, readiness, profiles, models, bankFiles }));
     const csv = buildWorkforcePayoutCsv(exportableRows, subjectLabel);
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = `${audience}-payouts.csv`; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -1150,7 +1169,13 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       <PayoutMultiFilter allLabel="All providers" label="Provider" onChange={(values) => { setProviders(values); setPage(1); }} options={providerOptions} selected={providers} />
       <PayoutMultiFilter allLabel="All methods" label="Payment method" onChange={(values) => { setMethods(values); setPage(1); }} options={methodOptions} selected={methods} />
       <PayoutMultiFilter allLabel="All mapping statuses" label="Mapping status" onChange={(values) => { setMappingStatuses(values); setPage(1); }} options={mappingStatusOptions} selected={mappingStatuses} />
-      <PayoutMultiFilter allLabel="All statuses" label="Status" onChange={(values) => { setStatuses(values); setPage(1); }} options={statusOptions} selected={statuses} />
+      <PayoutMultiFilter allLabel="All statuses" label="Review status" onChange={(values) => { setStatuses(values); setPage(1); }} options={statusOptions} selected={statuses} />
+      <PayoutMultiFilter allLabel="All payments" label="Payment status" onChange={(values) => { setPaymentStatuses(values); setPage(1); }} options={facets.values("paymentStatus").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={paymentStatuses} />
+      <PayoutMultiFilter allLabel="All holds" label="Hold" onChange={(values) => { setHolds(values); setPage(1); }} options={facets.values("hold").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={holds} />
+      <PayoutMultiFilter allLabel="All readiness" label="Payment readiness" onChange={(values) => { setReadiness(values); setPage(1); }} options={facets.values("readiness").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={readiness} />
+      <PayoutMultiFilter allLabel="All profiles" label="Profile status" onChange={(values) => { setProfiles(values); setPage(1); }} options={facets.values("profile").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={profiles} />
+      <PayoutMultiFilter allLabel="All models" label="Model" onChange={(values) => { setModels(values); setPage(1); }} options={facets.values("model").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={models} />
+      <PayoutMultiFilter allLabel="All bank readiness" label="Bank file" onChange={(values) => { setBankFiles(values); setPage(1); }} options={facets.values("bankFile").filter(v => v !== WORKFORCE_PAYOUT_FILTER_NONE)} selected={bankFiles} />
       <button className="button secondary" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button>
     </div>
     {selectedRows.length ? <div aria-label="Selected payout actions" className="payout-selection-bar">
