@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { WorkforcePayoutStationReview } from "@/components/workforce-payout-station-review";
+import { WorkforcePayoutLocationContext } from "@/components/workforce-payout-location-context";
 import type {
   WorkforceStationFinanceRequest,
   WorkforceStationReleaseState
@@ -24,7 +25,7 @@ export function WorkforcePayoutStationBoard({
   canDecideFinance,
   releases,
   financeRequests,
-  renderWorksheet
+  children
 }: {
   rows: WorkforcePayoutRow[];
   paymentReleaseHref?: string | null;
@@ -37,14 +38,11 @@ export function WorkforcePayoutStationBoard({
   canDecideFinance: boolean;
   releases: WorkforceStationReleaseState[];
   financeRequests: WorkforceStationFinanceRequest[];
-  renderWorksheet: (api: {
-    locations: string[];
-    onLocationsChange: (locations: string[]) => void;
-  }) => ReactNode;
+  children: ReactNode;
 }) {
   const [locations, setLocations] = useState<string[]>([]);
 
-  return <>
+  return <WorkforcePayoutLocationContext.Provider value={{ locations, onLocationsChange: setLocations }}>
     <WorkforcePayoutStationReview
       rows={rows}
       selectedStations={locations}
@@ -67,6 +65,6 @@ export function WorkforcePayoutStationBoard({
           </div>
         </section>
       : null}
-    {renderWorksheet({ locations, onLocationsChange: setLocations })}
-  </>;
+    {children}
+  </WorkforcePayoutLocationContext.Provider>;
 }

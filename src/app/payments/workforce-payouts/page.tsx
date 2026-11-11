@@ -1005,7 +1005,8 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
             canDecideFinance={canDecideFinance}
             releases={stationReleases.releases}
             financeRequests={financeRequestRows}
-            renderWorksheet={({ locations, onLocationsChange }) => <section className="panel">
+          >
+            <section className="panel">
               <div className="panel-head payout-period-head">
                 <h2>{period.title}</h2>
                 <WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} />
@@ -1021,15 +1022,13 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
                 canPublishNotifications={canEdit}
                 hasAllLocationAccess={authorization.hasAllLocationAccess}
                 initialSearch={initialSearch}
-                locations={locations}
                 mappingUnlocks={mappingLocks.unlocks}
-                onLocationsChange={onLocationsChange}
                 periodStart={period.fromDate}
                 periodEnd={period.toDate}
                 rows={rows}
               />
-            </section>}
-          />}
+            </section>
+          </WorkforcePayoutStationBoard>}
     </div>
   </AppShell>;
 }
