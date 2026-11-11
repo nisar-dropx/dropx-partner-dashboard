@@ -42,7 +42,7 @@ test('summary report colours its value cells without losing compact zebra rows',
 
 test('table can colour standard, premium and overall percentage columns together', async () => {
   let styled = 0;
-  const svg = await tableReportSvg('DOT', ['Station', 'Standard DOT %', 'Premium DOT %', 'Overall DOT %'], [['A', '80%', '90%', '85%']], ['Standard DOT %', 'Premium DOT %', 'Overall DOT %'], () => {
+  const svg = await tableReportSvg('DOT', ['Station', 'Std DOT %', 'Prem DOT %', 'All DOT %'], [['A', '80%', '90%', '85%']], ['Std DOT %', 'Prem DOT %', 'All DOT %'], () => {
     styled++;
     return {background: '#fff3c4', color: '#9b3b00'};
   });
