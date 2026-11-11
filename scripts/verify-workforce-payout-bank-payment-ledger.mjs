@@ -2725,6 +2725,41 @@ const rowSelections = [
   { workforce_id: rowSelectionWorkforce, station_id: klzaStation }
 ];
 
+const positiveLocationMigration = readFileSync(new URL(
+  "../supabase/migrations/20261111020627_allow_positive_workforce_location_with_negative_sibling.sql",
+  import.meta.url
+), "utf8");
+await db.exec(positiveLocationMigration);
+await db.exec(positiveLocationMigration);
+await db.exec("begin");
+await db.query(
+  `update public.workforce_payout_publications
+   set snapshot = jsonb_set(snapshot, '{item,net_amount}', '"-90.14"'::jsonb)
+   where id = $1`,
+  [rowSelectionPublicationKlza]
+);
+const signedLocationRows = JSON.stringify(rowSelections);
+const signedLocationPreview = await db.query(
+  `select station_id, eligible, eligibility_code, available_to_pay
+   from public.workforce_payout_payment_row_candidates($1,$2,$3,$4::jsonb)`,
+  [company, periodStart, periodEnd, signedLocationRows]
+);
+const positiveLocation = signedLocationPreview.rows.find((row) => row.station_id === kbweStation);
+const negativeLocation = signedLocationPreview.rows.find((row) => row.station_id === klzaStation);
+assert.equal(positiveLocation.eligible, true);
+assert.equal(Number(positiveLocation.available_to_pay), 474.01);
+assert.equal(negativeLocation.eligible, false);
+assert.equal(negativeLocation.eligibility_code, "no_positive_balance");
+const signedLocationBatch = await db.query(
+  `select public.workforce_create_payout_payment_row_batch(
+    $1,$2,$3,$4,$5,$6::date,$7::date,date '2026-10-10',$8::jsonb
+  ) result`,
+  [company, actor, id(996), "d".repeat(64), bank, periodStart, periodEnd, signedLocationRows]
+);
+assert.equal(signedLocationBatch.rows[0].result.items.length, 1);
+assert.equal(Number(signedLocationBatch.rows[0].result.items[0].instruction_amount), 474.01);
+await db.exec("rollback");
+
 // Targeted publication repair must lease only the exact checked row. A
 // sibling station for the same Workforce profile remains untouched.
 const rowRefreshRequest = id(160);
