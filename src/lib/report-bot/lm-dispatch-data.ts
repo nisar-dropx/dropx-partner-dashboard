@@ -11,7 +11,7 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
-import { overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
+import { bankRemittanceFollowup, observedBankerWindow, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = {
   asOf: string;
@@ -257,21 +257,22 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
       if(key==="bank") {
         const setting=await reportBotDb().from("cod_station_settings").select("pickup_configured,pickup_rule,pickup_window_start,pickup_window_end,next_day_preparation_from").eq("company_id",company).eq("location_id",location).eq("is_active",true).maybeSingle();
         if(setting.error) throw new Error(setting.error.message);
-        const policy=pickupPolicy(setting.data);
+        if(!c.data.complete) throw new Error("Remittance source check is incomplete.");
+        const now=new Date();
+        const observed=observedBankerWindow(c.data.rows,now);
+        if(!observed) throw new Error("Banker reporting window unavailable: fewer than three days of submitted-remittance last-updated history in the previous seven days.");
+        const policy=pickupPolicy({...setting.data,pickup_window_start:observed.start,pickup_window_end:observed.end});
         if(!policy) throw new Error("COD pickup timing is not configured for this station.");
-        const overdue=overdueRemittancesAfterGrace(c.data.rows,c.data.latestSubmitted,policy,new Date(),30);
+        const overdue=overdueRemittancesAfterGrace(c.data.rows,c.data.latestSubmitted,policy,now,30);
         const overdueAmount=overdue.reduce((sum,item)=>sum+Math.max(0,Number(item.row.expectedAmount)||0),0);
-        const bankerVisitAt=Math.max(0,...c.data.rows.filter(row=>row.status.toUpperCase()==="SUBMITTED").map(row=>Number(row.submittedAt)||Number(row.updatedAt)||0));
+        const bankerVisitAt=Math.max(0,...c.data.rows.filter(row=>row.status.toUpperCase()==="SUBMITTED").map(row=>Number(row.updatedAt)||0));
         const bankerVisitedToday=bankerVisitAt>0&&istDay(new Date(bankerVisitAt))===day;
-        const requiredAction=bankerVisitedToday
-          ? "Banker already visited today · hand over or submit the remaining COD; do not mark Banker Not Reported"
-          : policy.rule==="Same Day-Complete"
-          ? "Hand over all COD today · no COD can be held overnight"
-          : policy.rule==="Same Day-Partial"
-            ? "Hand over all COD available by pickup; later cash follows the next pickup"
-            : "Hand over all COD in the configured next-day pickup";
-        rows.push(["Pickup rule",policy.rule],["Banker visit signal",bankerVisitedToday?"Confirmed · remittance updated today":"No submitted remittance update today"],["Required action",requiredAction],["Pickup window",`${policy.start}–${policy.end} IST`],["Overdue remittances",overdue.length],["Overdue amount",money(overdueAmount)]);
-        if(overdue[0]) rows.push(["Reason",overdue[0].reason]);
+        rows.push(
+          ["CMS usually reports",`${observed.start}–${observed.end} IST`],
+          ["Due remittances",`${overdue.length} · ${money(overdueAmount)}`],
+          ...(bankerVisitedToday ? [["Submitted today",new Date(bankerVisitAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST"]] as [string,string][] : []),
+          ["Action",bankRemittanceFollowup(bankerVisitedToday)],
+        );
         pending ||= overdue.length>0;
       } else {
         rows.push(["Open remittances", c.data.openCount], ["Open amount", money(c.data.openAmount)]);

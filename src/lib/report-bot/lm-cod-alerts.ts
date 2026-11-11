@@ -14,9 +14,41 @@ const istMinutes = (now:Date) => {
 
 export type OverdueRemittance = { row:CodRemittance; reason:string; dueAt:number };
 
-/** Pickup timing comes from COD Pickup Master. The extra grace prevents an
- * alert at the exact configured pickup close and gives the station 30 minutes
- * to update the portal. */
+/** Observed submission updates are a proxy for banker reporting, never proof of
+ * physical arrival. Exclude today so a delayed visit cannot move its own deadline.
+ * Use every valid update in the previous seven IST days; sparse history fails closed. */
+export function observedBankerWindow(rows:CodRemittance[],now=new Date()) {
+  const today=new Date(now.getTime()+330*60000).toISOString().slice(0,10);
+  const end=dayAt(today,"00:00"), start=end-7*86400000;
+  const days=new Set<string>(), minutes:number[]=[];
+  const seen=new Set<string>();
+  for(const row of rows) {
+    const at=row.updatedAt;
+    if(row.status.toUpperCase()!=="SUBMITTED" || typeof at!=="number" || !Number.isFinite(at) || at<start || at>=end) continue;
+    const key=row.id || row.code || String(at);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const shifted=new Date(at+330*60000);
+    days.add(shifted.toISOString().slice(0,10));
+    minutes.push(shifted.getUTCHours()*60+shifted.getUTCMinutes());
+  }
+  if(days.size<3) return null;
+  const first=Math.floor(Math.min(...minutes)/30)*30;
+  const last=Math.min(1439,Math.max(first+30,Math.ceil(Math.max(...minutes)/30)*30));
+  const clock=(n:number)=>String(Math.floor(n/60)).padStart(2,"0")+":"+String(n%60).padStart(2,"0");
+  return {start:clock(first),end:clock(last),sampleDays:days.size,samples:minutes.length,
+    from:new Date(start+330*60000).toISOString().slice(0,10),
+    to:new Date(end-1+330*60000).toISOString().slice(0,10)};
+}
+
+export function bankRemittanceFollowup(updatedToday:boolean) {
+  return updatedToday
+    ? "A remittance was already submitted today. Why is the remaining due amount still pending? Confirm handover and update the portal."
+    : "Why is today's due remittance still pending? If the CMS person has not arrived, call immediately. If there is no response, email cod-recon@amazon.com; CC your Cluster Manager, CTL, CRM, ct@dropxlogistics.com and varun@dropxlogistics.com.";
+}
+
+/** Retain the station's pickup cycle with the observed reporting window. The
+ * extra grace gives the station 30 minutes after its end to update the portal. */
 export function overdueRemittancesAfterGrace(rows:CodRemittance[],latest:CodRemittance|null,policy:PickupPolicy|null,now=new Date(),graceMinutes=30):OverdueRemittance[] {
   if(!policy) return [];
   return rows.filter(openRemittance).flatMap(row=>{

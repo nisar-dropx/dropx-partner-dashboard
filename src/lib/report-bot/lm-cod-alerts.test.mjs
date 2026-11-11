@@ -1,9 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
+import { bankRemittanceFollowup, observedBankerWindow, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
 
 const at=value=>Date.parse(value+"+05:30");
 const row=(created,status="CREATED")=>({id:created,code:"AC1",status,expectedAmount:100,actualAmount:100,variance:0,createdAt:at(created),updatedAt:at(created),submittedAt:status==="SUBMITTED"?at(created):null,createdBy:"station",submittedBy:status==="SUBMITTED"?"station":null});
+
+test("banker window uses last updates, excludes today and respects the seven IST dates",()=>{
+  const history=[5,7,10].map((day,index)=>({...row(`2026-11-${String(day).padStart(2,"0")}T20:00:00`,"SUBMITTED"),
+    updatedAt:at(`2026-11-${String(day).padStart(2,"0")}T10:${[32,43,58][index]}:00`)}));
+  const now=new Date(at("2026-11-12T20:00:00"));
+  const result=observedBankerWindow([...history,
+    row("2026-11-04T03:00:00","SUBMITTED"),row("2026-11-12T19:00:00","SUBMITTED"),
+    row("2026-11-09T23:00:00"),{...row("2026-11-08T22:00:00","SUBMITTED"),updatedAt:null}],now);
+  assert.deepEqual(result,{start:"10:30",end:"11:00",sampleDays:3,samples:3,from:"2026-11-05",to:"2026-11-11"});
+  assert.equal(observedBankerWindow([history[0],history[0],history[1]],now),null);
+  const policy={rule:"Next Day",...result,preparationFrom:"16:00"};
+  assert.equal(overdueRemittancesAfterGrace([row("2026-11-11T20:00:00")],null,policy,new Date(at("2026-11-12T11:29:00"))).length,0);
+  assert.equal(overdueRemittancesAfterGrace([row("2026-11-11T20:00:00")],null,policy,new Date(at("2026-11-12T11:30:00"))).length,1);
+  assert.equal(overdueRemittancesAfterGrace([row("2026-11-12T20:00:00")],null,policy,now).length,0);
+});
 
 test("bank alerts wait for pickup end plus thirty minutes",()=>{
   const policy={rule:"Same Day-Complete",start:"18:00",end:"18:30"};
@@ -62,4 +77,14 @@ test("Prepare Deposit waits for zero OOR and two hours, then uses the 10 PM clos
   assert.equal(prepareDepositAlertState(0,closure,100,new Date(at("2026-11-11T20:00:00"))).due,true);
   assert.equal(prepareDepositAlertState(0,null,100,new Date(at("2026-11-11T22:00:00"))).due,true);
   assert.equal(prepareDepositAlertState(0,null,0,new Date(at("2026-11-11T22:00:00"))).due,false);
+});
+
+// A recorded submission must not trigger a missing-banker escalation.
+test("bank follow-up escalates only when no submission was updated today",()=>{
+  assert.match(bankRemittanceFollowup(false),/call immediately/);
+  assert.match(bankRemittanceFollowup(false),/cod-recon@amazon\.com/);
+  assert.match(bankRemittanceFollowup(false),/Cluster Manager, CTL, CRM, ct@dropxlogistics\.com and varun@dropxlogistics\.com/);
+  assert.doesNotMatch(bankRemittanceFollowup(true),/not arrived|email|cod-recon/);
+  assert.match(bankRemittanceFollowup(true),/remaining due amount/);
+  assert.doesNotMatch(bankRemittanceFollowup(false),/seven|last.updat/i);
 });

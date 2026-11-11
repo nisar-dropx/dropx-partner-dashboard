@@ -5,6 +5,9 @@ import type { ReportKey } from "./lm-dispatch-config";
 const MAX_CAPTION = 1200;
 
 function fallback(report: ReportKey, status: string, asOf: string, question: string, mentions: string[]) {
+  // The bank report rows already carry the timing and conditional escalation.
+  // Avoid repeating them or exposing internal timing calculations in the caption.
+  if (report === "bank") return [question, mentions.map(number => "@" + number).join(" ")].filter(Boolean).join("\n");
   const lead: Record<string, string> = {
     edd: "Why is EDD still pending for OOR? Please move the pending TIDs to OOR and confirm.",
     station: "Why are these shipments still at the station? Please assign them and complete the next action.",
@@ -17,7 +20,6 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     cod: "COD pending requires immediate station action. Please update the status and confirm.",
     recon: "The listed DA reconciliation remains pending after the 90-minute grace or the 10:00 PM closing sweep. Complete it now and confirm.",
     deposit: "Out on road is zero and Prepare Deposit remains pending after the operational grace. Complete it now and confirm.",
-    bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Check the banker visit signal: use Banker Not Reported only when no remittance was updated today and the banker genuinely did not arrive.",
     slip: "Station TL: the bank deposit slip is still not uploaded after remittance submission. Please upload it in OpsPulse.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
