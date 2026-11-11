@@ -4,6 +4,7 @@ import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
 import { pickupPolicy } from "@/lib/ops-pulse/cod-pickup";
+import { collectionDay } from "@/lib/ops-pulse/cod-reconciliation";
 import { AGEING_DAY_BUCKETS, CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
 import { stationDotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { reportBotDb } from "./settings";
@@ -42,6 +43,25 @@ function fresh(stamp: string | null, day: string) {
   return stamp!;
 }
 const money = (value: number) => "₹" + value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+function reconciliationAlertRows(data:NonNullable<Awaited<ReturnType<typeof fetchCodStatus>>["reconciliation"]["data"]>,day:string) {
+  const dayMs=Date.parse(`${day}T00:00:00Z`);
+  const drivers=(data.drivers || []).filter(driver=>Math.abs(Number(driver.pendingAmount)||0)>=0.01).map(driver=>{
+    const dated=(driver.packages || []).map(pkg=>collectionDay(pkg.collectedAt)).filter((value):value is string=>Boolean(value));
+    const oldestDays=dated.length ? Math.max(...dated.map(value=>Math.max(0,Math.floor((dayMs-Date.parse(`${value}T00:00:00Z`))/86400000)))) : null;
+    return {...driver,oldestDays};
+  }).sort((a,b)=>(b.oldestDays??-1)-(a.oldestDays??-1)||Math.abs(b.pendingAmount)-Math.abs(a.pendingAmount));
+  const priorDayDrivers=drivers.filter(driver=>(driver.oldestDays??0)>=1);
+  return [
+    ["DAs pending",data.pendingCount] as [string,string|number],
+    ["Cash pending",money(data.pendingAmount)] as [string,string|number],
+    ...(priorDayDrivers.length ? [["Prior-day DAs",priorDayDrivers.length] as [string,string|number]] : []),
+    ...drivers.map(driver=>[
+      `${driver.name || driver.id}${driver.oldestDays===null?" · age unknown":driver.oldestDays>=1?` · ${driver.oldestDays}d ageing`:" · today"}`,
+      `${money(driver.pendingAmount)} · ${(driver.packages || []).length} TID${(driver.packages || []).length===1?"":"s"}`,
+    ] as [string,string|number]),
+  ];
+}
 
 /**
  * Exact Today EDD queue used by the Last Mile Report Bot. A station is eligible
@@ -180,13 +200,14 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
       const c = s.reconciliation;
       if (!c.data || c.state !== "ok") throw new Error("DA reconciliation unavailable.");
       fresh(c.checkedAt, day);
-      rows.push(["DAs pending", c.data.pendingCount], ["Cash pending", money(c.data.pendingAmount)]);
+      rows.push(...reconciliationAlertRows(c.data,day));
       pending ||= c.data.pendingAmount > 0 || c.data.pendingCount > 0;
     }
     if (key === "cod" || key === "deposit") {
       const c = s.prepareDeposit;
       if (!c.data || c.state !== "ok") throw new Error("Deposit balance unavailable.");
-      fresh(c.checkedAt, day); rows.push(["Cash to prepare", money(c.data.actualAmount)]);
+      fresh(c.checkedAt, day);
+      rows.push(["Expected cash",money(c.data.expectedAmount)],["Cash to prepare", money(c.data.actualAmount)],["Difference",money(c.data.variance)]);
       pending ||= c.data.actualAmount > 0;
     }
     if (key === "cod" || key === "bank") {
