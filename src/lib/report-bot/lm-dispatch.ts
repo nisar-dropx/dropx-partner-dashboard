@@ -308,6 +308,12 @@ async function standardOutputs(route:Route, header:string, rows:[string,string|n
   return outputs.sort((a,b)=>a.key.localeCompare(b.key));
 }
 
+async function reconciliationOutputs(route:Route,header:string,columns:string[],rows:Array<Array<string|number>>,caption:string):Promise<SendOutput[]> {
+  const mentions=route.mentions.map(number=>number+"@s.whatsapp.net");
+  const image_base64=await reportPngBase64(await tableReportSvg(header,columns,rows,[],()=>info));
+  return [{key:"photo",body:{image_base64,mime:"image/png",caption,...(mentions.length?{mentions}:{})}}];
+}
+
 async function claimRun(routeId:string,day:string,slot:string) {
   const db = reportBotDb();
   const inserted = await db.from("report_bot_lm_dispatch_runs").insert({route_id:routeId,day,slot}).select("id,status").single();
@@ -444,7 +450,13 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
             const mentionNumbers = await resolveRouteMentionNumbers(company, sources, route, day);
             const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(reports[0].asOf), rows.map(([label,value])=>`${label}: ${value}`).join("; "), route.question, mentionNumbers);
-            outputs=await standardOutputs({...route,mentions:mentionNumbers},header,rows,caption,day); detail=header;
+            if(route.report==="recon") {
+              const firstTable=reports.find(report=>report.table)?.table;
+              const tableRows=reports.flatMap((report,index)=>(report.table?.rows||[]).map(row=>sources.length>1?[sources[index].station_code,...row]:row));
+              const columns=firstTable ? (sources.length>1?["Station",...firstTable.columns]:firstTable.columns) : ["DA","Last delivery","90-min due","Pending ₹","TIDs","Age","Status"];
+              outputs=await reconciliationOutputs({...route,mentions:mentionNumbers},header,columns,tableRows,caption);
+            } else outputs=await standardOutputs({...route,mentions:mentionNumbers},header,rows,caption,day);
+            detail=header;
             sentSnapshot={rows,asOf:reports[0].asOf};
           }
         }

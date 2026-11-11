@@ -3,11 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { readAllRows } from '@/lib/supabase-pagination';
 import { loadPeopleOperationalHierarchy } from '@/lib/people-operational-hierarchy';
 import { codStatusToday } from './cod-status';
-import { teamShift, type CodTeamPerson, type TeamRosterRow } from './cod-station-team-core';
+import { isDirectoryAssignmentInScope, teamShift, type CodTeamPerson, type TeamRosterRow } from './cod-station-team-core';
 import { isRosterPlanActiveOn } from '@/lib/roster-plan-preference';
 
 /** Contact-only projection from active People engagements and current assignments. */
-export async function loadCodTeamDirectory(companyId:string, locationIds:string[], managerPersonIds:string[]=[], asOf=codStatusToday(), additionalDesignationCodes:string[]=[]) {
+export async function loadCodTeamDirectory(companyId:string, locationIds:string[], managerPersonIds:string[]=[], asOf=codStatusToday(), _additionalDesignationCodes:string[]=[]) {
   if(!supabaseAdmin) throw Error('People unavailable.');
   if(!locationIds.length) return [] as CodTeamPerson[];
   const db=supabaseAdmin;
@@ -22,7 +22,6 @@ export async function loadCodTeamDirectory(companyId:string, locationIds:string[
   const engagementById=new Map(engagements.map(row=>[row.id,row]));
   const personById=new Map(people.map(row=>[row.id,row]));
   const designationById=new Map(designations.map(row=>[row.id,row]));
-  const additionalCodes=new Set(additionalDesignationCodes.map(code=>code.trim().toUpperCase()).filter(Boolean));
   const seen=new Set<string>();
   const candidates=assignments.flatMap(row=>{
     // Resolve the current assignment before station scope, so transfers cannot
@@ -31,7 +30,10 @@ export async function loadCodTeamDirectory(companyId:string, locationIds:string[
     seen.add(row.engagement_id);
     const e=engagementById.get(row.engagement_id),p=e && personById.get(e.person_id);
     const d=designationById.get(row.designation_id);
-    if(!e || !p || (!locationIds.includes(row.location_id) && !managerPersonIds.includes(p.id) && !additionalCodes.has(String(d?.code||'').trim().toUpperCase()))) return [];
+    // Role filters must never widen the station boundary. A route asking for TL,
+    // SSA or CT contacts is still scoped to its configured source station(s);
+    // only an explicitly resolved manager may sit outside that station assignment.
+    if(!e || !p || !isDirectoryAssignmentInScope(row.location_id,p.id,locationIds,managerPersonIds)) return [];
     const workerType=e.worker_type==='employee'?'employee':e.contractor_id?'contractor':null;
     const workerId=workerType==='employee'?e.employee_id:e.contractor_id;
     if(!workerType || !workerId) return [];

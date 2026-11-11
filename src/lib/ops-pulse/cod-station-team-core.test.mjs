@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {teamShift,isStationLead} from './cod-station-team-core.ts';
+import {teamShift,isStationLead,isDirectoryAssignmentInScope} from './cod-station-team-core.ts';
+
+test('directory role filters never widen the configured station boundary',()=>{
+  assert.equal(isDirectoryAssignmentInScope('station-a','person-a',['station-a'],[]),true);
+  assert.equal(isDirectoryAssignmentInScope('station-b','person-b',['station-a'],[]),false);
+  assert.equal(isDirectoryAssignmentInScope('head-office','manager-a',['station-a'],['manager-a']),true);
+});
 const person={workerId:'tl1',workerType:'employee'};
 const day='2026-10-13';
 const plan={status:'approved',roster_kind:'recurring_weekly',effective_from:'2026-10-01'};

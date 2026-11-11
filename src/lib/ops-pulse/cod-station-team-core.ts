@@ -1,6 +1,9 @@
 import { preferActiveRosterRow, formatShiftClock, type RosterPlanPreference } from '../roster-plan-preference.ts';
 export type CodTeamPerson = {personId:string;name:string;role:string;roleCode:string;phone:string|null;workerId:string;workerType:string;locationId:string|null;manager:boolean;shift?:string};
 export type CodStationTeam = {asOf:string;people:CodTeamPerson[]};
+export function isDirectoryAssignmentInScope(locationId:string|null,personId:string,locationIds:string[],managerPersonIds:string[]) {
+  return Boolean(locationId && locationIds.includes(locationId)) || managerPersonIds.includes(personId);
+}
 export function isStationLead(person:Pick<CodTeamPerson,'roleCode'|'role'>) {
   return ['TL','ATL','STM'].includes(person.roleCode.toUpperCase()) || /\b(team lead(?:er)?|station manager|hub incharge)\b/i.test(person.role);
 }

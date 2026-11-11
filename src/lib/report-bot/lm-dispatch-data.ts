@@ -13,7 +13,12 @@ import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
 import { overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
-export type DispatchReport = { asOf: string; rows: [string, string | number][]; pending: boolean };
+export type DispatchReport = {
+  asOf: string;
+  rows: [string, string | number][];
+  pending: boolean;
+  table?: { columns: string[]; rows: Array<Array<string | number>> };
+};
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
 export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
 export type EodDsrRow = { Station:string; "Verified total":number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "DSR %":string };
@@ -53,7 +58,7 @@ function reconciliationAlertRows(data:NonNullable<Awaited<ReturnType<typeof fetc
     return {...driver,oldestDays,lastDeliveryAt,alert:reconciliationDriverAlert(lastDeliveryAt,now,90,"22:00")};
   }).filter(driver=>driver.alert.due).sort((a,b)=>(b.oldestDays??-1)-(a.oldestDays??-1)||Math.abs(b.pendingAmount)-Math.abs(a.pendingAmount));
   const priorDayDrivers=drivers.filter(driver=>(driver.oldestDays??0)>=1);
-  return [
+  const rows = [
     ["DAs requiring reconciliation",drivers.length] as [string,string|number],
     ["Cash with listed DAs",money(drivers.reduce((sum,driver)=>sum+Number(driver.pendingAmount||0),0))] as [string,string|number],
     ["Rule",drivers.some(driver=>driver.alert.fullSweep)?"10 PM closing sweep · all pending DAs":"90 minutes after last COD delivery"] as [string,string|number],
@@ -63,6 +68,16 @@ function reconciliationAlertRows(data:NonNullable<Awaited<ReturnType<typeof fetc
       `${driver.lastDeliveryAt?new Date(driver.lastDeliveryAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" last delivery":"last delivery unverified"} · ${money(driver.pendingAmount)} · ${(driver.packages || []).length} TID${(driver.packages || []).length===1?"":"s"}`,
     ] as [string,string|number]),
   ];
+  const clock=(value:number|null)=>value
+    ? new Date(value).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})
+    : "Unverified";
+  const tableRows=drivers.map(driver=>{
+    const dueAt=driver.lastDeliveryAt ? driver.lastDeliveryAt+90*60000 : null;
+    const age=driver.oldestDays===null ? "Unknown" : driver.oldestDays>=1 ? `${driver.oldestDays}d` : "Today";
+    const overdue=driver.alert.elapsedMinutes===null ? "Closing sweep" : `${Math.max(0,driver.alert.elapsedMinutes-90)}m overdue`;
+    return [driver.name||driver.id,clock(driver.lastDeliveryAt),clock(dueAt),money(driver.pendingAmount),(driver.packages||[]).length,age,overdue] as Array<string|number>;
+  });
+  return {rows,table:{columns:["DA","Last delivery","90-min due","Pending ₹","TIDs","Age","Status"],rows:tableRows}};
 }
 
 async function prepareDepositOperations(code:string,day:string,pendingAmount:number,now=new Date()) {
@@ -219,9 +234,10 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
       const c = s.reconciliation;
       if (!c.data || c.state !== "ok") throw new Error("DA reconciliation unavailable.");
       fresh(c.checkedAt, day);
-      const alertRows=reconciliationAlertRows(c.data,day,new Date());
-      rows.push(...alertRows);
-      pending ||= Number(alertRows[0]?.[1]||0)>0;
+      const alert=reconciliationAlertRows(c.data,day,new Date());
+      rows.push(...alert.rows);
+      pending ||= Number(alert.rows[0]?.[1]||0)>0;
+      if(key==="recon") return {asOf,pending,rows,table:alert.table};
     }
     if (key === "cod" || key === "deposit") {
       const c = s.prepareDeposit;
