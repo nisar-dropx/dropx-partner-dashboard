@@ -18,7 +18,7 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     recon: "The listed DA reconciliation remains pending after the 90-minute grace or the 10:00 PM closing sweep. Complete it now and confirm.",
     deposit: "Out on road is zero and Prepare Deposit remains pending after the operational grace. Complete it now and confirm.",
     bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Check the banker visit signal: use Banker Not Reported only when no remittance was updated today and the banker genuinely did not arrive.",
-    slip: "Action required — TL and closing-shift SSA: the bank deposit slip is still not uploaded after remittance submission. Upload it now. Cluster Manager and Control Tower: for information.",
+    slip: "Station TL: the bank deposit slip is still not uploaded after remittance submission. Please upload it in OpsPulse.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
   return [lead[report], `Status: ${status}. As of ${asOf} IST.`, question, mentions.length ? mentions.map(number => "@" + number).join(" ") : ""].filter(Boolean).join("\n");

@@ -222,7 +222,7 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     const asOf=fresh(remittances.checkedAt,day),latest=remittances.data.latestSubmitted;
     const reminder=slipReminderState(latest,new Date(),30,60,30),submittedAt=submittedRemittanceAt(latest);
     const pending=r.pending&&reminder.due;
-    return { asOf, pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Latest remittance", latest?.code||"Not submitted"], ["Remittance submitted", submittedAt?new Date(submittedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"—"], ["Waiting for slip",submittedAt?`${reminder.elapsedMinutes} minutes`:"—"], ["Reminder",reminder.stage<=1?"First follow-up · 30 minutes":"Repeat follow-up · hourly"], ["Action owner","TL + closing-shift SSA"], ["For information","Cluster Manager + Control Tower"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
+    return { asOf, pending, rows: [["Status", r.status], ["Slip uploaded", r.slipUploaded ? "Yes" : "No"], ["Latest remittance", latest?.code||"Not submitted"], ["Remittance submitted", submittedAt?new Date(submittedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit"})+" IST":"—"], ["Waiting for slip",submittedAt?`${reminder.elapsedMinutes} minutes`:"—"], ["Reminder",reminder.stage<=1?"First follow-up · 30 minutes":"Repeat follow-up · hourly"], ["Action owner","Station TL"], ["Deposit", r.amount === null ? "—" : money(r.amount)]] };
   }
   if (["cod", "recon", "deposit", "bank"].includes(key)) {
     const s = await fetchCodStatus(code);
