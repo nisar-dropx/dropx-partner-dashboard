@@ -19,6 +19,7 @@ export function buildWorkforcePayoutPublicationSnapshot(
   periodEnd: string,
   dependencyHash: string
 ) {
+  const calculationStatus = row.publicationCalculationStatus ?? row.status;
   const dailyLines = row.dailyBreakdown.map((day, index) => {
     const counts = productionCounts(day.lines);
     return {
@@ -124,9 +125,9 @@ export function buildWorkforcePayoutPublicationSnapshot(
     lines,
     worksheet: {
       row_id: row.id,
-      payment_status: row.status,
+      payment_status: calculationStatus,
       payment_details_available: row.paymentDetailsAvailable,
-      payment_eligible: row.paymentDetailsAvailable && isWorkforcePayoutCalculationPublishable(row.status),
+      payment_eligible: row.paymentDetailsAvailable && isWorkforcePayoutCalculationPublishable(calculationStatus),
       dropx_status: row.dropxStatus,
       provider: row.provider,
       model: row.model,

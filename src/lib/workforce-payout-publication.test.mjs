@@ -59,6 +59,16 @@ test("a zero payout produces a valid frozen publication snapshot", () => {
   assert.deepEqual(snapshot.lines, []);
 });
 
+test("a returned review submits the same snapshot the worksheet signed", () => {
+  const calculated = row({ status: "Awaiting production" });
+  const returned = { ...calculated, status: "Returned", publicationCalculationStatus: calculated.status };
+  const period = ["2026-10-01", "2026-10-31", "version-a"];
+  const signed = buildWorkforcePayoutPublicationSnapshot(calculated, ...period);
+  const submitted = buildClientSnapshot(returned, ...period);
+  assert.equal(submitted.worksheet.payment_eligible, true);
+  assert.equal(workforcePayoutPublicationSnapshotHash(submitted), workforcePayoutPublicationSnapshotHash(signed));
+});
+
 test("an incentive is frozen once as incentive money and never mixed into adjustments", () => {
   const snapshot = buildWorkforcePayoutPublicationSnapshot(row({
     baseAmount: 1000,

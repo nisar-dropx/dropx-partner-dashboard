@@ -438,6 +438,7 @@ async function withPayoutReviewStatuses(
         publicationTargetAmount: audience === "workforce" ? publication?.targetAmount ?? null : null,
         reviewToken,
         publicationDependencyHash: audience === "workforce" ? dependencyHash : null,
+        publicationCalculationStatus: audience === "workforce" ? row.status : undefined,
         publicationLocations: publishableLocationsBySubject.get(String(row.reviewSubjectId)) ?? []
       };
     }),
