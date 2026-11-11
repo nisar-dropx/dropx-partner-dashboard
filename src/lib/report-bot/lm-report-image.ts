@@ -47,7 +47,7 @@ const rect = (x: number, y: number, width: number, height: number, fill: string)
 const svg = (width: number, height: number, body: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${body}</svg>`;
 export type CellStyle = { background: string; color: string } | null;
 
-export async function summaryReportSvg(title: string, rows: [string, string | number][]) {
+export async function summaryReportSvg(title: string, rows: [string, string | number][], rowStyle?: (label: string, value: string | number) => CellStyle) {
   const available = await fonts();
   const text = (value: string | number, options: TextOptions) => outlinedText(available, value, options);
   const visible = rows.slice(0, 70);
@@ -56,19 +56,22 @@ export async function summaryReportSvg(title: string, rows: [string, string | nu
     rect(0, 0, 900, 50, "#193456") + text(title, { x: 18, y: 32, size: 18, maxWidth: 864, color: "white", bold: true }) +
     visible.map(([label, value], index) => {
       const y = 50 + index * 34;
-      return rect(0, y, 900, 34, index % 2 ? "#f2f5f9" : "#fff") +
+      const style = rowStyle?.(label, value) ?? null;
+      return rect(0, y, 690, 34, index % 2 ? "#f2f5f9" : "#fff") +
+        rect(690, y, 210, 34, style?.background || (index % 2 ? "#e7edf5" : "#eef3f8")) +
         text(label, { x: 18, y: y + 23, size: 18, maxWidth: 650 }) +
-        text(value, { x: 875, y: y + 23, size: 18, maxWidth: 190, anchor: "end", bold: true });
+        text(value, { x: 875, y: y + 23, size: 18, maxWidth: 170, anchor: "end", color: style?.color, bold: true });
     }).join(""));
 }
 
-export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string, percentageStyle: (value: string | number) => CellStyle) {
+export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string | readonly string[], percentageStyle: (value: string | number) => CellStyle) {
   if (!columns.length) throw new Error("Report image requires columns");
   const available = await fonts();
   const text = (value: string | number, options: TextOptions) => outlinedText(available, value, options);
   const columnWidth = Math.max(102, Math.min(158, Math.floor(1264 / columns.length)));
   const width = columns.length * columnWidth;
   const rowHeight = 29, titleHeight = 45;
+  const percentageColumns: readonly string[] = typeof percentageColumn === "string" ? [percentageColumn] : percentageColumn;
   // Keep all configured stations and the actual total, never truncate a report.
   const header = columns.map((label, index) => rect(index * columnWidth, titleHeight, columnWidth, rowHeight, "#dce8f6") +
     text(label, { x: index * columnWidth + (index ? columnWidth / 2 : 8), y: titleHeight + 20, size: 13, maxWidth: columnWidth - 16, anchor: index ? "middle" : "start", bold: true })).join("");
@@ -77,7 +80,7 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
     return columns.map((column, columnIndex) => {
       const value = row[columnIndex] ?? "—";
       const y = titleHeight + rowHeight * (rowIndex + 1);
-      const style = !total && column === percentageColumn ? percentageStyle(value) : null;
+      const style = !total && percentageColumns.includes(column) ? percentageStyle(value) : null;
       return rect(columnIndex * columnWidth, y, columnWidth, rowHeight, style?.background || (total ? "#e8eef6" : rowIndex % 2 ? "#f6f8fb" : "#fff")) +
         text(value, { x: columnIndex * columnWidth + (columnIndex ? columnWidth / 2 : 10), y: y + 20, size: 13, maxWidth: columnWidth - 20, anchor: columnIndex ? "middle" : "start", color: style?.color, bold: total || !!style });
     }).join("");

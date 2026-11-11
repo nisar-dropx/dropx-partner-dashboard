@@ -7,7 +7,7 @@ import { teamShift, type CodTeamPerson, type TeamRosterRow } from './cod-station
 import { isRosterPlanActiveOn } from '@/lib/roster-plan-preference';
 
 /** Contact-only projection from active People engagements and current assignments. */
-export async function loadCodTeamDirectory(companyId:string, locationIds:string[], managerPersonIds:string[]=[], asOf=codStatusToday()) {
+export async function loadCodTeamDirectory(companyId:string, locationIds:string[], managerPersonIds:string[]=[], asOf=codStatusToday(), additionalDesignationCodes:string[]=[]) {
   if(!supabaseAdmin) throw Error('People unavailable.');
   if(!locationIds.length) return [] as CodTeamPerson[];
   const db=supabaseAdmin;
@@ -22,6 +22,7 @@ export async function loadCodTeamDirectory(companyId:string, locationIds:string[
   const engagementById=new Map(engagements.map(row=>[row.id,row]));
   const personById=new Map(people.map(row=>[row.id,row]));
   const designationById=new Map(designations.map(row=>[row.id,row]));
+  const additionalCodes=new Set(additionalDesignationCodes.map(code=>code.trim().toUpperCase()).filter(Boolean));
   const seen=new Set<string>();
   const candidates=assignments.flatMap(row=>{
     // Resolve the current assignment before station scope, so transfers cannot
@@ -29,8 +30,8 @@ export async function loadCodTeamDirectory(companyId:string, locationIds:string[
     if(seen.has(row.engagement_id)) return [];
     seen.add(row.engagement_id);
     const e=engagementById.get(row.engagement_id),p=e && personById.get(e.person_id);
-    if(!e || !p || (!locationIds.includes(row.location_id) && !managerPersonIds.includes(p.id))) return [];
     const d=designationById.get(row.designation_id);
+    if(!e || !p || (!locationIds.includes(row.location_id) && !managerPersonIds.includes(p.id) && !additionalCodes.has(String(d?.code||'').trim().toUpperCase()))) return [];
     const workerType=e.worker_type==='employee'?'employee':e.contractor_id?'contractor':null;
     const workerId=workerType==='employee'?e.employee_id:e.contractor_id;
     if(!workerType || !workerId) return [];

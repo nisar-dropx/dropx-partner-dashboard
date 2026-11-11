@@ -970,7 +970,6 @@ export async function saveDispatchRoutes(form: FormData) {
     if (!Object.prototype.hasOwnProperty.call(dispatchReports,report)) throw new Error("Select a report.");
     const scopeType = field(form,"scope_type");
     if (!['station','region'].includes(scopeType)) throw new Error("Choose station or region scope.");
-    if (report === "eod" && scopeType !== "region") throw new Error("Final EOD must use Regional / Internal LM scope.");
     const formats = [...new Set(form.getAll("format").map(String))];
     if (!formats.length || formats.some(value => !["photo","text","excel"].includes(value))) throw new Error("Choose at least one output format.");
     if (report === "eod" && (formats.length !== 1 || formats[0] !== "photo")) throw new Error("Final EOD sends compact table images only.");
@@ -983,12 +982,14 @@ export async function saveDispatchRoutes(form: FormData) {
     if (question.length > 400) throw new Error("Keep the question under 400 characters.");
     const managerPolicy = field(form,"mention_manager_policy") || "none";
     if (!["none","cluster_then_aom"].includes(managerPolicy)) throw new Error("Choose a valid manager tagging policy.");
+    const requestedAlwaysDesignationCodes = [...new Set(form.getAll("mention_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
     const requestedDesignationCodes = [...new Set(form.getAll("mention_present_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
-    if (requestedDesignationCodes.length > 25) throw new Error("Choose no more than 25 present-team designations.");
-    if (requestedDesignationCodes.length) {
-      const activeDesignations = check(await reportBotDb().from("designations").select("code").eq("company_id",companyId).eq("is_active",true).in("code",requestedDesignationCodes),"Check designations") as Array<{code:string|null}>;
+    if (requestedDesignationCodes.length > 25 || requestedAlwaysDesignationCodes.length > 25) throw new Error("Choose no more than 25 designations in each tag rule.");
+    const allRequestedDesignationCodes=[...new Set([...requestedAlwaysDesignationCodes,...requestedDesignationCodes])];
+    if (allRequestedDesignationCodes.length) {
+      const activeDesignations = check(await reportBotDb().from("designations").select("code").eq("company_id",companyId).eq("is_active",true).in("code",allRequestedDesignationCodes),"Check designations") as Array<{code:string|null}>;
       const available = new Set(activeDesignations.map(row=>String(row.code||"").trim().toUpperCase()));
-      if (requestedDesignationCodes.some(code=>!available.has(code))) throw new Error("One or more selected designations are inactive or unavailable.");
+      if (allRequestedDesignationCodes.some(code=>!available.has(code))) throw new Error("One or more selected designations are inactive or unavailable.");
     }
     const ids = [...new Set(form.getAll("group_id").map(String))];
     if (!ids.length || ids.length > 100) throw new Error("Select between 1 and 100 mapped Last Mile groups.");
@@ -1001,7 +1002,7 @@ export async function saveDispatchRoutes(form: FormData) {
     const sourceModelCodes = [...new Set(form.getAll("source_model_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
     const availableModelCodes = new Set(lastMileLocations.map(location=>locationModelName(location).trim().toUpperCase()).filter(Boolean));
     if (sourceModelCodes.length > 25 || sourceModelCodes.some(code=>!availableModelCodes.has(code))) throw new Error("Choose active source models from the location master.");
-    if (report === "eod" && !sourceModelCodes.length) throw new Error("Choose at least one source model for Final EOD.");
+    if (report === "eod" && scopeType === "region" && !sourceModelCodes.length) throw new Error("Choose at least one source model for a regional Final EOD schedule.");
     if (scopeType === "station") {
       if (!sourceLocationIds.length || sourceLocationIds.length > 100 || sourceLocationIds.some(id=>!activeById.has(id))) throw new Error("Choose between 1 and 100 active source stations in your scope.");
     } else {
@@ -1023,7 +1024,7 @@ export async function saveDispatchRoutes(form: FormData) {
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
-        mentions,question,mention_manager_policy:managerPolicy,mention_present_designation_codes:requestedDesignationCodes,
+        mentions,question,mention_manager_policy:managerPolicy,mention_designation_codes:requestedAlwaysDesignationCodes,mention_present_designation_codes:requestedDesignationCodes,
         pending_only:report === "eod" ? false : form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()
       };
     }));

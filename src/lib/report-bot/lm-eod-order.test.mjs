@@ -14,8 +14,8 @@ test("EOD DSR is ordered by DSR percentage descending", () => {
 
 test("EOD DOT is ordered by DOT percentage descending", () => {
   const rows = orderEodDotRows([
-    { Station: "LOW", "DOT %": "45.0%" },
-    { Station: "HIGH", "DOT %": "90.0%" },
+    { Station: "LOW", "Overall DOT %": "45.0%" },
+    { Station: "HIGH", "Overall DOT %": "90.0%" },
   ]);
   assert.deepEqual(rows.map(row => row.Station), ["HIGH", "LOW"]);
 });

@@ -15,7 +15,7 @@ export function orderEodDsrRows<T extends NumericRow>(rows: T[]) {
 
 export function orderEodDotRows<T extends NumericRow>(rows: T[]) {
   return [...rows].sort((left, right) =>
-    percentage(right["DOT %"]) - percentage(left["DOT %"])
+    percentage(right["Overall DOT %"] ?? right["DOT %"]) - percentage(left["Overall DOT %"] ?? left["DOT %"])
     || stationTieBreak(left, right));
 }
 

@@ -32,6 +32,24 @@ test('table keeps every station, actual total and metric colours', async () => {
   assert.ok(!svg.includes('<text'));
 });
 
+test('summary report colours its value cells without losing compact zebra rows', async () => {
+  const svg = await summaryReportSvg('Pending report', [['Pending', 8], ['Clear', 0]], (_label, value) =>
+    Number(value) > 0 ? {background: '#fee2e2', color: '#991b1b'} : {background: '#dcfce7', color: '#166534'});
+  assert.equal((svg.match(/fill="#fee2e2"/g) || []).length, 1);
+  assert.equal((svg.match(/fill="#dcfce7"/g) || []).length, 1);
+  assert.ok(svg.includes('<rect x="690"'));
+});
+
+test('table can colour standard, premium and overall percentage columns together', async () => {
+  let styled = 0;
+  const svg = await tableReportSvg('DOT', ['Station', 'Standard DOT %', 'Premium DOT %', 'Overall DOT %'], [['A', '80%', '90%', '85%']], ['Standard DOT %', 'Premium DOT %', 'Overall DOT %'], () => {
+    styled++;
+    return {background: '#fff3c4', color: '#9b3b00'};
+  });
+  assert.equal(styled, 3);
+  assert.equal((svg.match(/fill="#fff3c4"/g) || []).length, 3);
+});
+
 test('unsupported characters fail instead of sending an unreadable image', async () => {
   await assert.rejects(summaryReportSvg('Report', [['\u{10ffff}', 1]]), /font does not support/);
 });

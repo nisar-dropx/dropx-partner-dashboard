@@ -14,6 +14,7 @@ export type MentionManagerPolicy = "none" | "cluster_then_aom";
 export type MentionRouteConfig = {
   mentions?: string[];
   mention_manager_policy?: MentionManagerPolicy;
+  mention_designation_codes?: string[];
   mention_present_designation_codes?: string[];
 };
 export type MentionSource = { id: string; station_code: string };
@@ -43,8 +44,9 @@ export async function resolveRouteMentionNumbers(
   const staticNumbers = (route.mentions ?? []).map(normalizeWhatsAppNumber).filter((value): value is string => Boolean(value));
   if (!sources.length) return [...new Set(staticNumbers)];
   const managerPolicy = route.mention_manager_policy ?? "none";
+  const designationCodesAlways = new Set((route.mention_designation_codes ?? []).map(code => code.trim().toUpperCase()).filter(Boolean));
   const designationCodes = new Set((route.mention_present_designation_codes ?? []).map(code => code.trim().toUpperCase()).filter(Boolean));
-  if (managerPolicy === "none" && !designationCodes.size) return [...new Set(staticNumbers)];
+  if (managerPolicy === "none" && !designationCodesAlways.size && !designationCodes.size) return [...new Set(staticNumbers)];
 
   const locationIds = sources.map(row => row.id);
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, locationIds, { includeStationResponsibilities: true, asOf: day });
@@ -58,11 +60,16 @@ export async function resolveRouteMentionNumbers(
     }
   }
 
-  const directory = await loadCodTeamDirectory(companyId, locationIds, [...managerPersonIds], day);
+  const directory = await loadCodTeamDirectory(companyId, locationIds, [...managerPersonIds], day, [...designationCodesAlways]);
   const byPerson = new Map(directory.map(person => [person.personId, person]));
   const dynamicNumbers = new Set<string>();
   for (const personId of managerPersonIds) {
     const phone = normalizeWhatsAppNumber(byPerson.get(personId)?.phone);
+    if (phone) dynamicNumbers.add(phone);
+  }
+  for (const person of directory) {
+    if (!designationCodesAlways.has(String(person.roleCode ?? "").trim().toUpperCase())) continue;
+    const phone = normalizeWhatsAppNumber(person.phone);
     if (phone) dynamicNumbers.add(phone);
   }
 
