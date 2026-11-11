@@ -31,6 +31,7 @@ import {
   loadWorkforceStationFinanceRequests,
   loadWorkforceStationReleaseStates
 } from "@/lib/workforce-payout-station-finance";
+import { summarizeWorkforcePayoutStations } from "@/lib/workforce-payout-station-review";
 import {
   mergeWorkforcePayoutPaymentState,
   workforcePayoutPublicationRefreshPending,
@@ -746,32 +747,38 @@ export const dynamic = "force-dynamic";
 // Keep enough headroom so enrichment can degrade instead of blanking the page.
 export const maxDuration = 120;
 
-async function settleEnrichment<T>(work: Promise<T>, fallback: T, label: string, timeoutMs = 0) {
-  const timed = timeoutMs > 0
-    ? Promise.race([
-      work,
-      new Promise<T>((resolve) => {
-        setTimeout(() => {
-          console.error(`[workforce-payouts] ${label} timed out after ${timeoutMs}ms`);
-          if (fallback && typeof fallback === "object" && "error" in (fallback as object)) {
-            resolve({ ...(fallback as object), error: `${label} timed out. Showing the worksheet without that enrichment.` } as T);
-            return;
-          }
-          resolve(fallback);
-        }, timeoutMs);
-      })
-    ])
-    : work;
-  try {
-    return await timed;
-  } catch (caught) {
-    const detail = caught instanceof Error ? caught.message : "unexpected failure";
-    console.error(`[workforce-payouts] ${label} failed:`, detail);
-    if (fallback && typeof fallback === "object" && "error" in (fallback as object)) {
-      return { ...(fallback as object), error: `${label} unavailable. ${detail}` } as T;
-    }
-    return fallback;
+function enrichmentFallback<T>(fallback: T, label: string, detail: string) {
+  console.error(`[workforce-payouts] ${label}:`, detail);
+  if (fallback && typeof fallback === "object" && "error" in (fallback as object)) {
+    return { ...(fallback as object), error: `${label} unavailable. ${detail}` } as T;
   }
+  return fallback;
+}
+
+async function settleEnrichment<T>(work: Promise<T>, fallback: T, label: string, timeoutMs = 0) {
+  // Always absorb late failures. A timed-out race winner must not leave the
+  // original work able to reject the request after the page has moved on.
+  const guarded = work.then(
+    (value) => value,
+    (caught) => enrichmentFallback(
+      fallback,
+      label,
+      caught instanceof Error ? caught.message : "unexpected failure"
+    )
+  );
+  if (timeoutMs <= 0) return guarded;
+  return Promise.race([
+    guarded,
+    new Promise<T>((resolve) => {
+      setTimeout(() => {
+        resolve(enrichmentFallback(
+          fallback,
+          label,
+          `timed out after ${timeoutMs}ms. Showing the worksheet without that enrichment.`
+        ));
+      }, timeoutMs);
+    })
+  ]);
 }
 
 export default async function WorkforcePayoutsPage({ searchParams = {} }: { searchParams?: Record<string, string | string[] | undefined> }) {
@@ -886,19 +893,24 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
         ),
       { rows: loaded.rows, error: loadError || "Review status unavailable." },
       "Review status",
-      45000
+      25000
     ),
     settleEnrichment(
-      loadError || !canLoadPaymentSummaries
-        ? Promise.resolve({ rows: loaded.rows, error: loadError })
+      loadError || !canLoadPaymentSummaries || loaded.rows.length > 250
+        ? Promise.resolve({
+          rows: loaded.rows,
+          error: loadError
+            || (loaded.rows.length > 250
+              ? "Payment ledger status deferred for this large worksheet. Station review and calculated rows remain available."
+              : null)
+        })
         : withPayoutPaymentSummaries(companyId, audience, period.fromDate, period.toDate, loaded.rows, {
-          // Exact processing-item actions are optional. Skip on large closed
-          // months so the worksheet can still render within the route budget.
-          includeProcessingActionDetails: canProcessPayments && loaded.rows.length <= 400
+          // Exact processing-item actions are optional enrichment.
+          includeProcessingActionDetails: canProcessPayments
         }),
       { rows: loaded.rows, error: loadError || "Payment status unavailable." },
       "Payment status",
-      45000
+      25000
     )
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
@@ -928,13 +940,20 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       : row;
   });
   const sourceHeld = await settleEnrichment(
-    loadError || !canLoadPaymentSummaries
-      ? Promise.resolve({ rows: reviewedPaymentRows, error: loadError })
+    loadError || !canLoadPaymentSummaries || reviewedPaymentRows.length > 250
+      ? Promise.resolve({
+        rows: reviewedPaymentRows,
+        error: loadError
+          || (reviewedPaymentRows.length > 250
+            ? "Source payment holds deferred for this large worksheet."
+            : null)
+      })
       : withPayoutSourcePaymentHolds(
         companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows
       ),
     { rows: reviewedPaymentRows, error: loadError || "Source payment holds unavailable." },
-    "Source holds"
+    "Source holds",
+    15000
   );
   const rows = sourceHeld.rows;
   // Worksheet rows are required. Review/payment/bank enrichment must degrade to a
@@ -956,6 +975,8 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
     ...request,
     changed: releaseByStation.get(request.stationId.toLowerCase())?.worksheetHash !== request.worksheetHash
   }));
+  // Compact station cards for the client board — never re-send the full worksheet.
+  const stationSummaries = summarizeWorkforcePayoutStations(rows);
   const advancePageCode = accessSurface === "ops" ? "ops_workforce_advances" : "workforce_advances";
   const canDeductAdvances = audience === "workforce"
     && canEdit
@@ -994,7 +1015,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       {error
         ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load {subjectLabel} payouts</strong><p className="subtle">{error}</p></div></section>
         : <WorkforcePayoutStationBoard
-            rows={rows}
+            stations={stationSummaries}
             paymentReleaseHref={paymentReleaseHref}
             lifecycleWarning={lifecycleWarning || null}
             audience={audience}

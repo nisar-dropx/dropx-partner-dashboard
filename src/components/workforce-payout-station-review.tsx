@@ -2,15 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import type {
   WorkforceStationFinanceRequest,
   WorkforceStationReleaseState
 } from "@/lib/workforce-payout-station-finance-types";
 import {
-  summarizeWorkforcePayoutStations,
   workforceStationReviewStatusLabel,
-  type WorkforceStationReviewStatus
+  type WorkforceStationReviewStatus,
+  type WorkforceStationReviewSummary
 } from "@/lib/workforce-payout-station-review";
 
 function money(value: number) {
@@ -42,7 +41,7 @@ function financeLabel(request: WorkforceStationFinanceRequest | undefined, relea
  * release / Finance APIs for durable confirmation — never a per-station bank query.
  */
 export function WorkforcePayoutStationReview({
-  rows,
+  stations,
   selectedStations,
   onSelectedStationsChange,
   paymentReleaseHref,
@@ -55,7 +54,7 @@ export function WorkforcePayoutStationReview({
   releases,
   financeRequests
 }: {
-  rows: WorkforcePayoutRow[];
+  stations: WorkforceStationReviewSummary[];
   selectedStations: string[];
   onSelectedStationsChange: (stations: string[]) => void;
   paymentReleaseHref?: string | null;
@@ -75,7 +74,6 @@ export function WorkforcePayoutStationReview({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reason, setReason] = useState("");
-  const stations = useMemo(() => summarizeWorkforcePayoutStations(rows), [rows]);
   const releaseByStation = useMemo(() => new Map(releases.map((row) => [row.stationId.toLowerCase(), row])), [releases]);
   const requestByStation = useMemo(() => new Map(financeRequests.map((row) => [row.stationId.toLowerCase(), row])), [financeRequests]);
   const selected = new Set(selectedStations);

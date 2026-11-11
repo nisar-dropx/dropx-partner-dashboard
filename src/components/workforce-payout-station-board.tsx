@@ -1,20 +1,20 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { WorkforcePayoutStationReview } from "@/components/workforce-payout-station-review";
 import { WorkforcePayoutLocationContext } from "@/components/workforce-payout-location-context";
 import type {
   WorkforceStationFinanceRequest,
   WorkforceStationReleaseState
 } from "@/lib/workforce-payout-station-finance-types";
+import type { WorkforceStationReviewSummary } from "@/lib/workforce-payout-station-review";
 
 /**
  * Owns the station→worksheet location filter so station review and the payout
  * table stay in sync without a second data load.
  */
 export function WorkforcePayoutStationBoard({
-  rows,
+  stations,
   paymentReleaseHref,
   lifecycleWarning,
   audience,
@@ -27,7 +27,7 @@ export function WorkforcePayoutStationBoard({
   financeRequests,
   children
 }: {
-  rows: WorkforcePayoutRow[];
+  stations: WorkforceStationReviewSummary[];
   paymentReleaseHref?: string | null;
   lifecycleWarning?: string | null;
   audience: "workforce" | "helpers";
@@ -44,7 +44,7 @@ export function WorkforcePayoutStationBoard({
 
   return <WorkforcePayoutLocationContext.Provider value={{ locations, onLocationsChange: setLocations }}>
     <WorkforcePayoutStationReview
-      rows={rows}
+      stations={stations}
       selectedStations={locations}
       onSelectedStationsChange={setLocations}
       paymentReleaseHref={paymentReleaseHref}
