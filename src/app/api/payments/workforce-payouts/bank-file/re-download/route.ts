@@ -124,13 +124,8 @@ async function authorize(audience: PayoutAudience) {
   const authorization = await getAuthorization();
   if (!authorization) return { error: errorResponse(`Sign in to re-download ${label} bank files.`, 401) } as const;
   const accessSurface = currentAdminAccessSurface();
-  if (accessSurface === "ops") {
-    return { error: errorResponse("Re-download bank files from Finance after station confirmation and Finance approval.", 403) } as const;
-  }
-  const payoutPageCode = "workforce_payouts";
-  const canUsePaymentActions = hasPermission(authorization, "payment_process", "edit")
-    || accessSurface === "finance"
-    || accessSurface === "dashboard";
+  const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
   if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
     return { error: errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403) } as const;
   }

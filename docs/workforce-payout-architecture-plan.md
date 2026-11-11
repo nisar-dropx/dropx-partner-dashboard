@@ -16,8 +16,8 @@ Mirror People payroll (`dropx-hrms` station release → Finance submission → b
 2. Station reviewers see one station card with payable count, balance, paid/processing amount, blockers, and last calculation time.
 3. Reviewer confirms only that station. Confirmation creates an immutable station review with worksheet hash, row count, amount, actor, and version.
 4. Ops/People sends confirmed stations to Finance. Finance works them on `fin.dropxlogistics.com/payments/workforce-payouts` (same product surface as today), not inside Final P&L. Final P&L may continue to *read* published payout snapshots for statements, but bank issue and enquiry stay on the payment ledger.
-5. Finance downloads a bank file for one or more confirmed stations, after loss-clearance / payment-release gates remain satisfied.
-6. Finance uploads the bank enquiry file. The import is an idempotent job, processed in bounded batches, with row diagnostics and resumable progress.
+5. After Finance approval (and loss-clearance / payment-release), bank download is available on Finance and on Ops via the mirrored payment-action grant. Bank issue stays gated by `assertWorkforceStationsFinanceReady`, not by Final P&L.
+6. Bank enquiry upload is an idempotent job, processed in bounded batches, with row diagnostics and resumable progress.
 7. Payment state is reconciled from the immutable payment ledger. A partial credit pays only the remaining balance; a retry cannot create a duplicate UTR or second instruction.
 
 People reference paths:
@@ -60,7 +60,7 @@ Enquiry upload should create an import record containing file hash, operation id
 1. Instrument query timings, row counts, RPC duration, timeout/retry, and database error class (no personal or bank values in logs).
 2. Station review UI filters the worksheet station-by-station and degrades payment-preview failures instead of blanking the page.
 3. Station release + Finance handoff migration/RPCs: `20261111180000_workforce_payout_station_finance_handoff.sql` (apply alone to shared Supabase).
-4. Ops confirms/reopens/sends stations; Finance approves/returns; bank download + enquiry are Finance-only and require Finance approval + loss clearance.
+4. Ops confirms/reopens/sends stations; Finance approves/returns; bank download + enquiry require Finance approval + loss clearance (Ops page-edit still mirrors payment actions for the Ops surface).
 5. Enquiry processing is resumable in ≤20-row batches via `workforce_payout_enquiry_imports` with client resume polling.
 6. Next: move expensive payout detail/evidence behind lazy expansion; add load tests for 1, 5, 25, and 100 stations; export enquiry diagnostics workbook.
 

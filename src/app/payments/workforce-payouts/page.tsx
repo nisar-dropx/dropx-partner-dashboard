@@ -752,12 +752,12 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const canEdit = hasPermission(authorization, pageCode, "edit");
-  // Bank download and enquiry live on Finance after station confirmation.
-  // Ops confirms stations and sends them to Finance; it does not issue bank files.
-  const canUsePaymentActions = accessSurface !== "ops"
-    && (hasPermission(authorization, "payment_process", "edit")
-      || accessSurface === "finance"
-      || accessSurface === "dashboard");
+  // Ops has its own Workforce Payouts page permission and does not expose the
+  // Finance-only Payment Process page. Keep that extra permission on the other
+  // surfaces, while allowing Ops editors to use the mirrored payment actions.
+  // Bank creation still requires Finance-approved station handoff in the API.
+  const canUsePaymentActions = accessSurface === "ops"
+    || hasPermission(authorization, "payment_process", "edit");
   // Payout rows and every submitted row identity are already restricted to the
   // signed-in user's locations. Location scope must not turn a page editor into
   // a viewer; the mutation endpoints independently recheck the same boundary.

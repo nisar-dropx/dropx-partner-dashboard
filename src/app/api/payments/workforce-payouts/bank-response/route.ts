@@ -192,13 +192,8 @@ export async function POST(request: Request) {
     const authorization = await getAuthorization();
     if (!authorization) return errorResponse("Sign in to finalize Workforce payments.", 401);
     const accessSurface = currentAdminAccessSurface();
-    if (accessSurface === "ops") {
-      return errorResponse("Upload bank enquiry files from Finance after station confirmation and Finance approval.", 403);
-    }
-    const payoutPageCode = "workforce_payouts";
-    const canUsePaymentActions = hasPermission(authorization, "payment_process", "edit")
-      || accessSurface === "finance"
-      || accessSurface === "dashboard";
+    const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+    const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
     if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
       return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
@@ -340,11 +335,10 @@ export async function PUT(request: Request) {
     const authorization = await getAuthorization();
     if (!authorization) return errorResponse("Sign in to resume Workforce bank enquiry processing.", 401);
     const accessSurface = currentAdminAccessSurface();
-    if (accessSurface === "ops") {
-      return errorResponse("Resume bank enquiry processing from Finance.", 403);
-    }
-    if (authorization.readOnly || !hasPermission(authorization, "workforce_payouts", "edit")) {
-      return errorResponse("Edit access to Workforce Payouts is required.", 403);
+    const payoutPageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+    const canUsePaymentActions = accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit");
+    if (authorization.readOnly || !hasPermission(authorization, payoutPageCode, "edit") || !canUsePaymentActions) {
+      return errorResponse("Edit access to Workforce Payouts and Payment Process is required.", 403);
     }
     if (!supabaseAdmin) return errorResponse("Database configuration is unavailable.", 503);
     const companyId = requireCompanyId(authorization);
