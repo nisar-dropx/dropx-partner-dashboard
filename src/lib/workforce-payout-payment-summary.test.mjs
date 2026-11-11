@@ -401,7 +401,7 @@ test("stale and pending publications expose an unavailable balance with an actio
     eligible: false,
     eligibilityCode: "payment_history_allocation_reassignment_required",
     eligibilityMessage: "Reassign the payment history to the current locations."
-  }), "Reassign the payment history to the current locations.");
+  }), "Reassign payment history");
 
   const pending = { eligible: false, eligibilityCode: "publication_refresh_pending" };
   assert.equal(isWorkforcePayoutPaymentBalanceAvailable(pending), false);

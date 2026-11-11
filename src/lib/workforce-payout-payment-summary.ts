@@ -193,15 +193,15 @@ export function workforcePayoutPaymentEligibilityLabel(
   if (summary.eligible !== false) return null;
   const code = String(summary.eligibilityCode ?? "").trim().toLowerCase();
   if (code === "payment_processing" || code === "no_positive_balance") return null;
-  const message = summary.eligibilityMessage?.trim();
-  if (message) return message;
   switch (code) {
     case "publication_refresh_pending":
       return "Publication refresh pending";
     case "publication_missing":
       return "Publish before payment";
     case "publication_stale_or_incomplete":
-      return "Republish required";
+      return summary.eligibilityMessage?.trim() || "Republish required";
+    case "payment_history_allocation_reassignment_required":
+      return "Reassign payment history";
     case "mapping_relock_required":
       return "Relock required";
     case "profile_unavailable":
