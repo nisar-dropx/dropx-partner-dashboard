@@ -230,10 +230,12 @@ function buildShareTable(
 
   const zeroOnly = view === "zero";
   const dsrTitle =
-    view === "premium" ? "Premium DOT"
-      : view === "standard" ? "Standard DOT"
-        : view === "swa" ? "SWA DSR" : zeroOnly ? "Zero deliveries"
-          : "DSR";
+    view === "dot" ? "DOT"
+      : view === "premium" ? "Premium DOT"
+        : view === "standard" ? "Standard DOT"
+          : view === "swa" ? "SWA DSR" : zeroOnly ? "Zero deliveries"
+            : "DSR";
+  const pctHeader = view === "dot" || view === "premium" || view === "standard" ? "DOT%" : DSR_HEADERS.dsrPct;
   const hasOther = stations.some((s) => daDsrForView(s.board, view).some((d) => (d.other || 0) > 0));
   const headers = [
     "Station",
@@ -244,7 +246,7 @@ function buildShareTable(
     DSR_HEADERS.oor,
     DSR_HEADERS.total,
     ...(hasOther ? ["Outcome missing"] : []),
-    DSR_HEADERS.dsrPct,
+    pctHeader,
   ];
   const rows: BoardShareCell[][] = [];
   const allDas: StationBoardDaDsr[] = [];
@@ -555,13 +557,20 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     const standard=selected.reduce((n,s)=>n+(s.board.dotStandard?.total||0),0);
     return premium+standard ? (premium*targets.premium+standard*targets.standard)/(premium+standard) : undefined;
   }
-  function reportFor(blockStations: StationBoardStation[], label: string) {
+  function reportFor(blockStations: StationBoardStation[], label: string, opts?: { preferDaDetail?: boolean }) {
+    const preferDaDetail = Boolean(opts?.preferDaDetail);
     const dsrTitle =
-      view === "premium" ? "Premium DOT"
-        : view === "standard" ? "Standard DOT"
-          : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
-            : "DSR";
-    const sourceTable = isDotView(view) ? dotStationTable(blockStations, view as "dot" | "premium" | "standard") : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
+      view === "dot" ? "DOT"
+        : view === "premium" ? "Premium DOT"
+          : view === "standard" ? "Standard DOT"
+            : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries"
+              : "DSR";
+    // Station drawer Image/Excel must match the DA card on screen — not the board rollup
+    // (DSR Stations view / DOT station totals) that the toolbar Image uses.
+    const sourceTable = isDotView(view) && !preferDaDetail ? dotStationTable(blockStations, view as "dot" | "premium" | "standard")
+      : (isDotView(view) && preferDaDetail) || (isDsrFamilyView(view) && (preferDaDetail || level !== "station"))
+        ? buildShareTable(view, blockStations, payload.businessDate, label, stationNames, ageingMode)
+      : view === "creturn" ? cReturnDetailTable(blockStations, cReturnRows, level, stationNames)
       : isDsrFamilyView(view) && level === "station"
         ? dsrStationTable(
           blockStations,
@@ -584,10 +593,11 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     return prepareBoardReport({ ...(view === "ageing" ? formatAgeingPerformance(table) : formatBoardPerformance(table, performanceTarget, targetForRow)),
       compactNote: view === "edd" && eddMode === "today"
         ? "Actionable = due on the selected date, physically at station, with no dispatch or delivery attempt on or before that date. Driver assignment alone is not an attempt."
-        : isDotView(view) ? "DOT = delivered / eligible. EDD equals selected date; at-station stock includes returned parcels." : view === "dsr" && level === "station" ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
+        : isDotView(view) ? (preferDaDetail ? "DOT% = delivered ÷ DA eligible. Overall merges Premium + Standard." : "DOT = delivered / eligible. EDD equals selected date; at-station stock includes returned parcels.")
+          : view === "dsr" && level === "station" && !preferDaDetail ? `${formatOpsDate(payload.businessDate, payload.businessDate)} · Pending = never dispatched/attempted; included in physical stock.` : undefined,
       title: `${table.title}${blockStations.length === 1 ? ` · ${blockStations[0].stationCode}` : ""}${historyPending || metadataPending ? ` · Provisional (${[historyPending ? `${count(historyPending)} history checks pending` : "", metadataPending ? `${count(metadataPending)} data pending` : ""].filter(Boolean).join(" · ")})` : ""}`,
-      subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
-    }, sort, { dsr: level === "associate" && isDsrFamilyView(view), singleStation: level === "associate" && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation });
+      subtitle: `${table.subtitle || `${formatOpsDate(payload.businessDate, payload.businessDate)} · ${label}`} · Updated ${formatOpsDateTime(reportTime, reportTime)}${stats}${view === "dsr" && level === "station" && !preferDaDetail ? ` · ${STATION_DSR_INVENTORY_NOTE}` : ""}`,
+    }, sort, { dsr: (level === "associate" || preferDaDetail) && isDsrFamilyView(view), singleStation: (level === "associate" || preferDaDetail) && view !== "zero" && blockStations.length === 1, groupByStation: hasDetailViews && level === "associate" && groupByStation && !preferDaDetail });
   }
   const report = reportFor(stations, regionLabel);
   const outputUnavailable = dotUnavailable || detailUnavailable || dsrStationPending || Boolean(dsrStationError) || eddTodayPending || Boolean(eddTodayError);
@@ -831,7 +841,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setError(null);
     try {
       const tidSheet = await fetchTidExcelSheet([selected.stationCode]);
-      await downloadReportExcel(excelReport(reportFor([selected], selected.stationCode), tidSheet));
+      await downloadReportExcel(excelReport(reportFor([selected], selected.stationCode, { preferDaDetail: true }), tidSheet));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Excel download failed. Retry.");
     }
@@ -968,7 +978,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     setStationShareBusy(share ? "share" : "image");
     setError(null);
     try {
-      const table = reportFor([station], stationNames[station.stationCode] || station.stationCode);
+      const table = reportFor([station], stationNames[station.stationCode] || station.stationCode, { preferDaDetail: true });
       if (!table.rows.length) throw new Error("Nothing to share for this station.");
       const fileName = `station-board-${payload.businessDate}-${view}-${station.stationCode.toLowerCase()}`;
       if (share) {
@@ -986,7 +996,6 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
   }
 
   function openStationPanel(code: string) {
-    if (isDotView(view)) { void openDotMetricPanel(code, "Eligible"); return; }
     if (view === "edd" && eddMode === "today") {
       setOpenStation(code);
       setTids(eddTodayRows.filter((row) => String(row.stationCode || "").toUpperCase() === code && row.edd === payload.businessDate));
@@ -1355,7 +1364,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               <button type="button" disabled={stationShareBusy !== null} onClick={() => void shareStation(false)}>
                 {stationShareBusy === "image" ? <Loader2 size={14} className="spin" /> : <ImageDown size={14} />} Image
               </button>
-              <CopyReportImage resetKey={`${selected.stationCode}-${view}-${reportTime}-${JSON.stringify(sort)}`} disabled={stationShareBusy !== null} getImages={() => { const table = reportFor([selected], selected.stationCode); return renderBoardShareImages(table, true); }} />
+              <CopyReportImage resetKey={`${selected.stationCode}-${view}-${reportTime}-${JSON.stringify(sort)}`} disabled={stationShareBusy !== null} getImages={() => { const table = reportFor([selected], selected.stationCode, { preferDaDetail: true }); return renderBoardShareImages(table, true); }} />
               <button
                 type="button"
                 className={s.primary}
@@ -1364,7 +1373,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
               >
                 {stationShareBusy === "share" || stationShareBusy === "bot" ? <Loader2 size={14} className="spin" /> : <Share2 size={14} />} WhatsApp
               </button>
-              {panelMode === "tids" && !isDotView(view) ? (
+              {panelMode === "tids" ? (
                 <button type="button" onClick={() => setPanelMode("card")}>
                   <LayoutList size={14} /> View station card
                 </button>
@@ -1454,7 +1463,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                 <div className={s.shareCard}>
                   <div className={s.shareCardHead}>
                     <span>Ops Pulse · Station board</span>
-                    <strong>{view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
+                    <strong>{view === "dot" ? "DOT" : view === "premium" ? "Premium DOT" : view === "standard" ? "Standard DOT" : view === "swa" ? "SWA DSR" : view === "zero" ? "Zero deliveries" : "DA DSR"} · {selected.stationCode}</strong>
                     <small>{formatOpsDate(payload.businessDate, payload.businessDate)} · DropX Logistics</small>
                   </div>
                   <div className={s.shareColsWide} style={{ gridTemplateColumns: "minmax(88px, 1.5fr) repeat(7, minmax(46px, .85fr))" }}>
@@ -1465,7 +1474,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     <span>{DSR_HEADERS.failed}</span>
                     <span>{DSR_HEADERS.rejected}</span>
                     <span>Outcome missing</span>
-                    <span>{DSR_HEADERS.dsrPct}</span>
+                    <span>{isDotView(view) ? "DOT%" : DSR_HEADERS.dsrPct}</span>
                   </div>
                   <div className={`${s.shareRows} ${s.shareRowsScroll}`}>
                     {[...daDsrForView(selected.board, view)].sort((a, b) => view === "zero" ? b.oor - a.oor : b.dsrPct - a.dsrPct).map((da) => (
@@ -1483,7 +1492,7 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
                     {(() => {
                       const das = daDsrForView(selected.board, view);
                       if (!das.length) {
-                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : view === "premium" || view === "standard" ? `No ${view === "premium" ? "Premium" : "Standard"} DOT rows yet — Refresh` : "No DA DSR yet — Refresh"}</p>;
+                        return <p className={s.empty}>{view === "zero" ? "No zero-delivery DAs" : isDotView(view) ? `No ${view === "premium" ? "Premium" : view === "standard" ? "Standard" : "Overall"} DOT DA rows yet — Refresh` : "No DA DSR yet — Refresh"}</p>;
                       }
                       const tot = sumDaDsr(das);
                       return (

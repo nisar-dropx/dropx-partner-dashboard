@@ -116,10 +116,52 @@ export function isDsrFamilyView(view: StationBoardView): boolean {
   return view === "dsr" || view === "zero" || view === "swa";
 }
 
+/** Merge DA rows by driver (Overall DOT = Premium + Standard lanes). */
+export function mergeDaDsrRows(rows: StationBoardDaDsr[]): StationBoardDaDsr[] {
+  const map = new Map<string, StationBoardDaDsr>();
+  for (const row of rows) {
+    const key = String(row.driverId || row.driverName || "").trim() || "?";
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        driverId: String(row.driverId || ""),
+        driverName: String(row.driverName || ""),
+        delivered: Number(row.delivered) || 0,
+        failed: Number(row.failed) || 0,
+        rejected: Number(row.rejected) || 0,
+        oor: Number(row.oor) || 0,
+        other: Number(row.other) || 0,
+        total: Number(row.total) || 0,
+        dsrPct: Number(row.dsrPct) || 0,
+      });
+      continue;
+    }
+    const delivered = prev.delivered + (Number(row.delivered) || 0);
+    const failed = prev.failed + (Number(row.failed) || 0);
+    const rejected = prev.rejected + (Number(row.rejected) || 0);
+    const oor = prev.oor + (Number(row.oor) || 0);
+    const other = (Number(prev.other) || 0) + (Number(row.other) || 0);
+    const total = prev.total + (Number(row.total) || 0);
+    map.set(key, {
+      driverId: prev.driverId || String(row.driverId || ""),
+      driverName: prev.driverName || String(row.driverName || ""),
+      delivered,
+      failed,
+      rejected,
+      oor,
+      other,
+      total,
+      dsrPct: total > 0 ? (delivered / total) * 100 : 0,
+    });
+  }
+  return [...map.values()];
+}
+
 export function daDsrForView(board: StationBoardPayload, view: StationBoardView): StationBoardDaDsr[] {
   if (view === "swa") return board.daDsrSwa ?? [];
   if (view === "premium") return board.daDsrPremium ?? [];
   if (view === "standard") return board.daDsrStandard ?? [];
+  if (view === "dot") return mergeDaDsrRows([...(board.daDsrPremium ?? []), ...(board.daDsrStandard ?? [])]);
   if (view === "zero") return (board.daDsr ?? []).filter((da) => da.delivered === 0 && da.total > 0);
   return board.daDsr ?? [];
 }

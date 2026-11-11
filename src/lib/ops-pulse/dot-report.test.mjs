@@ -21,3 +21,15 @@ test('DOT drilldown excludes DSR-only, future inventory and other classes; flags
  assert.equal(mapBoardTidExportRows(rows,'standard').length,1);assert.equal(mapBoardTidExportRows(rows,'swa').length,1);
  const board=normalizeBoard({daDsrSwa:[{driverId:'A',driverName:'Associate',total:1,delivered:1}]});assert.equal(daDsrForView(board,'swa')[0].driverName,'Associate');
 });
+test('Overall DOT merges Premium + Standard DA rows by driver',()=>{
+ const board=normalizeBoard({
+  daDsrPremium:[{driverId:'D1',driverName:'Ravi',total:4,delivered:2,failed:1,rejected:0,oor:1,other:0,dsrPct:50}],
+  daDsrStandard:[{driverId:'D1',driverName:'Ravi',total:6,delivered:3,failed:0,rejected:1,oor:2,other:0,dsrPct:50},{driverId:'D2',driverName:'Anu',total:2,delivered:2,failed:0,rejected:0,oor:0,other:0,dsrPct:100}],
+ });
+ const rows=daDsrForView(board,'dot').sort((a,b)=>a.driverId.localeCompare(b.driverId));
+ assert.equal(rows.length,2);
+ assert.equal(rows[0].driverId,'D1');assert.equal(rows[0].total,10);assert.equal(rows[0].delivered,5);assert.equal(rows[0].failed,1);assert.equal(rows[0].rejected,1);assert.equal(rows[0].oor,3);assert.equal(rows[0].dsrPct,50);
+ assert.equal(rows[1].driverId,'D2');assert.equal(rows[1].total,2);assert.equal(rows[1].dsrPct,100);
+ assert.equal(daDsrForView(board,'premium').length,1);
+ assert.equal(daDsrForView(board,'standard').length,2);
+});
