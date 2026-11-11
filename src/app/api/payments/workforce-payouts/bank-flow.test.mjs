@@ -458,8 +458,9 @@ test("the UI exposes refresh-pending positive balances without treating them as 
 });
 
 test("new publication snapshots explicitly freeze bank-payment eligibility", () => {
-  assert.match(snapshot, /payment_status: row\.status/);
+  assert.match(snapshot, /const calculationStatus = row\.publicationCalculationStatus \?\? row\.status/);
+  assert.match(snapshot, /payment_status: calculationStatus/);
   assert.match(snapshot, /payment_details_available: row\.paymentDetailsAvailable/);
   assert.match(snapshot, /payment_eligible: row\.paymentDetailsAvailable/);
-  assert.match(snapshot, /isWorkforcePayoutCalculationPublishable\(row\.status\)/);
+  assert.match(snapshot, /isWorkforcePayoutCalculationPublishable\(calculationStatus\)/);
 });
