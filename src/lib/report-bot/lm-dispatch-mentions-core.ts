@@ -48,6 +48,27 @@ export function presentWorkerKeys(punches: PresencePunch[], expectedLocationByWo
   return present;
 }
 
+/** Includes current biometric Ins plus the latest completed station shift.
+ * This is used for evening operational follow-ups where the closing SSA must
+ * remain accountable even after punching Out. */
+export function lastShiftWorkerKeys(punches: PresencePunch[], expectedLocationByWorker: Map<string,string>) {
+  const latest=new Map<string,PresencePunch>();
+  for(const row of punches) {
+    const key=workerKey(row.workerType,row.workerId);
+    if(String(row.source??"").trim().toLowerCase()!=="biometric") continue;
+    if(!row.locationId||row.locationId!==expectedLocationByWorker.get(key)) continue;
+    const current=latest.get(key);
+    if(!current||eventOrder(row)>eventOrder(current)||(eventOrder(row)===eventOrder(current)&&String(row.id??"")>String(current.id??""))) latest.set(key,row);
+  }
+  const current=presentWorkerKeys(punches,expectedLocationByWorker);
+  const latestByLocation=new Map<string,number>();
+  for(const row of latest.values()) latestByLocation.set(row.locationId!,Math.max(latestByLocation.get(row.locationId!)||0,eventOrder(row)));
+  const selected=new Set(current);
+  const lastShiftWindowMs=3*60*60*1000;
+  for(const [key,row] of latest) if(eventOrder(row)>=(latestByLocation.get(row.locationId!)||0)-lastShiftWindowMs) selected.add(key);
+  return selected;
+}
+
 export function attendanceWorkerKey(workerType: "employee" | "contractor", workerId: string) {
   return workerKey(workerType, workerId);
 }

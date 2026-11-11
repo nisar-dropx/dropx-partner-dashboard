@@ -19,7 +19,7 @@ type Route = {
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
   source_model_codes?: string[];
-  mention_manager_policy?: MentionManagerPolicy; mention_designation_codes?:string[]; mention_present_designation_codes?: string[];
+  mention_manager_policy?: MentionManagerPolicy; mention_designation_codes?:string[]; mention_present_designation_codes?: string[]; mention_latest_shift_designation_codes?:string[];
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; state:string|null; report_code?:string };
 type SourceStationRow = SourceStation & { is_ho:boolean|null; hide_from_location_list:boolean|null; location_models:{code:string|null}|Array<{code:string|null}>|null };

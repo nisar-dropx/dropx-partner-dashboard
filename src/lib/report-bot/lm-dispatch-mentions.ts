@@ -5,6 +5,7 @@ import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarc
 import { loadCodTeamDirectory } from "@/lib/ops-pulse/cod-station-team";
 import {
   attendanceWorkerKey,
+  lastShiftWorkerKeys,
   normalizeWhatsAppNumber,
   presentWorkerKeys,
   teamLeaderMentionNumbers,
@@ -17,6 +18,7 @@ export type MentionRouteConfig = {
   mention_manager_policy?: MentionManagerPolicy;
   mention_designation_codes?: string[];
   mention_present_designation_codes?: string[];
+  mention_latest_shift_designation_codes?: string[];
 };
 export type MentionSource = { id: string; station_code: string };
 
@@ -47,7 +49,8 @@ export async function resolveRouteMentionNumbers(
   const managerPolicy = route.mention_manager_policy ?? "none";
   const designationCodesAlways = new Set((route.mention_designation_codes ?? []).map(code => code.trim().toUpperCase()).filter(Boolean));
   const designationCodes = new Set((route.mention_present_designation_codes ?? []).map(code => code.trim().toUpperCase()).filter(Boolean));
-  if (managerPolicy === "none" && !designationCodesAlways.size && !designationCodes.size) return [...new Set(staticNumbers)];
+  const latestShiftCodes = new Set((route.mention_latest_shift_designation_codes ?? []).map(code=>code.trim().toUpperCase()).filter(Boolean));
+  if (managerPolicy === "none" && !designationCodesAlways.size && !designationCodes.size && !latestShiftCodes.size) return [...new Set(staticNumbers)];
 
   const locationIds = sources.map(row => row.id);
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, locationIds, { includeStationResponsibilities: true, asOf: day });
@@ -61,7 +64,7 @@ export async function resolveRouteMentionNumbers(
     }
   }
 
-  const directory = await loadCodTeamDirectory(companyId, locationIds, [...managerPersonIds], day, [...designationCodesAlways]);
+  const directory = await loadCodTeamDirectory(companyId, locationIds, [...managerPersonIds], day, [...new Set([...designationCodesAlways,...designationCodes,...latestShiftCodes])]);
   const byPerson = new Map(directory.map(person => [person.personId, person]));
   const dynamicNumbers = new Set<string>();
   for (const personId of managerPersonIds) {
@@ -75,7 +78,7 @@ export async function resolveRouteMentionNumbers(
   }
 
   const attendanceCandidates = directory.filter(person =>
-    !person.manager && Boolean(person.locationId) && designationCodes.has(String(person.roleCode ?? "").trim().toUpperCase())
+    !person.manager && Boolean(person.locationId) && (designationCodes.has(String(person.roleCode ?? "").trim().toUpperCase()) || latestShiftCodes.has(String(person.roleCode ?? "").trim().toUpperCase()))
   );
   if (attendanceCandidates.length) {
     if (!supabaseAdmin) throw new Error("Biometric attendance is unavailable.");
@@ -99,8 +102,11 @@ export async function resolveRouteMentionNumbers(
     }
     const expected = new Map(attendanceCandidates.map(person => [attendanceWorkerKey(person.workerType as "employee"|"contractor", person.workerId), person.locationId!]));
     const present = presentWorkerKeys(punches, expected);
+    const latestShift = lastShiftWorkerKeys(punches,expected);
     for (const person of attendanceCandidates) {
-      if (!present.has(attendanceWorkerKey(person.workerType as "employee"|"contractor", person.workerId))) continue;
+      const code=String(person.roleCode??"").trim().toUpperCase();
+      const worker=attendanceWorkerKey(person.workerType as "employee"|"contractor",person.workerId);
+      if (!(designationCodes.has(code)&&present.has(worker)) && !(latestShiftCodes.has(code)&&latestShift.has(worker))) continue;
       const phone = normalizeWhatsAppNumber(person.phone);
       if (phone) dynamicNumbers.add(phone);
     }

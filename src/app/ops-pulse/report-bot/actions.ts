@@ -984,8 +984,9 @@ export async function saveDispatchRoutes(form: FormData) {
     if (!["none","cluster_then_aom"].includes(managerPolicy)) throw new Error("Choose a valid manager tagging policy.");
     const requestedAlwaysDesignationCodes = [...new Set(form.getAll("mention_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
     const requestedDesignationCodes = [...new Set(form.getAll("mention_present_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
-    if (requestedDesignationCodes.length > 25 || requestedAlwaysDesignationCodes.length > 25) throw new Error("Choose no more than 25 designations in each tag rule.");
-    const allRequestedDesignationCodes=[...new Set([...requestedAlwaysDesignationCodes,...requestedDesignationCodes])];
+    const requestedLatestShiftCodes=[...new Set(form.getAll("mention_latest_shift_designation_code").map(String).map(value=>value.trim().toUpperCase()).filter(Boolean))];
+    if (requestedDesignationCodes.length > 25 || requestedAlwaysDesignationCodes.length > 25 || requestedLatestShiftCodes.length>25) throw new Error("Choose no more than 25 designations in each tag rule.");
+    const allRequestedDesignationCodes=[...new Set([...requestedAlwaysDesignationCodes,...requestedDesignationCodes,...requestedLatestShiftCodes])];
     if (allRequestedDesignationCodes.length) {
       const activeDesignations = check(await reportBotDb().from("designations").select("code").eq("company_id",companyId).eq("is_active",true).in("code",allRequestedDesignationCodes),"Check designations") as Array<{code:string|null}>;
       const available = new Set(activeDesignations.map(row=>String(row.code||"").trim().toUpperCase()));
@@ -1024,7 +1025,7 @@ export async function saveDispatchRoutes(form: FormData) {
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
-        mentions,question,mention_manager_policy:managerPolicy,mention_designation_codes:requestedAlwaysDesignationCodes,mention_present_designation_codes:requestedDesignationCodes,
+        mentions,question,mention_manager_policy:managerPolicy,mention_designation_codes:requestedAlwaysDesignationCodes,mention_present_designation_codes:requestedDesignationCodes,mention_latest_shift_designation_codes:requestedLatestShiftCodes,
         pending_only:report === "eod" ? false : form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()
       };
     }));
