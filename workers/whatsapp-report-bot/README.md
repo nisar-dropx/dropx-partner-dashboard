@@ -84,6 +84,7 @@ link WhatsApp from Report Bot setup.
 | GET | `/groups` | Groups the linked number belongs to |
 | POST | `/config` | Enabled groups and mode (also pulled every minute) |
 | POST | `/send` | `{ client_ref, to, text, quoted }` or `{ client_ref, to, image_base64, mime, caption }`; a repeated `client_ref` returns the first result instead of posting twice |
+| POST | `/delete` | `{ to, id }` retracts one exact message previously sent by the linked account to an enabled group |
 | POST | `/media` | `{ ref, record }` → image bytes, from cache or downloaded from WhatsApp |
 
 ## Operating notes
