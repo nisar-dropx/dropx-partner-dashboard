@@ -221,12 +221,16 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
         if(!policy) throw new Error("COD pickup timing is not configured for this station.");
         const overdue=overdueRemittancesAfterGrace(c.data.rows,c.data.latestSubmitted,policy,new Date(),30);
         const overdueAmount=overdue.reduce((sum,item)=>sum+Math.max(0,Number(item.row.expectedAmount)||0),0);
-        const requiredAction=policy.rule==="Same Day-Complete"
+        const bankerVisitAt=Math.max(0,...c.data.rows.filter(row=>row.status.toUpperCase()==="SUBMITTED").map(row=>Number(row.submittedAt)||Number(row.updatedAt)||0));
+        const bankerVisitedToday=bankerVisitAt>0&&istDay(new Date(bankerVisitAt))===day;
+        const requiredAction=bankerVisitedToday
+          ? "Banker already visited today · hand over or submit the remaining COD; do not mark Banker Not Reported"
+          : policy.rule==="Same Day-Complete"
           ? "Hand over all COD today · no COD can be held overnight"
           : policy.rule==="Same Day-Partial"
             ? "Hand over all COD available by pickup; later cash follows the next pickup"
             : "Hand over all COD in the configured next-day pickup";
-        rows.push(["Pickup rule",policy.rule],["Required action",requiredAction],["Pickup window",`${policy.start}–${policy.end} IST`],["Overdue remittances",overdue.length],["Overdue amount",money(overdueAmount)]);
+        rows.push(["Pickup rule",policy.rule],["Banker visit signal",bankerVisitedToday?"Confirmed · remittance updated today":"No submitted remittance update today"],["Required action",requiredAction],["Pickup window",`${policy.start}–${policy.end} IST`],["Overdue remittances",overdue.length],["Overdue amount",money(overdueAmount)]);
         if(overdue[0]) rows.push(["Reason",overdue[0].reason]);
         pending ||= overdue.length>0;
       } else {

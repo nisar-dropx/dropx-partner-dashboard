@@ -17,7 +17,7 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     cod: "COD pending requires immediate station action. Please update the status and confirm.",
     recon: "DA reconciliation remains pending after 8:00 PM. Please complete the cash reconciliation and confirm.",
     deposit: "Prepare Deposit remains pending after 9:00 PM. Please prepare the available cash and update the portal now.",
-    bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Confirm the remittance, or mark Banker Not Reported with the required mail details.",
+    bank: "Bank remittance is overdue beyond the configured pickup time and 30-minute update window. Check the banker visit signal: use Banker Not Reported only when no remittance was updated today and the banker genuinely did not arrive.",
     slip: "The COD slip is still missing more than 30 minutes after remittance submission. Please upload it now.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
