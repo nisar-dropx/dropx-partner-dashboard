@@ -1,4 +1,6 @@
 import "server-only";
+import { CodRuntime } from "./lm-cod-runtime";
+import { codWorkflowOutputs, acknowledgeCodOutput, type CodAck } from "./lm-cod-workflow-output";
 import { summaryReportSvg, tableReportSvg, reportPngBase64, type CellStyle } from "./lm-report-image";
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
@@ -16,7 +18,7 @@ import { dispatchCaption } from "./lm-dispatch-wording";
 
 type Group = { wa_group_id: string; group_name:string|null; location_id: string|null; company_id: string; workspace: string; is_enabled: boolean; bot_in_group: boolean; mode: string };
 type Route = {
-  id: string; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
+  id: string; group_id:string; cod_workflow?:boolean; cod_shortfalls_since?:string; cod_shortfall_lead_minutes?:number; cod_route_service_url?:string|null; cod_reconciliation_allowance_minutes?:number; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
   source_model_codes?: string[];
@@ -25,7 +27,7 @@ type Route = {
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; state:string|null; report_code?:string };
 type SourceStationRow = SourceStation & { is_ho:boolean|null; hide_from_location_list:boolean|null; location_models:{code:string|null}|Array<{code:string|null}>|null };
-type SendOutput = { key:string; body:Record<string,unknown> };
+type SendOutput = { key:string; body:Record<string,unknown>; codAck?:CodAck };
 type DispatchSnapshot = { rows: [string, string | number][]; asOf: string };
 
 function snapshotRowsFromEdd(value: TodayEddSnapshot): [string, string | number][] {
@@ -92,7 +94,7 @@ function splitText(lines:string[], limit=3900) {
   return chunks;
 }
 
-async function routeSources(route:Route, company:string):Promise<SourceStation[]> {
+export async function routeSources(route:Route, company:string):Promise<SourceStation[]> {
   const db = reportBotDb();
   const scopeType = route.scope_type || "station";
   if (route.report === "eod" && scopeType === "region" && !route.source_model_codes?.length) throw new Error("Choose source models for this regional Final EOD schedule in Last Mile Report Bot master");
@@ -343,12 +345,14 @@ async function sendOutput(settings:ReportBotSettings,runId:string,groupId:string
     if (existing.error) throw new Error(existing.error.message);
     row = existing.data as {id:string;status:string};
   } else if (inserted.error) throw new Error(inserted.error.message);
-  if (!row || row.status === "sent") return;
+  if (!row) return;
+  if (row.status === "sent") { if(output.codAck)await acknowledgeCodOutput(output.codAck);return; }
   try {
     const receipt = await workerRequest<{id:string|null}>(settings,"/send",{method:"POST",timeoutMs:30000,body:{client_ref:row.id,to:groupId,...output.body}});
     if (!receipt?.id) throw new Error("Worker returned no WhatsApp message ID");
     const saved = await db.from("report_bot_lm_dispatch_run_outputs").update({status:"sent",receipt_id:receipt.id,detail:null,updated_at:new Date().toISOString()}).eq("id",row.id);
     if (saved.error) throw new Error(saved.error.message);
+    if(output.codAck)await acknowledgeCodOutput(output.codAck);
   } catch (error) {
     await db.from("report_bot_lm_dispatch_run_outputs").update({status:"failed",detail:String(error instanceof Error?error.message:error).slice(0,400),updated_at:new Date().toISOString()}).eq("id",row.id);
     throw error;
@@ -365,7 +369,9 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
     const due=Date.parse(day+"T"+slot+":00+05:30");
     return +now>=due && +now-due<8*60000 && Date.parse(route.updated_at)<=due;
   }).map(slot=>({route,slot})));
+  jobs.sort((a,b)=>Number(!!a.route.cod_workflow)-Number(!!b.route.cod_workflow));
   let claimed=0;
+  const codRuntime=new CodRuntime(deadline);
   async function next() {
     while (jobs.length && Date.now()<deadline-30000) {
       const {route,slot}=jobs.shift()!;
@@ -381,7 +387,15 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
         if (!current || !linked(current.group,company) || current.group.wa_group_id!==route.group.wa_group_id) throw new Error("Group or schedule changed");
         const sources=await routeSources(route,company);
         let outputs:SendOutput[]=[];
-        if (route.report==="edd" && route.source_rule!=="current_report") {
+        if(route.cod_workflow) {
+          const failures:string[]=[];
+          for(const source of sources){
+            try{outputs.push(...await codWorkflowOutputs(company,source,day,slot,route,codRuntime));}
+            catch(error){failures.push(`${source.station_code}: ${error instanceof Error?error.message:'Source unavailable'}`);}
+          }
+          if(!outputs.length&&failures.length)throw new Error(failures.join('; '));
+          detail=`Station-scoped COD workflow · ${sources.length} stations · ${outputs.length} outputs`;
+        } else if (route.report==="edd" && route.source_rule!=="current_report") {
           const snapshot=await loadTodayEddSnapshot(sources.map(row=>row.station_code),day);
           if (!snapshot.pending && snapshot.unverifiedStations.length) throw new Error(`Today EDD source is not verified for: ${snapshot.unverifiedStations.join(", ")}`);
           if (route.pending_only && !snapshot.pending) { status="skipped"; detail="Verified Today EDD is clear"; }

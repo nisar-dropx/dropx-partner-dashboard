@@ -285,7 +285,10 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     return { asOf, pending, rows };
   }
   if (key === "scrub") {
-    const s = (await fetchScrubNetwork([code])).stations.find(s => s.stationCode === code);
+    let s = (await fetchScrubNetwork([code])).stations.find(s => s.stationCode === code);
+    // Scheduled scrub is every two hours; refresh only when the saved check is stale.
+    if(!s || !Number.isFinite(Date.parse(s.fetchedAt)) || Date.now()-Date.parse(s.fetchedAt)>90*60000)
+      s=(await fetchScrubNetwork([code],{refresh:true})).stations.find(s=>s.stationCode===code);
     if (!s || s.inStation.error || s.onRoad.error) throw new Error("Scrub activity unavailable.");
     const today = (items: { at: string }[]) => items.filter(item => istDay(new Date(item.at)) === day).length;
     const station = today(s.inStation.invocations), road = today(s.onRoad.invocations);

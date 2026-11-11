@@ -48,7 +48,7 @@ function signCortex(
   return createHmac("sha256", session.sessionKey).update(canonical).digest("base64");
 }
 
-export async function readCortexSession(cookie: string): Promise<CortexSession | "expired"> {
+export async function readCortexSession(cookie: string, signal?: AbortSignal): Promise<CortexSession | "expired"> {
   const cacheKey = createHash("sha256").update(cookie).digest("hex");
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -56,6 +56,7 @@ export async function readCortexSession(cookie: string): Promise<CortexSession |
 
   const res = await fetch(`${AMAZON}/operations/execution/itineraries?navMenuVariant=external`, {
     redirect: "manual",
+    signal,
     headers: {
       accept: "text/html",
       cookie,
@@ -81,11 +82,12 @@ export async function readCortexSession(cookie: string): Promise<CortexSession |
   }
 }
 
-async function executionJson(auth: CortexAuth, path: string, query: string) {
+async function executionJson(auth: CortexAuth, path: string, query: string, signal?: AbortSignal) {
   const timestamp = String(Date.now());
   const signature = signCortex("GET", path, query, auth.session, timestamp);
   const res = await fetch(`${AMAZON}${path}?${query}`, {
     redirect: "manual",
+    signal,
     headers: {
       accept: "application/json, text/plain, */*",
       cookie: auth.cookie,
@@ -115,13 +117,14 @@ export async function fetchCortexSummaries(
   auth: CortexAuth,
   date: string,
   serviceAreaId: string,
+  signal?: AbortSignal,
 ) {
   const query = sortedQuery({
     historicalDay: String(historicalDay(date)),
     localDate: date,
     serviceAreaId,
   });
-  return executionJson(auth, "/operations/execution/api/summaries", query);
+  return executionJson(auth, "/operations/execution/api/summaries", query, signal);
 }
 
 export async function fetchCortexItinerary(
@@ -129,6 +132,7 @@ export async function fetchCortexItinerary(
   itineraryId: string,
   serviceAreaId: string,
   date: string,
+  signal?: AbortSignal,
 ) {
   const query = sortedQuery({
     documentType: "Itinerary",
@@ -136,7 +140,7 @@ export async function fetchCortexItinerary(
     itineraryId,
     serviceAreaId,
   });
-  return executionJson(auth, `/operations/execution/api/itineraries/${itineraryId}`, query);
+  return executionJson(auth, `/operations/execution/api/itineraries/${itineraryId}`, query, signal);
 }
 
 /** Dense Driver Trace used by Amazon Cortex map / playback. */

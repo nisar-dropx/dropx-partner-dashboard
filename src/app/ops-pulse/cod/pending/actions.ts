@@ -50,3 +50,18 @@ export async function returnCodSlip(_state:{ok:boolean;message:string},form:Form
   return {ok:true,message:'Returned. Notification queued for the station and cluster manager.'};
  }catch(error){return {ok:false,message:error instanceof Error?error.message:'Unable to return slip.'};}
 }
+
+export async function allocateCodRecovery(_state:{ok:boolean;message:string},form:FormData){
+ try{
+ const auth=await requirePagePermission('cod_reports','access'),company=requireCompanyId(auth);
+ if(!canAccessDailyCodPending(auth)||!canReturnCodSlip(auth)||!supabaseAdmin)throw new Error('Recovery allocation is restricted to Control Tower and authorised administrators.');
+ const receipt=String(form.get('submission_id')||''),ledger=String(form.get('ledger_id')||'');
+ const existing=await supabaseAdmin.from('cod_submissions').select('location_id').eq('company_id',company).eq('id',receipt).single();
+ if(existing.error||!existing.data||!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(existing.data.location_id))throw new Error('Submission is outside your station access.');
+ if(form.get('confirmed')!=='yes')throw new Error('Confirm this receipt includes the previous shortage recovery.');
+ const result=await supabaseAdmin.rpc('record_cod_shortfall_recovery',{p_company:company,p_ledger:ledger,p_submission:receipt,p_amount:Number(form.get('amount')),p_note:String(form.get('note')||''),p_actor:auth.userId,p_actor_name:auth.fullName||auth.email||'Control Tower'});
+ if(result.error)throw new Error(result.error.message);
+ revalidatePath('/cod/pending');revalidatePath('/ops-pulse/cod/pending');
+ return {ok:true,message:'Recovery recorded. The next reminder uses the remaining balance.'};
+ }catch(error){return {ok:false,message:error instanceof Error?error.message:'Unable to record recovery.'};}
+}

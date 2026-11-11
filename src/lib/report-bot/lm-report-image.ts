@@ -64,11 +64,11 @@ export async function summaryReportSvg(title: string, rows: [string, string | nu
     }).join(""));
 }
 
-export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string | readonly string[], percentageStyle: (value: string | number) => CellStyle) {
+export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string | readonly string[], percentageStyle: (value: string | number) => CellStyle, minimumWidth=0) {
   if (!columns.length) throw new Error("Report image requires columns");
   const available = await fonts();
   const text = (value: string | number, options: TextOptions) => outlinedText(available, value, options);
-  const columnWidth = Math.max(102, Math.min(158, Math.floor(1264 / columns.length)));
+  const columnWidth = Math.max(Math.floor(minimumWidth/columns.length),102, Math.min(158, Math.floor(1264 / columns.length)));
   const width = columns.length * columnWidth;
   const rowHeight = 29, titleHeight = 45;
   const percentageColumns: readonly string[] = typeof percentageColumn === "string" ? [percentageColumn] : percentageColumn;
@@ -91,4 +91,15 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
 
 export async function reportPngBase64(svgSource: string) {
   return (await sharp(Buffer.from(svgSource)).png().toBuffer()).toString("base64");
+}
+
+/** One data-only image; instructions and mentions belong to its WhatsApp caption. */
+export async function codSectionsPng(title:string,sections:Array<{title:string;columns:string[];rows:Array<Array<string|number>>}>) {
+  const parts=await Promise.all(sections.map(async section=>Buffer.from(await reportPngBase64(await tableReportSvg(section.title,section.columns,section.rows,[],()=>null,1100)),'base64')));
+  const width=1100;
+  const header=Buffer.from(await reportPngBase64(await summaryReportSvg(title,[])),'base64');
+  const inputs=[header,...parts];let top=0;
+  const composites=[];
+  for(const input of inputs){const resized=await sharp(input).resize({width}).png().toBuffer();const meta=await sharp(resized).metadata();composites.push({input:resized,left:0,top});top+=meta.height!+8;}
+  return (await sharp({create:{width,height:top,channels:4,background:'#eef2f7'}}).composite(composites).png().toBuffer()).toString('base64');
 }
