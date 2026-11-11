@@ -395,14 +395,11 @@ export async function loadWorkforcePayoutRows(
     try { routeContext = await loadRouteDistanceContext(admin,companyId,payoutInputWorkforceIds,thresholdHistoryStart,toDate); }
     catch(error) { return {rows:[] as WorkforcePayoutRow[],error:error instanceof Error?error.message:"Route distance is unavailable."}; }
   }
-  const manualKmKeys = new Set(payoutInputResults.production.map((row:any)=>`${row.workforce_id}|${row.station_id}|${row.work_date}|${String(row.field_code_snapshot).toUpperCase()}`));
-  const kmField = (methodComponentsResult.data??[]).map((c:any)=>Array.isArray(c.payment_fields)?c.payment_fields[0]:c.payment_fields).find((field:any)=>isKilometreField(field?.code));
-  const automaticKmInputs = kmField ? routeContext.rows.filter(row=>row.status==='ready' && !manualKmKeys.has(`${row.workforce_id}|${row.station_id}|${row.work_date}|KM_RUN`)).map(row=>({id:row.id,workforce_id:row.workforce_id,station_id:row.station_id,payment_field_id:kmField.id,field_code_snapshot:'KM_RUN',work_date:row.work_date,units:Number(row.distance_km)})) : [];
   const payoutInputMaps = buildWorkforcePayoutInputMaps({
     attendanceOverrides: attendanceOverridesResult.data ?? [],
     attendancePeriods: payoutInputResults.attendancePeriods,
     paymentFieldOverrides: paymentFieldOverridesResult.data ?? [],
-    productionInputs: [...(uploadedProductionInputsResult.data ?? []),...automaticKmInputs]
+    productionInputs: uploadedProductionInputsResult.data ?? []
   });
   const thresholdMappings = mappingsForAuthorizedWorkforce(allMappings, canonicalWorkers)
     .filter((mapping: any) => mapping.payment_method_id
@@ -1236,11 +1233,11 @@ export async function loadWorkforcePayoutRows(
       const routeFuel = kmRate===null?null:routeFuelForDay(routeContext,{workforceId:String(worker.id),stationId:String(mapping.station_id),mappingId:String(mapping.id),date,rate:kmRate,hasActivity:rows.some(daily=>Number(daily.total_activity??daily.total_delivery??0)>0)||attendanceUnitForDate(String(worker.id),String(mapping.station_id),date,attendanceSourceKey)>0});
       missingRouteDistance ||= routeFuel?.status==='pending';
       const productionLines = productionRules.map((rule) => {
-        if(isKilometreField(rule.code)&&routeFuel) return {code:rule.code,label:'Fuel allowance · calculated route km',componentType:rule.componentType,count:routeFuel.km??0,rate:routeFuel.rate,amount:routeFuel.amount??0,sortOrder:rule.sortOrder};
-        // After route distance is enabled, never fall back to provider metrics for KM_RUN (absent / excluded = ₹0 fuel).
+        if(isKilometreField(rule.code)&&routeFuel) return {code:rule.code,label:'Fuel allowance · uploaded km',componentType:rule.componentType,count:routeFuel.km??0,rate:routeFuel.rate,amount:routeFuel.amount??0,sortOrder:rule.sortOrder};
+        // Kilometres are supplied only by manual inputs; provider metrics never supply fuel units.
         if(isKilometreField(rule.code)&&routeContext.enabledFrom&&date>=routeContext.enabledFrom) {
           const rate = kmRate ?? (Number(rule.rate) || 0);
-          return {code:rule.code,label:'Fuel allowance · no payable distance',componentType:rule.componentType,count:0,rate,amount:0,sortOrder:rule.sortOrder};
+          return {code:rule.code,label:'Fuel allowance · no uploaded km',componentType:rule.componentType,count:0,rate,amount:0,sortOrder:rule.sortOrder};
         }
         const providerUnits = rule.customProduction
           ? 0

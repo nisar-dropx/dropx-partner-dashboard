@@ -4,7 +4,7 @@ export type RouteDistanceRow = {
   status:'ready'|'pending';reason:string|null;distance_km:number|string|null;
   departure_km:number|string|null;delivery_km:number|string|null;return_km:number|string|null;calculated_at:string;
 };
-export type RouteDistanceContext = {enabledFrom:string|null;rows:RouteDistanceRow[];manual:any[];rateOverrides:any[]};
+export type RouteDistanceContext = {enabledFrom:string|null;rows:RouteDistanceRow[];manual:any[];rateOverrides:any[];source?:'manual'};
 export type DailyRouteFuel = {date:string;stationId:string;mappingId:string;status:'ready'|'pending';reason:string|null;km:number|null;rate:number;amount:number|null;departureKm:number|null;deliveryKm:number|null;returnKm:number|null;updatedAt:string|null;source:'calculated'|'manual';routeId:string|null};
 /** Anomalous / unusable days pay no fuel — same as absent for salary (do not block payroll as pending). */
 export const distanceNoPayoutReasons = new Set([
@@ -20,8 +20,9 @@ export function kilometreRate(mapping:any):number|null {
 const kolkataToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
 export function routeFuelForDay(context:RouteDistanceContext,input:{workforceId:string;stationId:string;mappingId:string;date:string;rate:number;hasActivity:boolean}):DailyRouteFuel|null {
   if(!context.enabledFrom || input.date<context.enabledFrom)return null;
-  const rows=context.rows.filter(r=>r.workforce_id===input.workforceId&&r.station_id===input.stationId&&r.work_date===input.date);
+  const rows=context.source==='manual'?[]:context.rows.filter(r=>r.workforce_id===input.workforceId&&r.station_id===input.stationId&&r.work_date===input.date);
   const manual=context.manual.filter(r=>r.workforce_id===input.workforceId&&r.station_id===input.stationId&&r.work_date===input.date&&isKilometreField(r.field_code_snapshot));
+  if(context.source==='manual'&&!manual.length)return null;
   if(!manual.length&&!input.hasActivity&&!rows.some(r=>r.status==='ready'))return null;
   const overrides=context.rateOverrides.filter(r=>r.workforce_id===input.workforceId&&r.station_id===input.stationId&&isKilometreField(r.field_code_snapshot)&&r.effective_from<=input.date&&r.effective_to>=input.date);
   if(overrides.length>1||manual.length>1||rows.length>1)throw new Error('Conflicting kilometre inputs. Contact Workforce.');

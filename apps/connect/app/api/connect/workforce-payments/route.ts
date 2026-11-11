@@ -296,7 +296,7 @@ export async function GET(request: NextRequest) {
     const routeFuel=ownRouteFuel(routeContext,String(workforce?.id??''),mappings,routeActivity);
     for(const fuel of routeFuel){
       const current=dailyByDate.get(fuel.date)??{date:fuel.date,deliveries:0,amazonDeliveries:0,swaDeliveries:0,cReturns:0,mfn:0,mfnReturns:0,earnings:0,rateLines:new Map<string,RateLine>(),providers:new Map<string,ProviderDay>()};
-      const line={code:'KM_RUN',label:'Fuel allowance · calculated route km',count:fuel.km??0,rate:fuel.rate,amount:fuel.amount??0};
+      const line={code:'KM_RUN',label:'Fuel allowance · uploaded km',count:fuel.km??0,rate:fuel.rate,amount:fuel.amount??0};
       mergeLine(current.rateLines,line);current.earnings+=line.amount;
       dailyByDate.set(fuel.date,current);
     }
