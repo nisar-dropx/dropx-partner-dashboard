@@ -153,6 +153,13 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     return { asOf: fresh(s.fetchedAt, day), pending: s.totalCount > 0,
       rows: [["At station", s.totalCount], ["Overdue", b.overdue], ["Due today", b.dueToday], ["Due tomorrow", b.dueTomorrow], ["Later", b.future], ["EDD unknown", b.unknown]] };
   }
+  if (key === "oor") {
+    const station = (await fetchLoadFlashBoard(day, [code])).stations.find(row => row.stationCode === code && row.businessDate === day && row.hasSnapshot);
+    if (!station) throw new Error("Station board unavailable for this date.");
+    const asOf = fresh(station.fetchedAt, day);
+    const outOnRoad = station.board.daDsr.reduce((total, row) => total + Number(row.oor || 0), 0);
+    return { asOf, pending: outOnRoad > 0, rows: [["Out on road", outOnRoad]] };
+  }
   const s = (await fetchLoadFlashBoard(day, [code])).stations.find(s => s.stationCode === code && s.businessDate === day && s.hasSnapshot);
   if (!s) throw new Error("Station board unavailable for this date.");
   const asOf = fresh(s.fetchedAt, day), b = s.board;

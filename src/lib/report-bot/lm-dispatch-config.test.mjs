@@ -37,3 +37,8 @@ test("dispatch delta compares numeric values and preserves unchanged sends", () 
   assert.equal(compareDispatchRows([["Pending", 10], ["Cash", 500]], before), "unchanged");
   assert.equal(compareDispatchRows([["Pending", 10]], null), "increased");
 });
+
+test("the control-tower OOR report is a distinct configurable report key", async () => {
+  const { dispatchReports } = await import("./lm-dispatch-config.ts");
+  assert.equal(dispatchReports.oor, "OOR / Out on road");
+});

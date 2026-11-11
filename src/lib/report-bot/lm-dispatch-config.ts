@@ -1,6 +1,6 @@
 export const dispatchReports = {
   edd: "EDD pendency", station: "At station", dsr: "DSR", creturn: "C-Return", ageing: "Ageing",
-  zero: "Zero-delivery DAs", scrub: "Scrub", cod: "COD", recon: "DA reconciliation",
+  zero: "Zero-delivery DAs", oor: "OOR / Out on road", scrub: "Scrub", cod: "COD", recon: "DA reconciliation",
   deposit: "Prepare deposit", bank: "Bank remittance", slip: "COD slip",
   eod: "Final EOD · DSR + DOT + C-Return"
 };
