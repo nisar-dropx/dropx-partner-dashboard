@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import ts from 'typescript';
 import * as core from './lm-dispatch-mentions-core.ts';
 
-function fixture(hasCluster) {
+function fixture(hasCluster, personalOnly=false) {
   const queried=[];
   const db={from(table){const q={table,ids:[],select(){return q},eq(){return q},is(){return q},not(){return q},in(_key,ids){q.ids=ids;return q},order(){return q}};return q}};
   const deps={
     'server-only':{},
     '@/lib/supabase-admin':{supabaseAdmin:db},
-    '@/lib/supabase-pagination':{readAllRows:async q=>{queried.push(q.ids);return {data:q.ids.map(id=>({id,email:id+'@example.test'})),error:null}}},
+    '@/lib/supabase-pagination':{readAllRows:async q=>{assert.equal(q.table,'google_workspace_accounts');queried.push(q.ids);return {data:q.ids.map(id=>({id,primary_email:id+(personalOnly?'@gmail.com':'@dropxlogistics.com')})),error:null}}},
     '@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>({byLocation:new Map([['S1',{clusterManagers:hasCluster?[{personId:'CLM'}]:[],areaOperationsManagers:[{personId:'AOM'}]}]]),error:null})},
     '@/lib/ops-pulse/cod-station-team':{loadCodTeamDirectory:async(_company,locations,managerIds)=>{
       assert.deepEqual(locations,['S1']);
@@ -27,9 +27,15 @@ function fixture(hasCluster) {
 for(const hasCluster of [true,false]) test(hasCluster?'CLM email takes precedence over AOM':'unmapped CLM falls back to station AOM email and tag',async()=>{
   const {resolve,queried}=fixture(hasCluster);
   const result=await resolve('C',[{id:'S1',station_code:'TEST'}],{mention_manager_policy:'cluster_then_aom',mention_designation_codes:['TL','CT'],mentions:['919000000004']},'2026-11-12');
-  assert.deepEqual(result.managerEmails,[hasCluster?'clm@example.test':'aom@example.test']);
+  assert.deepEqual(result.managerEmails,[hasCluster?'clm@dropxlogistics.com':'aom@dropxlogistics.com']);
   assert.deepEqual(queried,[[hasCluster?'CLM':'AOM']]);
   assert.deepEqual(result.cluster,hasCluster?['919000000002']:[]);
   assert.deepEqual(result.aom,hasCluster?[]:['919000000003']);
   assert.deepEqual(result.tl,['919000000001']);
+});
+
+test('personal account email is never used as a fallback',async()=>{
+ const {resolve}=fixture(false,true);
+ const result=await resolve('C',[{id:'S1',station_code:'TEST'}],{mention_manager_policy:'cluster_then_aom'},'2026-11-12');
+ assert.deepEqual(result.managerEmails,[]);
 });

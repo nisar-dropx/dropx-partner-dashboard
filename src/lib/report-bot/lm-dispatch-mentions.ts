@@ -134,19 +134,17 @@ export async function resolveBankReminderMentions(companyId:string,sources:Menti
     else station?.areaOperationsManagers.forEach(person=>aomIds.add(person.personId));
   }
   const directory=await loadCodTeamDirectory(companyId,locations,[...clusterIds,...aomIds],day);
-  // Read only the selected station's CLM (or AOM fallback) email contacts.
-  // These addresses are CC instructions, never WhatsApp mention identifiers.
-  if(!supabaseAdmin) throw new Error("People contacts are unavailable.");
-  const db=supabaseAdmin;
-  const managerContacts=await Promise.all(["employee","contractor"].map(async type=>{
-    const ids=directory.filter(person=>(clusterIds.has(person.personId)||aomIds.has(person.personId))&&person.workerType===type).map(person=>person.workerId);
-    if(!ids.length) return {data:[],error:null};
-    return readAllRows(db.from(type==="employee"?"employees":"contractors").select("id,email")
-      .eq("company_id",companyId).eq("is_active",true).is("deleted_at",null)
-      .not("people_lifecycle_status","in",'(\"offboarding\",\"offboarded\")').in("id",ids).order("id"));
-  }));
-  for(const result of managerContacts) if(result.error) throw new Error(result.error.message);
-  const managerEmails=[...new Set(managerContacts.flatMap(result=>(result.data||[]).map(row=>String(row.email||"").trim().toLowerCase())).filter(email=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))];
+  // Resolve only active corporate Workspace accounts linked to the selected
+  // People manager. Employee/contractor contact fields may be personal email.
+  if(!supabaseAdmin) throw new Error("Workspace contacts are unavailable.");
+  const managerIds=[...new Set([...clusterIds,...aomIds])];
+  const managerContacts=managerIds.length?await readAllRows(supabaseAdmin.from("google_workspace_accounts")
+    .select("id,person_id,primary_email").eq("company_id",companyId)
+    .eq("account_type","person").eq("account_state","active")
+    .eq("suspended",false).eq("archived",false).eq("available_for_reassignment",false)
+    .in("person_id",managerIds).order("id")):{data:[],error:null};
+  if(managerContacts.error) throw new Error(managerContacts.error.message);
+  const managerEmails=[...new Set((managerContacts.data||[]).map(row=>String(row.primary_email||"").trim().toLowerCase()).filter(email=>/^[^\s@]+@dropxlogistics\.com$/.test(email)))];
   const numbers=(people:typeof directory)=>[...new Set(people.map(person=>normalizeWhatsAppNumber(person.phone)).filter((number):number is string=>Boolean(number)))];
   const roles=new Set(route.mention_designation_codes||[]);
   return {

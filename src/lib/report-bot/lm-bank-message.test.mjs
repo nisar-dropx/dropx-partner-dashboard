@@ -11,12 +11,18 @@ test("TL is addressed first, CT and station manager are FYI only",()=>{
 });
 
 test("CC uses the resolved manager email and never turns it into a WhatsApp tag",()=>{
-  const groups={tl:["910000000001"],ct:["910000000002"],cluster:[],aom:["910000000004"],managerEmails:["aom@example.test"]};
+  const groups={tl:["910000000001"],ct:["910000000002"],cluster:[],aom:["910000000004"],managerEmails:["aom@dropxlogistics.com"]};
   const rows=[["CMS usually reports","10:30–11:00 IST"],["Due remittances","1 · ₹500"],["Action","Email cod-recon@amazon.com."]];
   const text=bankReminderText("TEST",rows,groups);
-  assert.match(text,/CC: aom@example\.test, ct@dropxlogistics\.com, varun@dropxlogistics\.com/);
-  assert.doesNotMatch(text,/your Cluster Manager|Manager email is not available/);
+  assert.match(text,/CC: aom@dropxlogistics\.com, ct@dropxlogistics\.com, varun@dropxlogistics\.com/);
+  assert.doesNotMatch(text,/your Cluster Manager|Manager Workspace email is not mapped/);
   assert.match(text,/FYI: CT @910000000002 · AOM @910000000004/);
   assert.deepEqual(bankMentionNumbers(groups),["910000000001","910000000002","910000000004"]);
   assert.doesNotMatch(bankReminderText("TEST",[...rows,["Submitted today","10:45 AM"]],groups),/CC:/);
+});
+
+test("personal addresses cannot leak into the rendered CC list",()=>{
+ const text=bankReminderText("TEST",[["CMS usually reports","10:30–11:00 IST"],["Due remittances","1 · ₹500"]],{tl:[],ct:[],cluster:[],aom:[],managerEmails:["personal@gmail.com","wrong@dropxlogistics.com.evil"]});
+ assert.doesNotMatch(text,/personal@gmail|\.evil/);
+ assert.match(text,/Manager Workspace email is not mapped/);
 });
