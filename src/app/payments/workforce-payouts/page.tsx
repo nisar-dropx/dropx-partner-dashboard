@@ -943,8 +943,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
                 <WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} />
               </div>
               {period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}
-              <WorkforcePayoutTable
-                key={`${audience}-${period.fromDate}-${period.toDate}`}
+              <WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`}
                 audience={audience}
                 banks={bankResult.banks}
                 canDeductAdvances={false && canDeductAdvances}
