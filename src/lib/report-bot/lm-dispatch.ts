@@ -3,7 +3,7 @@ import { summaryReportSvg, tableReportSvg, reportPngBase64, type CellStyle } fro
 import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
 import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } from "@/lib/ops-pulse/station-board";
-import { compareDispatchRows, dispatchReports, type ReportKey } from "./lm-dispatch-config";
+import { compareDispatchRows, dispatchReports, type EodSection, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
@@ -19,6 +19,7 @@ type Route = {
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
   source_model_codes?: string[];
+  eod_sections?: EodSection[];
   mention_manager_policy?: MentionManagerPolicy; mention_designation_codes?:string[]; mention_present_designation_codes?: string[]; mention_latest_shift_designation_codes?:string[];
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; state:string|null; report_code?:string };
@@ -164,11 +165,12 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
   const dsrCaption=eodDsrPerformanceCaption(dsrTitle,digest.dsr,recognitionNumbers,focusNumbers);
   const dsrMentionNumbers=[...new Set([...staticNumbers,...recognitionNumbers,...focusNumbers])];
   const dsrMentions=dsrMentionNumbers.map(number=>number+"@s.whatsapp.net");
+  const configuredSections=new Set<EodSection>(route.eod_sections?.length ? route.eod_sections : ["dsr","dot","creturn"]);
   const tables=[
     {key:"01_dsr",title:dsrTitle,rows:dsr,percentage:"DSR %",tone:"performance" as const,caption:dsrCaption,mentions:dsrMentions},
     {key:"02_dot",title:`EOD DOT · Standard + Premium + Overall · ${dateLabel} · ${regionLabel}`,rows:dot,columns:[...EOD_DOT_VISIBLE_COLUMNS],percentage:[...EOD_DOT_PERCENTAGE_COLUMNS],tone:"performance" as const,caption:`*EOD DOT · Standard + Premium + Overall · ${dateLabel} · ${regionLabel}*`,mentions:[]},
     {key:"03_creturn",title:`EOD C-Return Report · ${dateLabel} · ${regionLabel}`,rows:creturn,percentage:"Pickup %",tone:"pickup" as const,caption:`*EOD C-Return Report · ${dateLabel} · ${regionLabel}*`,mentions:[]},
-  ];
+  ].filter(table=>configuredSections.has(table.key.split("_")[1] as EodSection));
   const outputs:SendOutput[]=[];
   const formats=route.formats?.length?route.formats:[route.format];
   if(formats.includes("photo")) for(const table of tables) {
@@ -178,7 +180,12 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
     outputs.push({key:`photo_${table.key}`,body:{image_base64:await tablePhoto(table.title,columns,values,table.percentage,table.tone),mime:"image/png",caption:table.caption,...(table.mentions.length?{mentions:table.mentions}:{})}});
   }
   if(formats.includes("excel")) {
-    const buffer=workbookBuffer([{name:"Final DSR",rows:dsr},{name:"Final DOT",rows:dot},{name:"Final C-Return",rows:creturn}]);
+    const sheets=[
+      {section:"dsr" as const,name:"Final DSR",rows:dsr},
+      {section:"dot" as const,name:"Final DOT",rows:dot},
+      {section:"creturn" as const,name:"Final C-Return",rows:creturn},
+    ].filter(sheet=>configuredSections.has(sheet.section)).map(({name,rows})=>({name,rows}));
+    const buffer=workbookBuffer(sheets);
     outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*EOD Report · ${dateLabel} · ${regionLabel}*`}});
   }
   return outputs.sort((a,b)=>a.key.localeCompare(b.key));

@@ -2,9 +2,15 @@ export const dispatchReports = {
   edd: "EDD pendency", station: "At station", dsr: "DSR", creturn: "C-Return", ageing: "Ageing",
   zero: "Zero-delivery DAs", oor: "OOR / Out on road", scrub: "Scrub", cod: "COD", recon: "DA reconciliation",
   deposit: "Prepare deposit", bank: "Bank remittance", slip: "COD slip",
-  eod: "Final EOD · DSR + DOT + C-Return"
+  eod: "Final EOD · configured sections"
 };
 export type ReportKey = keyof typeof dispatchReports;
+export const eodSections = {
+  dsr: "DSR",
+  dot: "DOT",
+  creturn: "C-Return",
+} as const;
+export type EodSection = keyof typeof eodSections;
 const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 function clockMinutes(value: string) {

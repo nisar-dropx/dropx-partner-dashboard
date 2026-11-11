@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { dispatchReports, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
+import { dispatchReports, eodSections, type EodSection, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
 import { saveDispatchRoutes } from "./actions";
 import s from "./report-bot.module.css";
 
@@ -8,6 +8,7 @@ export type Schedule = {
   id:string; group_id:string; report:ReportKey; format:string; formats?:string[]; times:string[];
   schedule_start?:string|null; schedule_end?:string|null; interval_minutes?:number|null;
   scope_type?:"station"|"region"; source_location_ids?:string[]; source_region_codes?:string[]; source_model_codes?:string[];
+  eod_sections?:EodSection[];
   mentions:string[]; question:string; pending_only:boolean; enabled:boolean;
   mention_manager_policy?:"none"|"cluster_then_aom"; mention_designation_codes?:string[]; mention_present_designation_codes?:string[]; mention_latest_shift_designation_codes?:string[];
 };
@@ -25,6 +26,7 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
   const [selectedRegions,setSelectedRegions] = useState<string[]>([]);
   const [selectedModels,setSelectedModels] = useState<string[]>([]);
   const [formats,setFormats] = useState<string[]>(["text"]);
+  const [selectedEodSections,setSelectedEodSections] = useState<EodSection[]>(["dsr","dot","creturn"]);
   const [start,setStart] = useState(defaults.start);
   const [end,setEnd] = useState(defaults.end);
   const [interval,setInterval] = useState(defaults.interval);
@@ -41,6 +43,7 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
     const scope = row?.scope_type || "station"; setScopeType(scope);
     setSelectedGroups(row ? [row.group_id] : []); setSelectedLocations(row?.source_location_ids || []); setSelectedRegions(row?.source_region_codes || []); setSelectedModels(row?.source_model_codes || []);
     setFormats(row?.report === "eod" ? ["photo"] : row?.formats?.length ? row.formats : row ? [row.format] : ["text"]);
+    setSelectedEodSections(row?.eod_sections?.length ? row.eod_sections : ["dsr","dot","creturn"]);
     setStart(row?.schedule_start || defaults.start); setEnd(row?.schedule_end || defaults.end); setInterval(row?.interval_minutes || defaults.interval);
     setManagerPolicy(row?.mention_manager_policy || "none"); setAlwaysDesignations(row?.mention_designation_codes || []); setPresentDesignations(row?.mention_present_designation_codes || []); setLatestShiftDesignations(row?.mention_latest_shift_designation_codes || []);
   }
@@ -64,7 +67,8 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
       <div className={s.formGrid}>
         <label className={s.field}>Report{edit && <input type="hidden" name="report" value={report}/>}<select disabled={Boolean(edit)} className={s.select} name="report" value={report} onChange={e=>chooseReport(e.target.value as ReportKey)}>{Object.entries(dispatchReports).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
         <label className={s.field}>Audience scope<select className={s.select} name="scope_type" value={scopeType} onChange={e=>chooseScope(e.target.value as "station"|"region")}><option value="station">Station War Room</option><option value="region">Regional / Internal LM</option></select><small>Destination group is separate from source. This is how XPT can use its configured base-station group.</small></label>
-        <div className={s.field}><span>Output</span><div className={s.formActions}>{[["text","TID message"],["photo","Compact table image"],["excel","Excel details"]].map(([value,label])=><label key={value}><input type="checkbox" name="format" value={value} disabled={report === "eod" && value !== "photo"} checked={formats.includes(value)} onChange={()=>toggle(value,formats,setFormats)}/> {label}</label>)}</div>{report === "eod" ? <small>EOD sends the three compact table images only: DSR, DOT and C-Return.</small> : null}</div>
+        <div className={s.field}><span>Output</span><div className={s.formActions}>{[["text","TID message"],["photo","Compact table image"],["excel","Excel details"]].map(([value,label])=><label key={value}><input type="checkbox" name="format" value={value} disabled={report === "eod" && value !== "photo"} checked={formats.includes(value)} onChange={()=>toggle(value,formats,setFormats)}/> {label}</label>)}</div>{report === "eod" ? <small>EOD sends only the compact table images selected below.</small> : null}</div>
+        {report === "eod" ? <div className={s.field}><span>EOD sections</span><div className={s.formActions}>{Object.entries(eodSections).map(([value,label])=><label key={value}><input type="checkbox" name="eod_section" value={value} checked={selectedEodSections.includes(value as EodSection)} onChange={()=>toggle(value,selectedEodSections,next=>setSelectedEodSections(next as EodSection[]))}/> {label}</label>)}</div><small>Choose exactly which report images this destination receives.</small></div> : null}
         <label className={s.field}>Start time · IST<input className={s.input} type="time" name="schedule_start" value={start} onChange={e=>setStart(e.target.value)} required/></label>
         <label className={s.field}>End time · IST<input className={s.input} type="time" name="schedule_end" value={end} onChange={e=>setEnd(e.target.value)} required/></label>
         <label className={s.field}>Repeat every<input className={s.input} type="number" name="interval_minutes" min={5} max={720} step={5} value={interval} onChange={e=>setInterval(Number(e.target.value))} required/><small>Minutes. The configured window includes both start and end.</small></label>
@@ -85,13 +89,14 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
         <div className={s.field}><span>Present team tags</span><div style={{maxHeight:150,overflowY:"auto"}}>{designations.map(row=><label key={row.code} style={{display:"block"}}><input type="checkbox" name="mention_present_designation_code" value={row.code} checked={presentDesignations.includes(row.code)} onChange={()=>toggle(row.code,presentDesignations,setPresentDesignations)}/> {row.code} · {row.name}</label>)}</div><small>Selected roles are tagged only when their latest punch today is a biometric In at this station and there is no later Out. For EDD, select TL and SSA.</small></div>
         <div className={s.field}><span>Latest shift team tags</span><div style={{maxHeight:150,overflowY:"auto"}}>{designations.map(row=><label key={row.code} style={{display:"block"}}><input type="checkbox" name="mention_latest_shift_designation_code" value={row.code} checked={latestShiftDesignations.includes(row.code)} onChange={()=>toggle(row.code,latestShiftDesignations,setLatestShiftDesignations)}/> {row.code} · {row.name}</label>)}</div><small>Tags people who are currently present or worked the station's latest shift today, even after punching Out. Use this for closing-shift SSA accountability.</small></div>
       </div>
-      <div className={s.formActions}><label><input type="checkbox" name="pending_only" defaultChecked={edit?.pending_only ?? true}/> Send only while pending</label><label><input type="checkbox" name="enabled" defaultChecked={edit?.enabled ?? true}/> Enabled</label>{edit && <button type="button" className={s.button} onClick={()=>open(null)}>New schedule</button>}<button className={s.primary+" "+s.button} disabled={!selectedGroups.length || !sourceCount || !formats.length || (report === "eod" && scopeType === "region" && !selectedModels.length)}>Save schedule</button></div>
+      <div className={s.formActions}><label><input type="checkbox" name="pending_only" defaultChecked={edit?.pending_only ?? true}/> Send only while pending</label><label><input type="checkbox" name="enabled" defaultChecked={edit?.enabled ?? true}/> Enabled</label>{edit && <button type="button" className={s.button} onClick={()=>open(null)}>New schedule</button>}<button className={s.primary+" "+s.button} disabled={!selectedGroups.length || !sourceCount || !formats.length || (report === "eod" && (!selectedEodSections.length || (scopeType === "region" && !selectedModels.length)))}>Save schedule</button></div>
     </form>}
     <div className={s.tableWrap}><table className={s.table}><thead><tr>{["Destination","Report","Source","Window (IST)","Outputs","Automatic tags","Status",""].map(value=><th key={value}>{value}</th>)}</tr></thead><tbody>{schedules.map(row=>{
       const source = row.scope_type === "region" ? (row.source_region_codes || []).join(", ") : (row.source_location_ids || []).map(id=>locations.find(location=>location.id===id)?.station_code || "Inactive/missing").join(", ");
       const modelScope = row.scope_type === "region" && row.source_model_codes?.length ? ` · Models: ${row.source_model_codes.join(", ")}` : "";
       const tags=[row.mention_manager_policy==="cluster_then_aom"?"CLM → AOM":null,(row.mention_designation_codes||[]).join(", ")||null,(row.mention_present_designation_codes||[]).length?`Present: ${row.mention_present_designation_codes!.join(", ")}`:null,(row.mention_latest_shift_designation_codes||[]).length?`Latest shift: ${row.mention_latest_shift_designation_codes!.join(", ")}`:null].filter(Boolean).join(" · ");
-      return <tr key={row.id}><td>{groups.find(group=>group.id===row.group_id)?.name || "Group removed"}</td><td>{dispatchReports[row.report]}</td><td>{row.scope_type === "region" ? "Regions: " : "Stations: "}{source || "Legacy mapping"}{modelScope}</td><td>{row.schedule_start && row.schedule_end ? `${row.schedule_start}–${row.schedule_end} · ${row.interval_minutes} min` : row.times.join(", ")}</td><td>{(row.formats?.length ? row.formats : [row.format]).join(" + ")}</td><td>{tags||"—"}</td><td>{row.enabled?"Enabled":"Paused"}</td><td>{canEdit && <button className={s.button} onClick={()=>open(row)}>Edit</button>}</td></tr>;
+      const outputs=row.report==="eod" ? (row.eod_sections?.length?row.eod_sections:["dsr","dot","creturn"]).map(section=>eodSections[section as EodSection]).join(" + ") : (row.formats?.length ? row.formats : [row.format]).join(" + ");
+      return <tr key={row.id}><td>{groups.find(group=>group.id===row.group_id)?.name || "Group removed"}</td><td>{dispatchReports[row.report]}</td><td>{row.scope_type === "region" ? "Regions: " : "Stations: "}{source || "Legacy mapping"}{modelScope}</td><td>{row.schedule_start && row.schedule_end ? `${row.schedule_start}–${row.schedule_end} · ${row.interval_minutes} min` : row.times.join(", ")}</td><td>{outputs}</td><td>{tags||"—"}</td><td>{row.enabled?"Enabled":"Paused"}</td><td>{canEdit && <button className={s.button} onClick={()=>open(row)}>Edit</button>}</td></tr>;
     })}</tbody></table></div>
     {!schedules.length && <p className={s.cardBody}>No outbound schedules configured.</p>}
   </section>;
