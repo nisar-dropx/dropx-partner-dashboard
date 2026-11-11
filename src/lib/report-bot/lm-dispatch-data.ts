@@ -3,7 +3,7 @@ import { fetchLoadFlashBoard, fetchLoadFlashTracking, fetchEddStation, fetchScru
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
-import { CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
+import { AGEING_DAY_BUCKETS, CRETURN_DISPLAY, CRETURN_SHORT } from "@/lib/ops-pulse/station-board";
 import { stationDotTotals } from "@/lib/ops-pulse/dot-metrics";
 import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
@@ -16,6 +16,15 @@ export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unve
 export type EodDsrRow = { Station:string; "Verified total":number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "DSR %":string };
 export type EodCReturnRow = { Station:string; Total:number; "Picked up":number; "Pending pickup":number; "Pickup %":string };
 export type EodDigest = { asOf:string; missingStations:string[]; dsr:EodDsrRow[]; dot:EodDotRow[]; creturn:EodCReturnRow[] };
+export type AgeingCell = { count:number; amount:number };
+export type AgeingDigest = {
+  asOf:string;
+  missingStations:string[];
+  dayBuckets:string[];
+  weekBuckets:string[];
+  byStation:Array<{stationCode:string; byDay:Record<string,AgeingCell>; byWeek:Record<string,AgeingCell>; total:AgeingCell}>;
+  trackingIds:BoardTidExportRow[];
+};
 export function istDay(now: Date) { return new Date(+now + 330 * 60000).toISOString().slice(0, 10); }
 function fresh(stamp: string | null, day: string) {
   const at = Date.parse(stamp || "");
@@ -87,6 +96,32 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
     dot: orderEodDotRows(dot),
     creturn: orderEodCReturnRows(creturn),
   };
+}
+
+function addAgeingCells(cells:AgeingCell[]) {
+  return cells.reduce((total,cell)=>({count:total.count+Number(cell.count||0),amount:Math.round((total.amount+Number(cell.amount||0)+Number.EPSILON)*100)/100}),{count:0,amount:0});
+}
+
+/** Regional ageing uses the verified Station Board summary for TID/value
+ * buckets and the worker's BoardAgeing rows for the row-level workbook. */
+export async function loadAgeingDigest(stationCodes:string[],day:string):Promise<AgeingDigest> {
+  const requested=[...new Set(stationCodes.map(code=>code.trim().toUpperCase()).filter(Boolean))];
+  if(!requested.length) throw new Error("No active source stations are configured.");
+  const network=await fetchLoadFlashBoard(day,requested);
+  const allowed=new Set(requested);
+  const stations=network.stations.filter(row=>allowed.has(row.stationCode)&&row.businessDate===day&&row.hasSnapshot);
+  if(!stations.length) throw new Error("No current ageing snapshots are available for this region.");
+  const missingStations=requested.filter(code=>!stations.some(row=>row.stationCode===code));
+  const stamps=stations.map(row=>fresh(row.fetchedAt,day));
+  const weekBuckets=[...new Set(stations.flatMap(row=>Object.keys(row.board.ageingByWeek||{})))].sort();
+  const byStation=stations.sort((a,b)=>a.stationCode.localeCompare(b.stationCode)).map(station=>{
+    const byDay=Object.fromEntries(AGEING_DAY_BUCKETS.map(bucket=>[bucket,station.board.ageingByDay?.[bucket]||{count:0,amount:0}])) as Record<string,AgeingCell>;
+    const byWeek=Object.fromEntries(weekBuckets.map(bucket=>[bucket,station.board.ageingByWeek?.[bucket]||{count:0,amount:0}])) as Record<string,AgeingCell>;
+    return {stationCode:station.stationCode,byDay,byWeek,total:addAgeingCells(Object.values(byDay))};
+  });
+  const flash=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.AGEING]});
+  const trackingIds=mapBoardTidExportRows(flash.filter(row=>allowed.has(row.stationCode)),"ageing");
+  return {asOf:stamps.sort().at(-1)||network.asOf,missingStations,dayBuckets:[...AGEING_DAY_BUCKETS],weekBuckets,byStation,trackingIds};
 }
 
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {

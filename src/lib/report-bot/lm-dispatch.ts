@@ -4,7 +4,7 @@ import { workbookBuffer } from "@/lib/report-workbook";
 import { boardTidSheetRows } from "@/lib/ops-pulse/station-board-tids";
 import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } from "@/lib/ops-pulse/station-board";
 import { compareDispatchRows, dispatchReports, type ReportKey } from "./lm-dispatch-config";
-import { istDay, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
+import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveRouteMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
@@ -219,6 +219,50 @@ async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:st
   return {outputs,snapshot:{rows:snapshotRows,asOf:digest.asOf}};
 }
 
+function ageingBucketLabel(bucket:string) {
+  if(bucket==="1") return "1 day";
+  if(bucket==="14+") return "15+ days";
+  return `${bucket} days`;
+}
+
+function ageingDays(day:string,edd:string) {
+  const report=Date.parse(`${day}T00:00:00+05:30`), due=Date.parse(`${edd}T00:00:00+05:30`);
+  return Number.isFinite(report)&&Number.isFinite(due)?Math.max(0,Math.floor((report-due)/86400000)):null;
+}
+
+async function ageingOutputs(route:Route,digest:AgeingDigest,scopeLabel:string,day:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
+  const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
+  const formats=route.formats?.length?route.formats:[route.format];
+  const totals=digest.dayBuckets.map(bucket=>{
+    const cells=digest.byStation.map(row=>row.byDay[bucket]||{count:0,amount:0});
+    return {bucket,count:cells.reduce((sum,cell)=>sum+cell.count,0),amount:cells.reduce((sum,cell)=>sum+cell.amount,0)};
+  });
+  const grand={count:totals.reduce((sum,row)=>sum+row.count,0),amount:totals.reduce((sum,row)=>sum+row.amount,0)};
+  const title=`Ageing Report · ${dateLabel} · ${scopeLabel} · ${asIst(digest.asOf)}`;
+  const summaryRows:[string,string|number][]=totals.flatMap(row=>[[`${ageingBucketLabel(row.bucket)} · TIDs`,row.count],[`${ageingBucketLabel(row.bucket)} · Value`,`₹${row.amount.toLocaleString("en-IN",{maximumFractionDigits:2})}`]]) as [string,string|number][];
+  summaryRows.push(["Total TIDs",grand.count],["Total value",`₹${grand.amount.toLocaleString("en-IN",{maximumFractionDigits:2})}`]);
+  const outputs:SendOutput[]=[];
+  const missing=digest.missingStations.length?`Coverage pending: ${digest.missingStations.join(", ")}`:"";
+  if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:await photo(title,summaryRows,(label,value)=>{
+    if(label.startsWith("1 day")) return caution;
+    if(label.startsWith("2-3")) return {background:"#ffedd5",color:"#9a3412"};
+    if(label.startsWith("4-7")||label.startsWith("8-14")||label.startsWith("15+")) return positive;
+    return numeric(value)!>0?info:clear;
+  }),mime:"image/png",caption:[`*${title}*`,missing].filter(Boolean).join("\n")}});
+  if(formats.includes("text")) outputs.push({key:"text_001",body:{text:[`*${title}*`,...summaryRows.map(([label,value])=>`${label}: ${value}`),missing].filter(Boolean).join("\n")}});
+  if(formats.includes("excel")) {
+    const dayRows=digest.byStation.map(row=>({Station:row.stationCode,...Object.fromEntries(digest.dayBuckets.flatMap(bucket=>[[`${ageingBucketLabel(bucket)} TIDs`,row.byDay[bucket]?.count||0],[`${ageingBucketLabel(bucket)} value`,row.byDay[bucket]?.amount||0]])),"Total TIDs":row.total.count,"Total value":row.total.amount}));
+    dayRows.push({Station:"Grand total",...Object.fromEntries(totals.flatMap(row=>[[`${ageingBucketLabel(row.bucket)} TIDs`,row.count],[`${ageingBucketLabel(row.bucket)} value`,row.amount]])),"Total TIDs":grand.count,"Total value":grand.amount});
+    const weekRows=digest.byStation.map(row=>({Station:row.stationCode,...Object.fromEntries(digest.weekBuckets.flatMap(bucket=>[[`${bucket} TIDs`,row.byWeek[bucket]?.count||0],[`${bucket} value`,row.byWeek[bucket]?.amount||0]])),"Total TIDs":row.total.count,"Total value":row.total.amount}));
+    const tidRows=[...digest.trackingIds].sort((a,b)=>a.stationCode.localeCompare(b.stationCode)||a.edd.localeCompare(b.edd)||a.trackingId.localeCompare(b.trackingId)).map(source=>{const row=boardTidSheetRows([source])[0]||{};const days=ageingDays(day,source.edd);return {...row,"Ageing days":days??"","Ageing bucket":days===null?"":days<=1?"1 day":days<=3?"2-3 days":days<=7?"4-7 days":days<=14?"8-14 days":"15+ days"};});
+    const sheets=[{name:"Ageing by day",rows:dayRows},...(weekRows.length&&digest.weekBuckets.length?[{name:"Ageing by week",rows:weekRows}]:[]),{name:"Tracking IDs",rows:tidRows}];
+    const buffer=workbookBuffer(sheets);
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Ageing_${scopeLabel.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`${title} · bucket summary and row-level tracking IDs`}});
+  }
+  const snapshotRows=digest.byStation.map(row=>[`${row.stationCode} · Ageing TIDs`,row.total.count] as [string,string|number]);
+  return {outputs:outputs.sort((a,b)=>a.key.localeCompare(b.key)),snapshot:{rows:snapshotRows,asOf:digest.asOf}};
+}
+
 async function standardOutputs(route:Route, header:string, rows:[string,string|number][], caption:string, day:string):Promise<SendOutput[]> {
   const formats = route.formats?.length ? route.formats : [route.format === "table" ? "text" : route.format];
   const mentions = route.mentions.map(number=>number+"@s.whatsapp.net");
@@ -357,6 +401,17 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const live=await livePerformanceOutputs(route,digest,scopeLabel,day);
             outputs=live.outputs; sentSnapshot=live.snapshot;
             detail=`${scopeLabel} · ${sources.length} source station(s) · Live ${dispatchReports[route.report]}`;
+          }
+        } else if (route.report==="ageing" && (route.scope_type==="region" || sources.length>1)) {
+          const digest=await loadAgeingDigest(sources.map(row=>row.station_code),day);
+          const pending=digest.byStation.some(row=>row.total.count>0||row.total.amount>0);
+          if(!route.pending_only||pending) {
+            const scopeLabel=route.scope_type==="region"
+              ? (route.source_region_codes||[]).join(", ")
+              : route.group.group_name||sources.map(row=>row.station_code).join(", ");
+            const regional=await ageingOutputs(route,digest,scopeLabel,day);
+            outputs=regional.outputs; sentSnapshot=regional.snapshot;
+            detail=`${scopeLabel} · ${sources.length} source station(s) · Ageing summary + row-level Excel`;
           }
         } else {
           const reports=await Promise.all(sources.map(source=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day)));
