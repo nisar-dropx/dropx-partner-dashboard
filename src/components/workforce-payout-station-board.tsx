@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { WorkforcePayoutStationReview } from "@/components/workforce-payout-station-review";
 import { WorkforcePayoutLocationContext } from "@/components/workforce-payout-location-context";
 import type {
@@ -41,10 +41,12 @@ export function WorkforcePayoutStationBoard({
   children: ReactNode;
 }) {
   const [locations, setLocations] = useState<string[]>([]);
+  const [liveStations, setLiveStations] = useState(stations);
+  useEffect(() => setLiveStations(stations), [stations]);
 
-  return <WorkforcePayoutLocationContext.Provider value={{ locations, onLocationsChange: setLocations }}>
+  return <WorkforcePayoutLocationContext.Provider value={{ locations, onLocationsChange: setLocations, onStationsChange: setLiveStations }}>
     <WorkforcePayoutStationReview
-      stations={stations}
+      stations={liveStations}
       selectedStations={locations}
       onSelectedStationsChange={setLocations}
       paymentReleaseHref={paymentReleaseHref}

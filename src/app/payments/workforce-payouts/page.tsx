@@ -899,10 +899,10 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       loadError || !canLoadPaymentSummaries || loaded.rows.length > 250
         ? Promise.resolve({
           rows: loaded.rows,
-          error: loadError
-            || (loaded.rows.length > 250
-              ? "Payment ledger status deferred for this large worksheet. Station review and calculated rows remain available."
-              : null)
+          // Large Workforce worksheets load compact payment previews in the
+          // client after rendering; this intentional deferral is not an error.
+          error: loadError || (audience === "helpers" && loaded.rows.length > 250
+            ? "Payment status is unavailable for this large Helper worksheet." : null)
         })
         : withPayoutPaymentSummaries(companyId, audience, period.fromDate, period.toDate, loaded.rows, {
           // Exact processing-item actions are optional enrichment.
@@ -944,9 +944,6 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
       ? Promise.resolve({
         rows: reviewedPaymentRows,
         error: loadError
-          || (reviewedPaymentRows.length > 250
-            ? "Source payment holds deferred for this large worksheet."
-            : null)
       })
       : withPayoutSourcePaymentHolds(
         companyId, audience, period.fromDate, period.toDate, reviewedPaymentRows

@@ -9,6 +9,8 @@ import { isKilometreField, routePendingLabel, type DailyRouteFuel } from "@/lib/
 import { ChevronDown, Search } from "lucide-react";
 import { useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { WorkforcePayoutLocationContext } from "@/components/workforce-payout-location-context";
+import { useWorkforcePaymentStatus } from "@/components/use-workforce-payment-status";
+import { summarizeWorkforcePayoutStations } from "@/lib/workforce-payout-station-review";
 import { useRouter } from "next/navigation";
 import { buildWorkforcePayoutCsv } from "@/lib/workforce-payout-export";
 import {
@@ -435,13 +437,17 @@ function PayoutActionMenu({ children, label }: { children: ReactNode; label: str
   </details>;
 }
 
-export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, initialSearch = "", locations: controlledLocations, mappingUnlocks = [], onLocationsChange, periodEnd, periodStart, rows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; initialSearch?: string; locations?: string[]; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; onLocationsChange?: (locations: string[]) => void; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
+export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDeductAdvances = false, canEdit = false, canManageMappingLocks = false, canProcessPayments = false, canPublishNotifications = false, hasAllLocationAccess = false, initialSearch = "", locations: controlledLocations, mappingUnlocks = [], onLocationsChange, periodEnd, periodStart, rows: sourceRows }: { audience?: "workforce" | "helpers"; banks?: WorkforcePayoutBankOption[]; canDeductAdvances?: boolean; canEdit?: boolean; canManageMappingLocks?: boolean; canProcessPayments?: boolean; canPublishNotifications?: boolean; hasAllLocationAccess?: boolean; initialSearch?: string; locations?: string[]; mappingUnlocks?: WorkforcePayoutMappingUnlock[]; onLocationsChange?: (locations: string[]) => void; periodStart: string; periodEnd: string; rows: WorkforcePayoutRow[] }) {
   const router = useRouter();
+  const paymentStatus = useWorkforcePaymentStatus(sourceRows, audience, periodStart, periodEnd);
+  const rows = paymentStatus.rows;
   const subjectLabel = audience === "helpers" ? "Helper" : "Workforce";
   const subjectLabelLower = subjectLabel.toLowerCase();
   const [search, setSearch] = useState(initialSearch);
   const [uncontrolledLocations, setUncontrolledLocations] = useState<string[]>([]);
   const stationScope = useContext(WorkforcePayoutLocationContext);
+  const updateStations = stationScope?.onStationsChange;
+  useEffect(() => { updateStations?.(summarizeWorkforcePayoutStations(rows)); }, [rows, updateStations]);
   const locations = controlledLocations ?? stationScope?.locations ?? uncontrolledLocations;
   const setLocations = onLocationsChange ?? stationScope?.onLocationsChange ?? setUncontrolledLocations;
   const [designations, setDesignations] = useState<string[]>([]);
@@ -1165,6 +1171,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       {selectedBankUnavailableCount.toLocaleString("en-IN")} selected row{selectedBankUnavailableCount === 1 ? " is" : "s are"} excluded by the status, balance, profile, PAN, hold or publication checks shown in the table. Eligible rows remain available and are not blocked by the excluded selection.
     </div> : null}
     {selectedBankRefreshPendingCount ? <div aria-live="polite" className="payout-inline-message warn"><strong>{selectedBankRefreshPendingCount} selected payout row{selectedBankRefreshPendingCount === 1 ? " has" : "s have"} a publication refresh pending.</strong> The refresh runs before bank-file generation, then the row balance and every payment eligibility rule are checked again. No stale publication will be paid.</div> : null}
+    {paymentStatus.loading ? <p className="subtle" role="status">Loading payment status and bank readiness… Filters will update when ready.</p> : paymentStatus.error ? <p className="subtle" role="status">Some payment statuses could not load. <button className="button secondary" onClick={paymentStatus.retry} type="button">Retry payment status</button></p> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />
