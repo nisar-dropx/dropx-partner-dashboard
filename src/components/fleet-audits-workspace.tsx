@@ -172,8 +172,13 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles, initia
         status: typeof result.status === "string" ? result.status : "in_progress",
         draft
       });
-      if (result.message) setMessage({ tone: "notice", text: result.message });
-      onChanged();
+      const restored = Object.keys(draft).filter((key) => key.startsWith("item_") && draft[key]).length;
+      setMessage({
+        tone: "notice",
+        text: restored
+          ? `Opened ${audit.auditMode === "physical" ? "physical" : "virtual"} audit with ${restored} saved draft answer${restored === 1 ? "" : "s"}.`
+          : (result.message || `Opened ${audit.auditMode === "physical" ? "physical" : "virtual"} audit. No checklist draft saved on this audit yet.`)
+      });
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : "Could not open this audit." });
     } finally {
