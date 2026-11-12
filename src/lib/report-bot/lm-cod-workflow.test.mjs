@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {pickupReview,dueBankRows,prepareTrigger,parseCodHold,prepareCarryover,prepareAction,priorDayCash,shouldAlertPreparation} from './lm-cod-workflow.ts';
+import {pickupReview,dueBankRows,prepareTrigger,parseCodHold,prepareCarryover,prepareAction,reconciliationSection,priorDayCash,shouldAlertPreparation} from './lm-cod-workflow.ts';
 import {CodRuntime} from './lm-cod-runtime.ts';
 const at=t=>Date.parse('2026-11-11T'+t+':00+05:30');
 const row=(id,status,time,amount=100000)=>({id,code:id,status,actualAmount:amount,expectedAmount:amount,variance:0,createdAt:at(time),updatedAt:at(time),submittedAt:status==='SUBMITTED'?at(time):null,createdBy:'',submittedBy:null});
@@ -58,4 +58,26 @@ test('morning follow-up excludes current-day collections and unproven preparatio
  assert.equal(shouldAlertPreparation('pickup','09:00',true),true);
  assert.equal(shouldAlertPreparation('pickup','18:00',false),true);
  assert.equal(shouldAlertPreparation(null,'09:00',true),false);
+});
+
+
+test('reconciliation count and value match eligible DAs, including same-name associates',()=>{
+ const drivers=[{id:'a',name:'Same name',pendingAmount:10000.1,packages:[]},{id:'b',name:'Same name',pendingAmount:20000.2,packages:[]},{id:'c',name:'Third DA',pendingAmount:12500,packages:[]},{id:'d',name:'Still on road',pendingAmount:99999,packages:[]}];
+ const journeys=new Map(drivers.slice(0,3).map(d=>[d.id,{driverId:d.id,closed:true,dueAt:at('19:00'),lastStopAt:at('18:00'),returnAt:at('18:45'),distanceKm:12,travelMinutes:45,basis:'road'}]));
+ const result=reconciliationSection(drivers,journeys,'2026-11-11',at('20:00'),true,false);
+ assert.equal(result.rows.length,3);
+ assert.equal(result.issue.amount,42500.3);
+ assert.match(result.title,/3 DAs · ₹42,500.3 pending/);
+ assert.match(result.action,/3 DAs · ₹42,500.3 pending/);
+ assert.doesNotMatch(result.action,/Still on road|99999|Direct-distance|exceptions/);
+ assert.ok(result.action.length<115);
+});
+
+test('morning reconciliation total includes only prior-day cash capped by current pending amount',()=>{
+ const drivers=[{id:'a',name:'First',pendingAmount:900,packages:[{amount:500,collectedAt:at('20:00')},{amount:400,collectedAt:Date.parse('2026-11-12T08:00:00+05:30')}]},{id:'b',name:'Second',pendingAmount:100,packages:[{amount:200,collectedAt:at('20:00')}]},{id:'c',name:'Today',pendingAmount:800,packages:[{amount:800,collectedAt:Date.parse('2026-11-12T08:00:00+05:30')}]}];
+ const result=reconciliationSection(drivers,new Map(),'2026-11-12',Date.parse('2026-11-12T10:00:00+05:30'),false,false);
+ assert.equal(result.issue.amount,600);
+ assert.equal(result.rows.length,2);
+ assert.match(result.action,/Previous-day COD: 2 DAs · ₹600 pending/);
+ assert.equal(reconciliationSection([drivers[2]],new Map(),'2026-11-12',Date.now(),false,false),null);
 });

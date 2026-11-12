@@ -15,7 +15,7 @@ test("CC uses the resolved manager email and never turns it into a WhatsApp tag"
   const rows=[["CMS usually reports","10:30–11:00 IST"],["Due remittances","1 · ₹500"],["Action","Email cod-recon@amazon.com."]];
   const text=bankReminderText("TEST",rows,groups);
   assert.match(text,/CC: aom@dropxlogistics\.com, ct@dropxlogistics\.com, varun@dropxlogistics\.com/);
-  assert.doesNotMatch(text,/your Cluster Manager|Manager Workspace email is not mapped/);
+  assert.doesNotMatch(text,/your Cluster Manager|CT: confirm the manager’s Workspace CC/);
   assert.match(text,/FYI: CT @910000000002 · AOM @910000000004/);
   assert.deepEqual(bankMentionNumbers(groups),["910000000001","910000000002","910000000004"]);
   assert.doesNotMatch(bankReminderText("TEST",[...rows,["Submitted today","10:45 AM"]],groups),/CC:/);
@@ -24,5 +24,13 @@ test("CC uses the resolved manager email and never turns it into a WhatsApp tag"
 test("personal addresses cannot leak into the rendered CC list",()=>{
  const text=bankReminderText("TEST",[["CMS usually reports","10:30–11:00 IST"],["Due remittances","1 · ₹500"]],{tl:[],ct:[],cluster:[],aom:[],managerEmails:["personal@gmail.com","wrong@dropxlogistics.com.evil"]});
  assert.doesNotMatch(text,/personal@gmail|\.evil/);
- assert.match(text,/Manager Workspace email is not mapped/);
+ assert.match(text,/CT: confirm the manager’s Workspace CC/);
+});
+
+
+test("combined COD caption does not repeat owner tags",()=>{
+ const text=bankReminderText('',[["CMS usually reports","10:30–11:00 IST"],["Due remittances","2 · ₹5,000"],["Submitted today","10:45 AM"],["Action","Clear the remaining due remittance."]],{tl:["910000000001"],ct:[],cluster:[],aom:[]},true);
+ assert.doesNotMatch(text,/@910000000001|Station TL|CC:/);
+ assert.match(text,/2 · ₹5,000/);
+ assert.ok(text.length<200);
 });

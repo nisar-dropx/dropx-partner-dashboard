@@ -11,6 +11,24 @@ export type Journey={driverId:string;lastStopAt:number|null;distanceKm:number|nu
 export type CashObservation={at:number;prepare:number;remittances:CodRemittance[];drivers:Array<{id:string;name:string;amount:number;dueAt:number|null;lastStopAt:number|null;closed:boolean;packages?:Array<{id:string;amount:number}>}>};
 export type CodSection={issue?:{ids:string[];amount:number};key:string;title:string;columns:string[];rows:Array<Array<string|number>>;action:string;owner:'team'|'tl';tone:'attention'|'waiting'};
 
+/** Summarise only DAs eligible for this alert; morning totals exclude today's cash. */
+export function reconciliationSection(drivers:Array<{id:string;name:string;pendingAmount:number;packages:Array<{amount:number;collectedAt?:number|null}>}>,journeys:Map<string,Journey>,day:string,now:number,evening:boolean,closing:boolean):CodSection|null {
+ const eligible=drivers.flatMap(d=>{
+  if(!Number.isFinite(d.pendingAmount)||d.pendingAmount<=0)return [];
+  const j=journeys.get(d.id);
+  const oldest=Math.min(...d.packages.map(pkg=>Number(pkg.collectedAt)).filter(at=>Number.isFinite(at)&&at>0));
+  const prior=Number.isFinite(oldest)&&codDay(oldest)<day;
+  if(!evening){const earlier=priorDayCash(d.packages,day);const amount=Math.min(d.pendingAmount,earlier.amount);return amount>0?[{id:d.name||d.id,amount,row:[d.name||d.id,earlier.dates,codMoney(amount)]}]:[];}
+  const overdue=!!j?.closed&&j.dueAt!==null&&now>=j.dueAt;
+  if(!closing&&!prior&&!overdue)return [];
+  return [{id:d.name||d.id,amount:d.pendingAmount,row:[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km${approximateJourney(j)?' direct':''} · ~${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?(approximateJourney(j)?'Est. return check':'Overdue'):j?.closed?'Closing check':'On road / unverified']}];
+ });
+ if(!eligible.length)return null;
+ const amount=Math.round(eligible.reduce((sum,d)=>sum+d.amount,0)*100)/100;
+ const summary=`${eligible.length} ${eligible.length===1?'DA':'DAs'} · ${codMoney(amount)} pending`;
+ return {key:'recon',issue:{ids:eligible.map(d=>d.id),amount},title:`${evening?'DA reconciliation':'Previous-day reconciliation'} · ${summary}`,columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows:eligible.map(d=>d.row),owner:'team',tone:'attention',action:`${!evening?'Previous-day COD: ':''}${summary}. ${evening?'Confirm DA returns and reconcile collected cash now.':'Collect and reconcile now.'}`};
+}
+
 /** Submission time is only a pickup proxy. Late edits cannot prove physical handover. */
 export function pickupReview(before:CashObservation|undefined,after:CashObservation,pickupAt:number) {
  if(!before||before.at>=pickupAt||pickupAt-before.at>45*60000||after.at<pickupAt) return null;
@@ -91,7 +109,7 @@ export function prepareCarryover(before:CashObservation|undefined,amount:number,
  return !rows.some(row=>(row.createdAt==null||row.createdAt>before.at)||((submittedTime(row)||0)>before.at));
 }
 export function prepareAction(amount:number,pickup:boolean,carryover:boolean) {
- return `${carryover?"Yesterday’s reconciled cash is still awaiting preparation. ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''}`;
+ return `${carryover?"Yesterday’s cash: ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''}`;
 }
 
 export function priorDayCash(packages:Array<{collectedAt?:number|null;amount:number}>,day:string) {

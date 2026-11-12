@@ -74,10 +74,10 @@ test("Prepare Deposit waits for zero OOR and two hours, then uses the 10 PM clos
 
 // A recorded submission must not trigger a missing-banker escalation.
 test("bank follow-up escalates only when no submission was updated today",()=>{
-  assert.match(bankRemittanceFollowup(false),/call immediately/);
+  assert.match(bankRemittanceFollowup(false),/Call your CMS person now/);
   assert.match(bankRemittanceFollowup(false),/cod-recon@amazon\.com/);
   assert.doesNotMatch(bankRemittanceFollowup(true),/not arrived|email|cod-recon/);
-  assert.match(bankRemittanceFollowup(true),/remaining due amount/);
+  assert.match(bankRemittanceFollowup(true),/remaining due remittance/);
   assert.doesNotMatch(bankRemittanceFollowup(false),/seven|last.updat/i);
 });
 

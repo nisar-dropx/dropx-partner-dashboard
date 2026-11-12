@@ -51,12 +51,12 @@ export async function codWorkflowOutputs(company:string,source:{id:string;statio
  const actions=sections.map(s=>s.action);
  if(bankRows.length){
   const updated=bankRows.some(([key])=>key==='Submitted today');
-  actions.push(bankReminderText('',[...bankRows,['Action',bankRemittanceFollowup(updated)]],{...groups,ct:[],cluster:[],aom:[]}));
+  actions.push(bankReminderText('',[...bankRows,['Action',bankRemittanceFollowup(updated)]],{...groups,ct:[],cluster:[],aom:[]},true));
   sections.push({key:'bank',title:'Bank remittance',columns:['Status','Value'],rows:bankRows,action:'',owner:'tl',tone:'attention'});
  }
  const outputs:Array<{key:string;body:Record<string,unknown>;codAck:CodAck}>=[];
  if(sections.length){
-  const caption=[`*${title}*`,owner,escalated.size?'*Escalation · still pending. Please intervene and confirm clearance.*':'',...actions,quietUpdates.length?'Complete this immediately. We will recheck quietly; only a missed deadline or a new/worsening issue will trigger another update.':'',fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
+  const caption=[`*${title}*`,owner,escalated.size?'*Escalation · clearance required.*':'',...actions,quietUpdates.length?'Updates stop once cleared.':'',fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
   if(caption.length>3900)throw new Error('COD caption exceeds compact limit; review section size');
   outputs.push({key:`cod_${source.id}`,body:{image_base64:await codSectionsPng(title,sections),mime:'image/png',caption,mentions:[...new Set([...bankMentionNumbers(groups),...(sections.some(s=>s.owner==='team')?ssa:[])])].map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,quiet:quietUpdates,keys:[...(held.has('pickup')?[]:report.acks),...(held.has('short')?[]:report.shortAcks)]}});
  }
@@ -65,7 +65,7 @@ export async function codWorkflowOutputs(company:string,source:{id:string;statio
  if(slips.length){
   const escalation=escalated.has('slip');
   const mentions=[...new Set([...groups.tl,...(escalation?[...groups.ct,...managers]:[])])];
-  outputs.push({key:`slip_${source.id}`,body:{text:[`${tags(groups.tl)||'Station TL'} · *${source.station_code} · CMS slip pending*`,escalation?'*Escalation · slip remains missing after the first alert.*':'',...slips.map(s=>`${s.code} · ${codMoney(s.amount)} · remittance submitted ${codClock(s.at)} · ${s.returned?'re-upload required':'slip not uploaded'}`),'Upload the correct bank/CMS deposit slip in OpsPulse immediately. We will recheck quietly and stop once uploaded.',escalation&&fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n'),mentions:mentions.map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,quiet:slipUpdates,keys:slips.map(s=>'sent:'+s.key)}});
+  outputs.push({key:`slip_${source.id}`,body:{text:[`${tags(groups.tl)||'Station TL'} · *${source.station_code} · CMS slip pending*`,escalation?'*Escalation · slip still missing.*':'',...slips.map(s=>`${s.code} · ${codMoney(s.amount)} · submitted ${codClock(s.at)} · ${s.returned?'re-upload required':'slip not uploaded'}`),'Upload the CMS slip in OpsPulse now. Updates stop once uploaded.',escalation&&fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n'),mentions:mentions.map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,quiet:slipUpdates,keys:slips.map(s=>'sent:'+s.key)}});
  }
  return outputs;
 }

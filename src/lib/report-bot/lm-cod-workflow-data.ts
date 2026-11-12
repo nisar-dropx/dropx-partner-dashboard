@@ -1,4 +1,3 @@
-import {approximateJourney} from './lm-cod-return-fallback';
 import 'server-only';
 import {loadCodExceptions} from '../ops-pulse/cod-exceptions';
 import {trackCodShortfalls} from './lm-cod-shortfalls';
@@ -9,7 +8,7 @@ import {pickupPolicy} from '../ops-pulse/cod-pickup';
 import {loadCodPendingReport} from '../ops-pulse/cod-pending-data';
 import {hasSlipProof} from '../ops-pulse/cod-pending';
 import {observedBankerWindow,observedNonPickupWeekday} from './lm-cod-alerts';
-import {codDay,codClock,codMoney,submittedTime,dueBankRows,prepareTrigger,prepareCarryover,prepareAction,priorDayCash,shouldAlertPreparation,pickupReview,evidenceFromSnapshot,type CashObservation,type CodSection,type Journey} from './lm-cod-workflow';
+import {codDay,codClock,codMoney,submittedTime,dueBankRows,prepareTrigger,prepareCarryover,prepareAction,reconciliationSection,shouldAlertPreparation,pickupReview,evidenceFromSnapshot,type CashObservation,type CodSection,type Journey} from './lm-cod-workflow';
 import {CodRuntime} from './lm-cod-runtime';
 import {codCacheGet,codCachePut,loadCodJourneys} from './lm-cod-journeys';
 
@@ -53,17 +52,10 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
    if(write.error)throw new Error(write.error.message);
   }
   if(evening||scheduled){
-   const rows=pendingDrivers.flatMap(d=>{
-    const j=journeys.get(d.id);
-    const oldest=Math.min(...d.packages.map(pkg=>Number(pkg.collectedAt)).filter(at=>Number.isFinite(at)&&at>0));
-    const prior=Number.isFinite(oldest)&&codDay(oldest)<day;
-    if(!evening){const earlier=priorDayCash(d.packages,day);return earlier.amount>0?[[d.name||d.id,earlier.dates,codMoney(Math.min(d.pendingAmount,earlier.amount))]]:[];}
-    const overdue=!!j?.closed&&j.dueAt!==null&&now>=j.dueAt;
-    if(!closing&&!prior&&(!evening||!overdue))return [];
-    return [[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km${approximateJourney(j)?' direct':''} · ~${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?(approximateJourney(j)?'Est. return check':'Overdue'):j?.closed?'Closing check':'On road / unverified']];
-   });
-   if(rows.length)result.sections.push({issue:{ids:rows.map(row=>String(row[0])),amount:rows.reduce((n,row)=>n+Number(String(row[evening?5:2]).replace(/[^0-9.]/g,'')),0)},key:'recon',title:evening?'DA reconciliation':'Previous-day DA reconciliation',columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows,owner:'team',tone:'attention',action:!evening?'Previous-day COD reconciliation is still pending. Collect and reconcile the amounts shown now.':closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
+   const section=reconciliationSection(pendingDrivers,journeys,day,now,evening,closing);
+   if(section)result.sections.push(section);
   }
+
   // Preparing current-day cash at closure is independent from the next-day bank handover.
   if(scheduled&&(evening||policy&&istClock(now)>=policy.start&&istClock(now)<=policy.end)){
    const board=await runtime.memo(`board:${source.id}`,()=>fetchLoadFlashBoard(day,[code])).catch(()=>null);
@@ -97,8 +89,8 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
    }
    if(!review||review.gap<=1&&!review.lateDas.length)continue;
    const rows:Array<Array<string|number>>=[['Cash already reconciled / prepared',codMoney(review.available)],['Submitted to CMS',codMoney(review.deposited)],['Difference to explain',codMoney(review.gap)]];
-   if(review.gap>1)result.sections.push({key:'pickup',title:`After CMS submission · ${codClock(at)} · ${review.codes.join(', ')}`,columns:['Cash at pickup','Amount'],rows,owner:'team',tone:'attention',action:`${codMoney(review.available)} was recorded as available before pickup, but only ${codMoney(review.deposited)} was submitted. ${review.gap>1?`Explain the ${codMoney(review.gap)} difference and confirm the next handover time.`:''}`});
-   if(review.lateDas.length)result.sections.push({key:'pickup',title:'DA cash already due before pickup · separate from available cash',columns:['DA','Last stop','Reconciliation due','Unreconciled cash'],rows:review.lateDas.map(d=>[d.name,codClock(d.lastStopAt),codClock(d.dueAt),codMoney(d.amount)]),owner:'team',tone:'attention',action:`${review.lateDas.map(d=>`${d.name}: ${codMoney(d.amount)}`).join('; ')} was already due for reconciliation before pickup. Why was it not reconciled and included? Confirm collection and handover time.`});
+   if(review.gap>1)result.sections.push({key:'pickup',title:`After CMS submission · ${codClock(at)} · ${review.codes.join(', ')}`,columns:['Cash at pickup','Amount'],rows,owner:'team',tone:'attention',action:`Explain the ${codMoney(review.gap)} pickup gap and confirm handover time.`});
+   if(review.lateDas.length)result.sections.push({key:'pickup',title:'DA cash already due before pickup · separate from available cash',columns:['DA','Last stop','Reconciliation due','Unreconciled cash'],rows:review.lateDas.map(d=>[d.name,codClock(d.lastStopAt),codClock(d.dueAt),codMoney(d.amount)]),owner:'team',tone:'attention',action:`${review.lateDas.length} DAs · ${codMoney(review.lateDas.reduce((sum,d)=>sum+d.amount,0))} due before pickup. Explain the missed collection and confirm handover time.`});
    for(const item of submitted.filter(row=>review!.codes.includes(row.code||row.id))){reviewed.add(item.code||item.id);result.acks.push('pickup-sent:'+item.id);}
   }
   if(scheduled&&policy&&observed&&!nonPickup&&!exceptions.some(e=>e.kind==='Banker Not Reported')&&now>=Date.parse(`${day}T${observed.end}:00+05:30`)+30*60000){

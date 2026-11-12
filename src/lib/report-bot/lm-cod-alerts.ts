@@ -43,8 +43,8 @@ export function observedBankerWindow(rows:CodRemittance[],now=new Date()) {
 
 export function bankRemittanceFollowup(updatedToday:boolean) {
   return updatedToday
-    ? "A remittance was already submitted today. Why is the remaining due amount still pending? Confirm handover and update the portal."
-    : "Why is today's due remittance still pending? If the CMS person has not arrived, call immediately. If there is no response, email cod-recon@amazon.com.";
+    ? "CMS submission recorded today. Clear the remaining due remittance and update the portal."
+    : "Call your CMS person now. If unresponsive, email cod-recon@amazon.com.";
 }
 
 /** Infer a recurring non-pickup weekday only from a complete history window.

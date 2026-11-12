@@ -439,7 +439,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             if(!report.pending)continue;
             const mentions=await resolveRouteMentionNumbers(company,[source],route,day);
             const header=`${source.station_code} · Scrub · ${asIst(report.asOf)}`;
-            const caption=[`*${header}*`,mentions.map(n=>'@'+n).join(' '),report.escalation?'Escalation: scrub is still pending after the first alert. Please intervene.':'','Complete the listed scrub stage immediately. We will recheck quietly and stop once completed.'].filter(Boolean).join('\n');
+            const caption=[`*${header}*`,mentions.map(n=>'@'+n).join(' '),report.escalation?'Escalation · scrub still pending.':'','Complete the listed scrub now. Updates stop once cleared.'].filter(Boolean).join('\n');
             const rendered=await standardOutputs({...route,mentions},header,report.rows,caption,day);
             outputs.push(...rendered.map(output=>({...output,key:source.id+'_'+output.key,codAck:report.ack})));
           }
