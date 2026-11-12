@@ -94,7 +94,7 @@ export function prepareAction(amount:number,pickup:boolean,carryover:boolean) {
  return `${carryover?"Yesterday’s reconciled cash is still awaiting preparation. ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''} Reminders continue until completed.`;
 }
 
-export function priorDayCash(packages:Array<{collectedAt:number|null;amount:number}>,day:string) {
+export function priorDayCash(packages:Array<{collectedAt?:number|null;amount:number}>,day:string) {
  const dated=packages.filter(pkg=>typeof pkg.collectedAt==='number'&&Number.isFinite(pkg.collectedAt)&&pkg.collectedAt>0&&codDay(pkg.collectedAt)<day);
  return {amount:dated.reduce((sum,pkg)=>sum+Math.max(0,pkg.amount),0),dates:[...new Set(dated.map(pkg=>codDay(pkg.collectedAt!)))].sort().join(', ')};
 }
