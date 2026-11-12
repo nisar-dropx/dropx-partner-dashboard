@@ -368,7 +368,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
   const now = new Date(), day = istDay(now);
   const jobs = (routes.data as unknown as Route[]).filter(route=>linked(route.group,company)).flatMap(route=>route.times.filter(slot=>{
     const due=Date.parse(day+"T"+slot+":00+05:30");
-    return +now>=due && +now-due<8*60000 && Date.parse(route.updated_at)<=due;
+    return +now>=due && +now-due<(["dsr","creturn"].includes(route.report)?20:8)*60000 && Date.parse(route.updated_at)<=due;
   }).map(slot=>({route,slot})));
   jobs.sort((a,b)=>Number(!!a.route.cod_workflow)-Number(!!b.route.cod_workflow));
   let claimed=0;

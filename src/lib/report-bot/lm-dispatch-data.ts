@@ -1,6 +1,6 @@
 import {cReturnSummary,requireReportFreshness,type CReturnSummary} from './lm-live-report';
 import "server-only";
-import { fetchLoadFlashBoard, fetchLoadFlashTracking, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
+import { fetchLoadFlashBoard, fetchLoadFlashTracking, queueLoadFlashStations, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
@@ -135,6 +135,16 @@ export async function loadEodDigest(stationCodes: string[], day: string, options
   const allowed = new Set(requested);
   const stations = network.stations.filter(row => allowed.has(row.stationCode) && row.businessDate === day && row.hasSnapshot);
   const missingStations = requested.filter(code => !stations.some(row => row.stationCode === code));
+  if (options.maxAgeMinutes === 5) {
+    const stale = requested.filter(code => {
+      const station = stations.find(row => row.stationCode === code);
+      try { requireReportFreshness(station?.fetchedAt ?? null, day, 5); return false; } catch { return true; }
+    });
+    if (stale.length) {
+      await queueLoadFlashStations(stale, 5);
+      throw new Error("Waiting for current refresh: " + stale.join(", "));
+    }
+  }
   const dsr:EodDsrRow[] = [];
   const dot:EodDotRow[] = [];
   const creturn:EodCReturnRow[] = [];

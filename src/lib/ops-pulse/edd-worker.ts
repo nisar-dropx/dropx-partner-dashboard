@@ -1465,12 +1465,12 @@ export async function fetchScrubNetwork(stations: string[], options: { refresh?:
 }
 
 /** Selected refreshes persist in the worker queue and survive browser closure. */
-export async function queueLoadFlashStations(stations: string[]) {
+export async function queueLoadFlashStations(stations: string[], maxAgeMinutes?: 5) {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) throw new EddWorkerError('EDD worker is not configured.');
   const response = await fetch(`${baseUrl}/api/admin/executive/edd/load-flash/network/refresh-selected`, {
     method: 'POST', headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stations }), cache: 'no-store', signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({ stations, ...(maxAgeMinutes ? {maxAgeMinutes} : {}) }), cache: 'no-store', signal: AbortSignal.timeout(30_000),
   });
   const body = await readJson(response);
   if (!response.ok) throw new EddWorkerError(String(body.error ?? 'Unable to queue station refresh.'));
