@@ -239,14 +239,37 @@ async function rescheduleAudit(companyId: string, userId: string, allowed: boole
   const monthStart = `${scheduledFor.slice(0, 7)}-01`;
   const nextMonth = new Date(`${monthStart}T12:00:00+05:30`); nextMonth.setMonth(nextMonth.getMonth() + 1);
   const nextMonthStart = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
-  const duplicate = await supabaseAdmin!.from("fleet_audits").select("id").eq("company_id", companyId).eq("vehicle_id", current.data.vehicle_id).neq("id", auditId).gte("scheduled_for", monthStart).lt("scheduled_for", nextMonthStart).like("scheduled_reason", `[mode:${mode}]%`).neq("status", "cancelled").limit(1);
+  const duplicate = await supabaseAdmin!.from("fleet_audits").select("id,status,scheduled_for").eq("company_id", companyId).eq("vehicle_id", current.data.vehicle_id).neq("id", auditId).gte("scheduled_for", monthStart).lt("scheduled_for", nextMonthStart).like("scheduled_reason", `[mode:${mode}]%`).neq("status", "cancelled").limit(5);
   if (duplicate.error) throw new Error(duplicate.error.message);
-  if ((duplicate.data ?? []).length) throw new Error(`This vehicle already has a ${mode === "video" ? "video review" : "physical inspection"} in the selected month.`);
+  const blockers = duplicate.data ?? [];
+  const startedBlocker = blockers.find((row) => row.status !== "scheduled");
+  if (startedBlocker) throw new Error(`This vehicle already has a ${mode === "video" ? "video review" : "physical inspection"} in ${scheduledFor.slice(0, 7)} (${startedBlocker.status.replaceAll("_", " ")} on ${startedBlocker.scheduled_for}). Finish or cancel that one before moving here.`);
+  for (const unused of blockers.filter((row) => row.status === "scheduled")) {
+    const cancelled = await supabaseAdmin!.from("fleet_audits").update({
+      status: "cancelled",
+      summary: `Schedule removed: replaced by moving in-progress ${mode} audit ${auditId} to ${scheduledFor}`,
+      updated_at: new Date().toISOString()
+    }).eq("company_id", companyId).eq("id", unused.id).eq("status", "scheduled").select("id").maybeSingle();
+    if (cancelled.error) throw new Error(cancelled.error.message);
+    if (cancelled.data) {
+      await supabaseAdmin!.from("dashboard_app_event_logs").insert({
+        company_id: companyId,
+        module: "fleet",
+        platform: "dashboard",
+        event_code: "fleet_audit_cancelled",
+        subject_id: unused.id,
+        subject_code: unused.id,
+        actor_user_id: userId,
+        actor_label: "Fleet user",
+        metadata: { scheduled_for: unused.scheduled_for, reason: `Replaced when moving draft audit to ${scheduledFor}`, replaced_by: auditId }
+      });
+    }
+  }
   const plainReason = clean(current.data.scheduled_reason).replace(/^\[mode:(?:video|physical)\]\s*/i, "").replace(/\s*\[moved:[^\]]+\]\s*$/i, "") || "Routine monthly audit";
-  const update = await supabaseAdmin!.from("fleet_audits").update({ scheduled_for: scheduledFor, scheduled_reason: `[mode:${mode}] ${plainReason} [moved:${clean(current.data.scheduled_for)}|${reason}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId);
+  const update = await supabaseAdmin!.from("fleet_audits").update({ scheduled_for: scheduledFor, scheduled_reason: `[mode:${mode}] ${plainReason} [moved:${clean(current.data.scheduled_for)}|${reason}]`, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).in("status", ["scheduled", "in_progress"]);
   if (update.error) throw new Error(update.error.message);
-  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_rescheduled", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { from_date: current.data.scheduled_for, to_date: scheduledFor, reason } });
-  return NextResponse.json({ ok: true, message: "Audit moved to the new date." });
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_rescheduled", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { from_date: current.data.scheduled_for, to_date: scheduledFor, reason, replaced_unused: blockers.map((row) => row.id) } });
+  return NextResponse.json({ ok: true, message: blockers.length ? `Audit moved to ${scheduledFor}. The unused ${mode === "video" ? "video" : "physical"} slot already planned in that month was removed.` : "Audit moved to the new date." });
 }
 
 async function swapAudits(companyId: string, userId: string, allowed: boolean, body: Payload) {
