@@ -1,3 +1,4 @@
+import {approximateJourney} from './lm-cod-return-fallback';
 import 'server-only';
 import {loadCodExceptions} from '../ops-pulse/cod-exceptions';
 import {trackCodShortfalls} from './lm-cod-shortfalls';
@@ -55,9 +56,9 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
     const prior=Number.isFinite(oldest)&&codDay(oldest)<day;
     const overdue=!!j?.closed&&j.dueAt!==null&&now>=j.dueAt;
     if(!closing&&!prior&&!overdue)return [];
-    return [[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km · ${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?'Overdue':j?.closed?'Closing check':'On road / unverified']];
+    return [[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km${approximateJourney(j)?' direct':''} · ~${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?(approximateJourney(j)?'Est. return check':'Overdue'):j?.closed?'Closing check':'On road / unverified']];
    });
-   if(rows.length)result.sections.push({key:'recon',title:'DA reconciliation',columns:['DA','Last stop','To station · est.','Est. return','Recon. due','Cash','Status'],rows,owner:'team',tone:'attention',action:closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Collect and reconcile the overdue DA cash shown. Reply with the specific reason and clearance time if there is an exception.'});
+   if(rows.length)result.sections.push({key:'recon',title:'DA reconciliation',columns:['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status'],rows,owner:'team',tone:'attention',action:closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
   }
   // Preparing current-day cash at closure is independent from the next-day bank handover.
   if(evening||policy&&istClock(now)>=policy.start&&istClock(now)<=policy.end){

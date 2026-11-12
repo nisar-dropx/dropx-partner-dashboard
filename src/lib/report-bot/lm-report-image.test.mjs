@@ -53,3 +53,11 @@ test('table can colour standard, premium and overall percentage columns together
 test('unsupported characters fail instead of sending an unreadable image', async () => {
   await assert.rejects(summaryReportSvg('Report', [['\u{10ffff}', 1]]), /font does not support/);
 });
+
+test('compact reports keep legible numeric columns, grid and multiple status colours', async () => {
+  const columns=['Station','Scheduled','At station','Assigned','On road','Picked up','Pickup failed','Cancelled','Delayed','Unpickupable','Pickup %'];
+  const svg=await tableReportSvg('C-return · 12 Nov',columns,[['QLDA',100,10,85,10,70,5,2,1,2,'70.0%']], 'Pickup %',()=>({background:'#e7f3ec',color:'#14532d'}),0,true);
+  const meta=await sharp(Buffer.from(await reportPngBase64(svg),'base64')).metadata();
+  assert.ok(meta.width<850);assert.equal(meta.height,117);
+  for(const colour of ['#d7e0ec','#eff6ff','#ede9fe','#fef3c7','#ffedd5','#ecfdf5'])assert.ok(svg.includes(colour),colour);
+});

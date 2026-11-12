@@ -1,3 +1,4 @@
+import {approximateJourney} from './lm-cod-return-fallback.ts';
 import type { CodRemittance, CodStatusSnapshot } from '../ops-pulse/cod-status';
 import type { PickupPolicy } from '../ops-pulse/cod-pickup';
 
@@ -72,7 +73,7 @@ export function evidenceFromSnapshot(s:CodStatusSnapshot,journeys:Map<string,Jou
  if(r.state!=='ok'||!r.data?.complete||p.state!=='ok'||!p.data||p.data.sourceScope!=='outstanding_history'||p.data.sourceWindow?.startTime!==0||m.state!=='ok'||!m.data?.complete)return null;
  const stamps=[r.checkedAt,p.checkedAt,m.checkedAt].map(Date.parse);
  if(stamps.some(n=>!Number.isFinite(n))||Math.max(...stamps)-Math.min(...stamps)>5*60000||!Number.isFinite(p.data.actualAmount)||p.data.actualAmount<0)return null;
- return {at:Math.max(...stamps),prepare:p.data.actualAmount,remittances:m.data.rows,drivers:r.data.drivers.filter(d=>d.pendingAmount>0).map(d=>({id:d.id,name:d.name,amount:d.pendingAmount,dueAt:journeys.get(d.id)?.dueAt??null,lastStopAt:journeys.get(d.id)?.lastStopAt??null,closed:journeys.get(d.id)?.closed??false,packages:d.packages.map(p=>({id:p.trackingId,amount:p.amount}))}))};
+ return {at:Math.max(...stamps),prepare:p.data.actualAmount,remittances:m.data.rows,drivers:r.data.drivers.filter(d=>d.pendingAmount>0).map(d=>({id:d.id,name:d.name,amount:d.pendingAmount,dueAt:approximateJourney(journeys.get(d.id))?null:journeys.get(d.id)?.dueAt??null,lastStopAt:journeys.get(d.id)?.lastStopAt??null,closed:journeys.get(d.id)?.closed??false,packages:d.packages.map(p=>({id:p.trackingId,amount:p.amount}))}))};
 }
 
 /** Explicit, bounded hold. No free-text AI can silently mark cash resolved. */

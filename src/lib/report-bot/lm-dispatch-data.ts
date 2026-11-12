@@ -1,3 +1,4 @@
+import {cReturnSummary,requireReportFreshness,type CReturnSummary} from './lm-live-report';
 import "server-only";
 import { fetchLoadFlashBoard, fetchLoadFlashTracking, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
@@ -22,7 +23,7 @@ export type DispatchReport = {
 export type TodayEddStation = { stationCode: string; count: number; trackingIds: BoardTidExportRow[]; asOf: string };
 export type TodayEddSnapshot = { asOf: string; stations: TodayEddStation[]; unverifiedStations: string[]; pending: boolean };
 export type EodDsrRow = { Station:string; "Verified total":number; Delivered:number; "Delivery failed":number; Rejected:number; "On road":number; "DSR %":string };
-export type EodCReturnRow = { Station:string; Total:number; "Picked up":number; "Pending pickup":number; "Pickup %":string };
+export type EodCReturnRow = CReturnSummary;
 export type EodDigest = {
   asOf:string;
   missingStations:string[];
@@ -42,10 +43,8 @@ export type AgeingDigest = {
   trackingIds:BoardTidExportRow[];
 };
 export function istDay(now: Date) { return new Date(+now + 330 * 60000).toISOString().slice(0, 10); }
-function fresh(stamp: string | null, day: string) {
-  const at = Date.parse(stamp || "");
-  if (!Number.isFinite(at) || istDay(new Date(at)) !== day || Date.now() - at > 90 * 60000 || at > Date.now() + 60000) throw new Error("Current station data unavailable or older than 90 minutes.");
-  return stamp!;
+function fresh(stamp: string | null, day: string, maxMinutes=90) {
+  return requireReportFreshness(stamp,day,maxMinutes);
 }
 const money = (value: number) => "₹" + value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
@@ -129,7 +128,7 @@ export async function loadTodayEddSnapshot(stationCodes: string[], day: string):
   return { asOf, stations, unverifiedStations, pending: stations.some(row => row.count > 0) };
 }
 
-export async function loadEodDigest(stationCodes: string[], day: string): Promise<EodDigest> {
+export async function loadEodDigest(stationCodes: string[], day: string, options:{maxAgeMinutes?:number;requireCReturn?:boolean}={}): Promise<EodDigest> {
   const requested = [...new Set(stationCodes.map(code => code.trim().toUpperCase()).filter(Boolean))];
   if (!requested.length) throw new Error("No active source stations are configured.");
   const network = await fetchLoadFlashBoard(day, requested);
@@ -143,36 +142,43 @@ export async function loadEodDigest(stationCodes: string[], day: string): Promis
   const stationInventoryTracking:{edd:BoardTidExportRow[];physical:BoardTidExportRow[]}={edd:[],physical:[]};
   const stamps:string[] = [];
   for (const station of stations.sort((a,b)=>a.stationCode.localeCompare(b.stationCode))) {
-    stamps.push(fresh(station.fetchedAt, day));
+    stamps.push(fresh(station.fetchedAt, day,options.maxAgeMinutes??90));
     const das = station.board.daDsr;
     const sum = (key:"delivered"|"failed"|"rejected"|"oor"|"total") => das.reduce((total,row)=>total+Number(row[key] || 0),0);
     const delivered = sum("delivered");
     const known = delivered + sum("failed") + sum("rejected") + sum("oor");
     dsr.push({Station:station.stationCode,"Verified total":known,Delivered:delivered,"Delivery failed":sum("failed"),Rejected:sum("rejected"),"On road":sum("oor"),"DSR %":known ? `${(delivered/known*100).toFixed(1)}%` : "—"});
     dot.push(eodDotRow(station.stationCode, stationDotTotals(station.board,"standard"), stationDotTotals(station.board,"premium")));
-    const total = Number(station.board.cReturnTotal || 0), picked = Number(station.board.cReturn.PICKUP_DONE || 0);
-    creturn.push({Station:station.stationCode,Total:total,"Picked up":picked,"Pending pickup":Math.max(0,total-picked),"Pickup %":total ? `${(picked/total*100).toFixed(1)}%` : "—"});
+
   }
-  if (!stations.length) throw new Error("No current station snapshots are available for this region.");
+  if (!stations.length || missingStations.length) throw new Error("Current station snapshots missing: "+missingStations.join(", "));
   try {
-    const inventory=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.EDD,BOARD_TID.PHYSICAL]});
+    const inventory=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.EDD,BOARD_TID.PHYSICAL,BOARD_TID.CRETURN]});
+    for(const station of stations){
+      const rows=inventory.filter(row=>row.stationCode===station.stationCode&&row.bucket===BOARD_TID.CRETURN);
+      const summary=cReturnSummary(station.stationCode,day,rows);
+      if(summary.Scheduled!==station.board.cReturnTotal||rows.some(row=>row.edd!==day)){
+        if(options.requireCReturn)throw new Error('Waiting for dated C-return refresh: '+station.stationCode);
+      }else creturn.push(summary);
+    }
     const unique=new Map<string,{edd:Set<string>;physical:Set<string>}>();
-    for(const station of stations) unique.set(station.stationCode,{edd:new Set(),physical:new Set()});
+    for(const station of stations) if(station.board.stationInventoryVersion===2) unique.set(station.stationCode,{edd:new Set(),physical:new Set()});
     for(const row of inventory) {
       const bucket=unique.get(row.stationCode);
       if(!bucket||!row.trackingId) continue;
-      if(row.bucket===BOARD_TID.EDD) bucket.edd.add(row.trackingId);
+      if(row.bucket===BOARD_TID.EDD&&row.edd===day) bucket.edd.add(row.trackingId);
       if(row.bucket===BOARD_TID.PHYSICAL) bucket.physical.add(row.trackingId);
     }
     for(const [stationCode,counts] of unique) stationInventory[stationCode]={eddAtStation:counts.edd.size,physicalAtStation:counts.physical.size};
-    stationInventoryTracking.edd=mapBoardTidExportRows(inventory.filter(row=>row.bucket===BOARD_TID.EDD),"edd");
-    stationInventoryTracking.physical=mapBoardTidExportRows(inventory.filter(row=>row.bucket===BOARD_TID.PHYSICAL),"dsr-station");
-  } catch {
+    stationInventoryTracking.edd=mapBoardTidExportRows(inventory.filter(row=>unique.has(row.stationCode)&&row.bucket===BOARD_TID.EDD&&row.edd===day),"edd");
+    stationInventoryTracking.physical=mapBoardTidExportRows(inventory.filter(row=>unique.has(row.stationCode)&&row.bucket===BOARD_TID.PHYSICAL),"dsr-station");
+  } catch(error) {
+    if(options.requireCReturn)throw error;
     // Keep the live DSR available when the package-level inventory endpoint is
     // temporarily unavailable; its two inventory columns will show em dashes.
   }
   return {
-    asOf: stamps.sort().at(-1) || network.asOf,
+    asOf: stamps.sort()[0] || network.asOf,
     missingStations,
     stationInventory,
     stationInventoryTracking,

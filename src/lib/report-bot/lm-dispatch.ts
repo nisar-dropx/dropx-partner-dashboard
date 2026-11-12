@@ -1,3 +1,4 @@
+import {CRETURN_COLUMNS,cReturnTotal,performanceTitle,requireReportFreshness} from './lm-live-report';
 import "server-only";
 import { CodRuntime } from "./lm-cod-runtime";
 import { codWorkflowOutputs, acknowledgeCodOutput, type CodAck } from "./lm-cod-workflow-output";
@@ -10,7 +11,7 @@ import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayE
 import { filterDispatchSourceRows } from "./lm-source-scope";
 import { resolveBankReminderMentions, resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { bankMentionNumbers, bankReminderText } from "./lm-bank-message";
-import { eodDsrMentionStations, eodDsrPerformanceCaption } from "./lm-eod-caption";
+import { eodDsrMentionStations } from "./lm-eod-caption";
 import { EOD_DOT_PERCENTAGE_COLUMNS, EOD_DOT_VISIBLE_COLUMNS, eodDotTotalRow } from "./lm-eod-dot";
 import { reportBotDb, type ReportBotSettings } from "./settings";
 import { workerRequest } from "./worker-client";
@@ -27,7 +28,7 @@ type Route = {
 };
 type SourceStation = { id:string; station_code:string; station_name:string|null; region:string|null; state:string|null; report_code?:string };
 type SourceStationRow = SourceStation & { is_ho:boolean|null; hide_from_location_list:boolean|null; location_models:{code:string|null}|Array<{code:string|null}>|null };
-type SendOutput = { key:string; body:Record<string,unknown>; codAck?:CodAck };
+type SendOutput = { key:string; body:Record<string,unknown>; codAck?:CodAck; liveAsOf?:string };
 type DispatchSnapshot = { rows: [string, string | number][]; asOf: string };
 
 function snapshotRowsFromEdd(value: TodayEddSnapshot): [string, string | number][] {
@@ -53,7 +54,7 @@ function percentageStyle(value:string|number,tone:PercentageTone) {
 }
 
 async function tablePhoto(title:string, columns:string[], rows:Array<Array<string|number>>, percentageColumn:string|readonly string[], tone:PercentageTone) {
-  return reportPngBase64(await tableReportSvg(title, columns, rows, percentageColumn, value => percentageStyle(value, tone)));
+  return reportPngBase64(await tableReportSvg(title, columns, rows, percentageColumn, value => percentageStyle(value, tone),0,true));
 }
 
 const positive = {background:"#fee2e2",color:"#991b1b"};
@@ -160,19 +161,16 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
   const dsrTotal=sumNumeric(digest.dsr,"Verified total"),dsrDelivered=sumNumeric(digest.dsr,"Delivered");
   const dsr=[...digest.dsr,{Station:"Grand total","Verified total":dsrTotal,Delivered:dsrDelivered,"Delivery failed":sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":dsrTotal?`${(dsrDelivered/dsrTotal*100).toFixed(1)}%`:"—"}];
   const dot=[...digest.dot,eodDotTotalRow(digest.dot)];
-  const cTotal=sumNumeric(digest.creturn,"Total"),cPicked=sumNumeric(digest.creturn,"Picked up");
-  const creturn=[...digest.creturn,{Station:"Grand total",Total:cTotal,"Picked up":cPicked,"Pending pickup":sumNumeric(digest.creturn,"Pending pickup"),"Pickup %":cTotal?`${(cPicked/cTotal*100).toFixed(1)}%`:"—"}];
-  const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
-  const regionLabel=`${region} Region`;
-  const dsrTitle=`EOD DSR Report · ${dateLabel} · ${regionLabel}`;
-  const dsrCaption=eodDsrPerformanceCaption(dsrTitle,digest.dsr,recognitionNumbers,focusNumbers);
+  const creturn=[...digest.creturn,cReturnTotal(digest.creturn)];
+  const dsrTitle=performanceTitle('dsr',day);
+  const dsrCaption=[`*${dsrTitle}*`,[...new Set([...staticNumbers,...recognitionNumbers,...focusNumbers])].map(n=>'@'+n).join(' ')].filter(Boolean).join('\n');
   const dsrMentionNumbers=[...new Set([...staticNumbers,...recognitionNumbers,...focusNumbers])];
   const dsrMentions=dsrMentionNumbers.map(number=>number+"@s.whatsapp.net");
   const configuredSections=new Set<EodSection>(route.eod_sections?.length ? route.eod_sections : ["dsr","dot","creturn"]);
   const tables=[
     {key:"01_dsr",title:dsrTitle,rows:dsr,percentage:"DSR %",tone:"performance" as const,caption:dsrCaption,mentions:dsrMentions},
-    {key:"02_dot",title:`EOD DOT · Standard + Premium + Overall · ${dateLabel} · ${regionLabel}`,rows:dot,columns:[...EOD_DOT_VISIBLE_COLUMNS],percentage:[...EOD_DOT_PERCENTAGE_COLUMNS],tone:"performance" as const,caption:`*EOD DOT · Standard + Premium + Overall · ${dateLabel} · ${regionLabel}*`,mentions:[]},
-    {key:"03_creturn",title:`EOD C-Return Report · ${dateLabel} · ${regionLabel}`,rows:creturn,percentage:"Pickup %",tone:"pickup" as const,caption:`*EOD C-Return Report · ${dateLabel} · ${regionLabel}*`,mentions:[]},
+    {key:"02_dot",title:performanceTitle('dot',day),rows:dot,columns:[...EOD_DOT_VISIBLE_COLUMNS],percentage:[...EOD_DOT_PERCENTAGE_COLUMNS],tone:"performance" as const,caption:`*${performanceTitle('dot',day)}*`,mentions:[]},
+    {key:"03_creturn",title:performanceTitle('creturn',day),rows:creturn,columns:CRETURN_COLUMNS.filter(column=>column!=='Other'||creturn.some(row=>row.Other>0)),percentage:"Pickup %",tone:"pickup" as const,caption:`*${performanceTitle('creturn',day)}*`,mentions:[]},
   ].filter(table=>configuredSections.has(table.key.split("_")[1] as EodSection));
   const outputs:SendOutput[]=[];
   const formats=route.formats?.length?route.formats:[route.format];
@@ -189,7 +187,7 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
       {section:"creturn" as const,name:"Final C-Return",rows:creturn},
     ].filter(sheet=>configuredSections.has(sheet.section)).map(({name,rows})=>({name,rows}));
     const buffer=workbookBuffer(sheets);
-    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:`*EOD Report · ${dateLabel} · ${regionLabel}*`}});
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`Final_EOD_${region.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`}});
   }
   return outputs.sort((a,b)=>a.key.localeCompare(b.key));
 }
@@ -197,7 +195,7 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
 /** Regional live views use the same verified board snapshot as EOD, but keep
  * one report per message and one station per row. Destinations, source scope
  * and times remain entirely route configuration. */
-async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:string,day:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
+async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:string,day:string,slot:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
   const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
   const stamp=asIst(digest.asOf);
   const formats=route.formats?.length?route.formats:[route.format];
@@ -215,12 +213,11 @@ async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:st
     const eddAvailable=inventoryValues.every(row=>row.eddAtStation!==null),physicalAvailable=inventoryValues.every(row=>row.physicalAtStation!==null);
     tableRows=[...inventoryRows,{Station:"Grand total","EDD at station":eddAvailable?inventoryValues.reduce((sum,row)=>sum+Number(row.eddAtStation||0),0):"—","Physical at station":physicalAvailable?inventoryValues.reduce((sum,row)=>sum+Number(row.physicalAtStation||0),0):"—",Assigned:total,Delivered:delivered,Failed:sumNumeric(digest.dsr,"Delivery failed"),Rejected:sumNumeric(digest.dsr,"Rejected"),"On road":sumNumeric(digest.dsr,"On road"),"DSR %":total?`${(delivered/total*100).toFixed(1)}%`:"—"}];
     columns=["Station","EDD at station","Physical at station","Assigned","Delivered","Failed","Rejected","On road","DSR %"];
-    percentage="DSR %"; tone="performance"; title=`Live DSR Report · ${dateLabel} · ${scopeLabel} · ${stamp}`;
+    percentage="DSR %"; tone="performance"; title=performanceTitle('dsr',day,digest.asOf,slot);
   } else {
-    const total=sumNumeric(digest.creturn,"Total"), picked=sumNumeric(digest.creturn,"Picked up");
-    tableRows=[...digest.creturn,{Station:"Grand total",Total:total,"Picked up":picked,"Pending pickup":sumNumeric(digest.creturn,"Pending pickup"),"Pickup %":total?`${(picked/total*100).toFixed(1)}%`:"—"}];
-    columns=["Station","Total","Picked up","Pending pickup","Pickup %"];
-    percentage="Pickup %"; tone="pickup"; title=`Live C-Return Report · ${dateLabel} · ${scopeLabel} · ${stamp}`;
+    tableRows=[...digest.creturn,cReturnTotal(digest.creturn)];
+    columns=CRETURN_COLUMNS.filter(column=>column!=='Other'||tableRows.some(row=>Number(row.Other)>0));
+    percentage="Pickup %"; tone="pickup"; title=performanceTitle('creturn',day,digest.asOf,slot);
   }
   const values=tableRows.map(row=>columns.map(column=>row[column]));
   if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*`}});
@@ -236,8 +233,9 @@ async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:st
         ]
       : [{name:"Live C-Return",rows:tableRows}];
     const buffer=workbookBuffer(sheets);
-    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`${route.report==="dsr"?"Live_DSR_Inventory":"Live_C-Return"}_${scopeLabel.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`,caption:route.report==="dsr"?`${title} · EDD at station and Physical at station tracking IDs`:`${title} · detailed export`}});
+    outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`${route.report==="dsr"?"Live_DSR_Inventory":"Live_C-Return"}_${scopeLabel.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`}});
   }
+  outputs.forEach(output=>{output.liveAsOf=digest.asOf;});
   const snapshotRows=tableRows.filter(row=>row.Station!=="Grand total").map(row=>[`${row.Station} · ${percentage}`,row[percentage]] as [string,string|number]);
   return {outputs,snapshot:{rows:snapshotRows,asOf:digest.asOf}};
 }
@@ -337,6 +335,9 @@ async function previousSnapshot(routeId: string, runId: string): Promise<Dispatc
 }
 
 async function sendOutput(settings:ReportBotSettings,runId:string,groupId:string,output:SendOutput) {
+  if(output.liveAsOf)requireReportFreshness(output.liveAsOf,istDay(new Date()),5);
+  // A workbook is an attachment, not a second caption/mention notification.
+  if(output.body.document_base64){delete output.body.caption;delete output.body.mentions;}
   const db = reportBotDb();
   const inserted = await db.from("report_bot_lm_dispatch_run_outputs").insert({run_id:runId,output_key:output.key}).select("id,status").single();
   let row = inserted.data as {id:string;status:string}|null;
@@ -414,7 +415,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
           }
         } else if (route.report==="eod") {
-          const digest=await loadEodDigest(sources.map(row=>row.station_code),day);
+          const digest=await loadEodDigest(sources.map(row=>row.station_code),day,{requireCReturn:route.eod_sections?.includes("creturn")??true});
           const region=route.scope_type==="region"
             ? (route.source_region_codes||[]).join(", ")
             : [...new Set(sources.map(row=>String(row.state||"").trim()).filter(Boolean))].join(", ") || sources.map(row=>row.station_code).join(", ");
@@ -430,8 +431,8 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           ]);
           outputs=await eodOutputs(route,digest,region,day,recognitionNumbers,focusNumbers,staticNumbers);
           detail=`${region} · ${sources.length} source station(s) · Final DSR + DOT + C-Return`;
-        } else if (["dsr","creturn"].includes(route.report) && (route.scope_type==="region" || sources.length>1)) {
-          const digest=await loadEodDigest(sources.map(row=>row.station_code),day);
+        } else if (["dsr","creturn"].includes(route.report)) {
+          const digest=await codRuntime.memo(`live:${route.report}:${day}:${sources.map(row=>row.station_code).sort().join(",")}`,()=>loadEodDigest(sources.map(row=>row.station_code),day,{maxAgeMinutes:5,requireCReturn:route.report==="creturn"}));
           const pending=route.report==="dsr"
             ? digest.dsr.some(row=>Number.parseFloat(row["DSR %"])<100)
             : digest.creturn.some(row=>Number.parseFloat(row["Pickup %"])<100);
@@ -439,7 +440,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const scopeLabel=route.scope_type==="region"
               ? (route.source_region_codes||[]).join(", ")
               : route.group.group_name || [...new Set(sources.map(row=>String(row.state||"").trim()).filter(Boolean))].join(", ") || sources.map(row=>row.station_code).join(", ");
-            const live=await livePerformanceOutputs(route,digest,scopeLabel,day);
+            const live=await livePerformanceOutputs(route,digest,scopeLabel,day,slot);
             outputs=live.outputs; sentSnapshot=live.snapshot;
             detail=`${scopeLabel} · ${sources.length} source station(s) · Live ${dispatchReports[route.report]}`;
           }
