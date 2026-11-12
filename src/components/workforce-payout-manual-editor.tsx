@@ -279,6 +279,7 @@ export function WorkforcePayoutManualEditor({
 
   async function submit(mode: "preview" | "commit") {
     if (mode === "commit" && (!preview?.canCommit || preview.importId)) {
+      setConfirmationOpen(false);
       setError("Preview and validate the current input lines before applying them.");
       return;
     }
@@ -335,11 +336,15 @@ export function WorkforcePayoutManualEditor({
         })));
         if (aggregate.rows!.length > 50) aggregate.rows = aggregate.rows!.slice(0, 50);
         if (!response.ok) {
+          aggregate.canCommit = false;
           setPreview(aggregate);
           throw new Error(result.error ?? "Unable to process these payout inputs.");
         }
         if (mode === "commit") completedCommitChunks += 1;
         lineOffset += chunk.length;
+      }
+      if (mode === "preview") {
+        aggregate.canCommit = Boolean(aggregate.canCommit && aggregate.matchedRows === lines.length);
       }
       aggregate.message = mode === "commit"
         ? `${aggregate.totalRows} payout input line${aggregate.totalRows === 1 ? " was" : "s were"} applied in ${chunks.length} safe batch${chunks.length === 1 ? "" : "es"}.`
@@ -354,6 +359,7 @@ export function WorkforcePayoutManualEditor({
         onCommitted?.();
       }
     } catch (caught) {
+      setConfirmationOpen(false);
       const message = caught instanceof Error ? caught.message : "Unable to process these payout inputs.";
       setError(completedCommitChunks
         ? `${completedCommitChunks} manual edit batch${completedCommitChunks === 1 ? " was" : "es were"} applied before the next batch failed. Retry to replay completed batches safely and continue. ${message}`
@@ -648,7 +654,7 @@ export function WorkforcePayoutManualEditor({
         </div>
       ) : null}
 
-      {confirmationOpen ? (
+      {confirmationOpen && preview?.canCommit && !preview.importId ? (
         <div className="modal-backdrop confirmation-backdrop" role="presentation">
           <section
             aria-labelledby="manual-payout-confirmation-title"
