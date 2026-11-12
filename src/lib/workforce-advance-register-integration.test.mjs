@@ -174,6 +174,15 @@ test("high-frequency attendance and shipment revisions are scoped to the payout 
 test("recovery hardening versions all loader inputs and preserves FIFO audit history", () => {
   const loaderTables = new Set([...payoutLoader.matchAll(/\.from\(["']([^"']+)["']\)/g)].map((match) => match[1]));
   for (const table of loaderTables) {
+    if (table === "workforce_payout_linked_pan_aadhaar") {
+      // Link status is a live bank eligibility check, not an earnings input.
+      // An override should not invalidate published amounts for the company.
+      const linkage = source("../../supabase/migrations/20261112172146_workforce_payout_pan_aadhaar_overrides.sql");
+      assert.match(linkage, /create or replace view public\.workforce_payout_linked_pan_aadhaar/);
+      assert.match(linkage, /override\.pair_hash = encode\(sha256/);
+      assert.match(linkage, /new_gate constant text := \$new\$\s+from public\.workforce_payout_linked_pan_aadhaar/);
+      continue;
+    }
     if (table === "workforce_payout_shipment_facts" || table === "workforce_payout_attendance_facts") {
       const review = source("../../supabase/migrations/20261107055448_workforce_worked_id_review.sql");
       assert.match(review, new RegExp(`create or replace view public\\.${table}`));
