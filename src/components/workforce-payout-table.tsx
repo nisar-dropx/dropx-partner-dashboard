@@ -1248,10 +1248,17 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
               && canChangePayoutHold(row)
               && !individualHoldBlockedByProcessing;
             const hasRowAdvanceSelectionConflict = Boolean(row.reviewSubjectId && advanceSelectionConflictIds.has(row.reviewSubjectId));
-            const selectionTitle = hasRowAdvanceSelectionConflict
+            const paymentHistory = canViewPaymentHistory && row.reviewSubjectId && row.locationId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton audience={audience} canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} stationId={row.locationId} subjectLabel={`${row.dropxId || row.name} · ${row.name} · ${row.location}`} workforceId={row.reviewSubjectId} /> : null;
+            const useProcessingPaymentHistory = Boolean(paymentHistory)
+              && canProcessPayments
+              && isPayoutProcessing(row)
+              && !canCancelProcessingPayment(row);
+            const selectionTitle = useProcessingPaymentHistory
+                ? "Use Payment history to check whether the original batch can be downloaded."
+                : hasRowAdvanceSelectionConflict
                 ? "More than one selected location row belongs to this Workforce member. Keep one row only for advance deduction; Publish Payment requires all publishable location rows."
                 : canProcessPayments && canCancelProcessingPayment(row)
-                  ? "Available for bulk Payment Processing cancellation."
+                  ? "Available for re-download or cancellation under Bank & payment."
                 : canProcessPayments && audience === "workforce" && !activePaymentProfile
                   ? `Bank file unavailable: only current Active ${subjectLabel} profiles are eligible. This row remains selectable for other permitted actions.`
                 : refreshBeforeBankFile
@@ -1279,7 +1286,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                 <td className="payout-money payout-gross-cell">{row.paymentDetailsAvailable ? <><strong>{money(row.grossPayment)}</strong><small className={row.deductions ? "negative" : undefined}>{row.deductions ? `- ${money(row.deductions)} deductions` : "No deductions"}</small></> : null}</td>
                 <td className="payout-money payout-net-pay">{row.paymentDetailsAvailable ? <><strong>{money(row.netAmount)}</strong>{row.paymentSummary ? <small className="payout-payment-balance">{row.paymentSummary.processingAmount > 0 ? <span>Published location net {exactMoney(row.paymentSummary.currentNetAmount)}</span> : null}<span>Paid {exactMoney(row.paymentSummary.paidAmount)}</span>{row.paymentSummary.processingAmount > 0 ? <span>Processing {exactMoney(row.paymentSummary.processingAmount)}</span> : null}{refreshBeforeBankFile ? <span>Preliminary balance {exactMoney(preliminaryBankBalance)}</span> : paymentBalanceAvailable ? <span>Balance payable {exactMoney(row.paymentSummary.balancePayable)}</span> : <span>Balance payable —</span>}{canProcessPayments && audience === "workforce" && !activePaymentProfile ? <span className="negative">Bank file: Active profiles only</span> : refreshBeforeBankFile ? <span>Refresh before bank file · eligibility rechecked</span> : paymentEligibilityLabel ? <span className="negative" style={{ maxInlineSize: "14rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.paymentSummary.eligibilityMessage ?? paymentEligibilityLabel}>{paymentEligibilityLabel}</span> : null}{row.paymentSummary.overpaidAmount > 0 ? <span className="negative">Overpaid {exactMoney(row.paymentSummary.overpaidAmount)}</span> : null}</small> : null}</> : null}</td>
                 <td><div className="payout-status-stack">{reviewDays.length > 0 && <span className="status-pill warn">{reviewDays.length} low-delivery days</span>}{row.mappingStatus === "Payment setup conflict" ? <span className="status-pill bad">Payment setup conflict</span> : null}<span className={`status-pill ${statusTone(displayStatus)}`}>{displayStatus}</span>{refreshBeforeBankFile && displayStatus !== "Publication refresh pending" ? <span className="status-pill warn">Publication refresh pending</span> : null}{audience === "workforce" && row.paymentDetailsAvailable && row.panAadhaarStatus ? <span className={`status-pill ${row.panAadhaarStatus === "LINKED" ? "good" : "warn"}`}>{row.panAadhaarStatus === "LINKED" ? "PAN linked" : "PAN not linked"}</span> : null}</div></td>
-                <td className="payout-row-open-cell"><button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button></td>
+                <td className="payout-row-open-cell">{useProcessingPaymentHistory ? paymentHistory : null}<button aria-controls={detailId} aria-expanded={expanded} className="button secondary compact" onClick={(event) => toggleBreakup(row.id, event.currentTarget)} type="button">{expanded ? "Close" : "Breakup"}</button></td>
               </tr>,
               expanded ? <tr className="payout-total-detail-row" key={`${row.id}-totals`}>
                 <td colSpan={tableColumnCount}>
@@ -1305,7 +1312,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
                           periodStart={periodStart}
                           releaseItems={isPayoutOnHold(row) && individualHoldTarget ? [individualHoldTarget] : []}
                         /> : null}
-                        {canViewPaymentHistory && row.reviewSubjectId && row.locationId && row.paymentSummary ? <WorkforcePayoutPaymentHistoryButton audience={audience} canManageStatus={canProcessPayments} historyCount={row.paymentSummary.historyCount} periodEnd={periodEnd} periodStart={periodStart} stationId={row.locationId} subjectLabel={`${row.dropxId || row.name} · ${row.name} · ${row.location}`} workforceId={row.reviewSubjectId} /> : null}
+                        {useProcessingPaymentHistory ? null : paymentHistory}
                       </div>
                     </header>
                     {row.paymentDetailsAvailable ? <><div className="payout-breakup-summary">

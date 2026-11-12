@@ -81,12 +81,14 @@ test("global payout actions are hidden without payout edit permission", () => {
   assert.match(source, /\{canEdit \? <div className="payout-global-actions">[\s\S]*?Export full CSV[\s\S]*?<\/div> : null\}/);
 });
 
-test("payout overview consolidates columns and moves history controls into the expanded detail", () => {
+test("payout overview consolidates columns and exposes payment history directly when a processing row cannot be selected", () => {
   assert.match(source, /const tableColumnCount = showSelection \? 11 : 10/);
   assert.match(source, />Assignment<\/th>/);
   assert.match(source, />Gross \/ deductions<\/th>/);
   assert.match(source, /className="payout-row-open-cell"[\s\S]*?expanded \? "Close" : "Breakup"/);
-  assert.match(source, /className="payout-detail-header"[\s\S]*?PaymentAllocationHistoryButton[\s\S]*?WorkforcePayoutBulkHold[\s\S]*?WorkforcePayoutPaymentHistoryButton/);
+  assert.match(source, /className="payout-detail-header"[\s\S]*?PaymentAllocationHistoryButton[\s\S]*?WorkforcePayoutBulkHold[\s\S]*?\{useProcessingPaymentHistory \? null : paymentHistory\}/);
+  assert.match(source, /const useProcessingPaymentHistory = Boolean\(paymentHistory\)\s*&& canProcessPayments\s*&& isPayoutProcessing\(row\)\s*&& !canCancelProcessingPayment\(row\)/);
+  assert.match(source, /className="payout-row-open-cell">\{useProcessingPaymentHistory \? paymentHistory : null\}/);
   assert.match(source, /canViewPaymentHistory && row\.reviewSubjectId && row\.locationId && row\.paymentSummary[\s\S]*?canManageStatus=\{canProcessPayments\}/);
 });
 
