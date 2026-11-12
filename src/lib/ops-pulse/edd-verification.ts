@@ -13,6 +13,8 @@ export type EddVerification = {
   rejectedAt?: string | null;
   deliveredAt?: string | null;
   latestEventAt?: string | null;
+  latestEventReason?: string | null;
+  latestEventState?: string | null;
   routeStationCode?: string | null;
 };
 export type VerifiedEddPackage = EddPackage & {
@@ -158,7 +160,7 @@ export function eddHistoryFacts(history: PackageHistoryEvent[]) {
       && event.time > attemptTimes.at(-1)! && !returnedAfterAttemptAt) returnedAfterAttemptAt = event.time;
   }
   return { rulesVersion: 3, firstDispatchAt: [first(dispatchStates),customerTransit].filter((v):v is string=>!!v).sort()[0] ?? null, firstAttemptAt: attemptTimes[0] ?? null,
-    attemptTimes, attemptCountComplete, secondAttemptAt: attemptTimes[1] ?? null, returnedAfterAttemptAt, rejectedAt, deliveredAt, latestEventAt: valid.at(-1)?.time ?? null,
+    attemptTimes, attemptCountComplete, secondAttemptAt: attemptTimes[1] ?? null, returnedAfterAttemptAt, rejectedAt, deliveredAt, latestEventAt: valid.at(-1)?.time ?? null, latestEventReason: valid.at(-1)?.reason || null, latestEventState: valid.at(-1)?.state || null,
     // Empty/malformed history cannot prove that a shipment has never been dispatched.
     historyComplete: history.length > 0 && history.every(e => !!e.state.trim() && !!e.time && !Number.isNaN(Date.parse(e.time))) };
 }
@@ -186,7 +188,10 @@ export function eddAttemptLifecycle(pkg: VerifiedEddPackage) {
   const observedAttempts = times.length || (history?.firstAttemptAt ? 1 : 0);
   let category: EddAttemptCategory = "none";
   if (eddDeliveredState(state)) category = "none";
-  else if (state === "IN_TRANSIT_DS_TO_FC") category = "returningToFc";
+  else if (["IN_TRANSIT_DS_TO_FC","READY_FOR_FC_RETURN"].includes(state)
+    || state === "RECEIVED" && (pkg.sourceDirection === "DS -> FC"
+      || history?.latestEventState === "RECEIVED" && history.latestEventReason === "TO_MIDDLE_MILE"
+        && Date.parse(history.latestEventAt||"") >= Date.parse(pkg.stateUpdatedAt||history.latestEventAt||""))) category = "returningToFc";
   else if (rejectedStates.has(state) || history?.rejectedAt) category = "rejected";
   else if (times.length >= 2) category = "hcr"; // Positive evidence of two distinct cycles suffices.
   else if (complete && times.length === 1) category = "hfr";

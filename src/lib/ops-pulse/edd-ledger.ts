@@ -39,7 +39,7 @@ async function eddStationsWithNewObservations() {
 }
 /** Everything the counting rules read, without the ~1 KB of address and order detail in `source`. */
 const COUNTING_COLUMNS = ["station_code", "tracking_id", "last_seen_at", "source_at", "verified_at", "verification",
-  ...["state", "ead", "internalEAD", "promisedDeliveryDate", "packageType", "shipOption", "summaryCheckedAt", "stateUpdatedAt", "driverId", "driverName"]
+  ...["sourceDirection", "state", "ead", "internalEAD", "promisedDeliveryDate", "packageType", "shipOption", "summaryCheckedAt", "stateUpdatedAt", "driverId", "driverName"]
     .map(field => `${field}:source->${field}`)].join(",");
 const quoted = (value: string) => `"${value.replace(/[\\"]/g, "\\$&")}"`;
 
@@ -66,9 +66,9 @@ async function readStationLedger(code: string, columns: "full" | "counting"): Pr
     if (error) throw new Error(`Unable to load verified EDD records: ${error.message}`);
     const page = (data ?? []) as unknown as Array<Record<string, unknown> & { tracking_id: string; last_seen_at: string }>;
     for (const row of page) {
-      const { state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption, summaryCheckedAt, stateUpdatedAt, driverId, driverName, ...rest } = row;
+      const { sourceDirection, state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption, summaryCheckedAt, stateUpdatedAt, driverId, driverName, ...rest } = row;
       // A row re-ingested mid-walk moves later and is read again; the later copy is current.
-      rows.set(row.tracking_id, (columns === "full" ? row : { ...rest, source: { state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption,
+      rows.set(row.tracking_id, (columns === "full" ? row : { ...rest, source: { sourceDirection, state, ead, internalEAD, promisedDeliveryDate, packageType, shipOption,
         summaryCheckedAt: summaryCheckedAt ?? undefined, stateUpdatedAt, driverId, driverName } }) as unknown as LedgerRow);
     }
     if (page.length < 1000) break;
@@ -121,7 +121,7 @@ export async function loadVerifiedEddStation(stationCode: string): Promise<EddSt
   if (!ledger) return { status: "no_snapshot", stationCode };
   return { status: "ok", payload: { status: "ok", stationCode, fetchedAt: ledger.fetchedAt, todayYmd: stationEddToday(),
     window: { from: "", to: "" }, totalCount: ledger.packages.length,
-    buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 }, byDate: [],
+    buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0, returningToFc: 0 }, byDate: [],
     packages: ledger.packages, sessionSource: null, accountKey: null } };
 }
 
@@ -201,11 +201,15 @@ export async function verifyEddBatch(codes?: string[]) {
           stateUpdatedAt:typeof value.lastUpdatedTime === "number" && value.lastUpdatedTime > 1e12 && value.lastUpdatedTime <= Date.parse(observedAt) ? new Date(value.lastUpdatedTime).toISOString() : ""}));
         // Compare package-event times, not the time the summary batch was fetched.
         const priorRead=await supabaseAdmin.from("edd_package_ledger")
-          .select("tracking_id,state:source->>state,stateUpdatedAt:source->>stateUpdatedAt")
+          .select("tracking_id,state:source->>state,stateUpdatedAt:source->>stateUpdatedAt,sourceDirection:source->>sourceDirection")
           .eq("station_code",code).in("tracking_id",ids);
         if(priorRead.error)throw new Error(priorRead.error.message);
         const previous=new Map((priorRead.data??[]).map(p=>[p.tracking_id,p]));
-        const values=candidates.filter(value=>canApplyEddSummaryState(previous.get(value.trackingId)||{},value));
+        const values=candidates.filter(value=>canApplyEddSummaryState(previous.get(value.trackingId)||{},value)).map(value=>{
+          const prior=previous.get(value.trackingId);
+          const newer=Date.parse(value.stateUpdatedAt)>Date.parse(prior?.stateUpdatedAt||"");
+          return {...value,sourceDirection:newer?"":prior?.sourceDirection||""};
+        });
         const {error:summaryError}=await supabaseAdmin.rpc("edd_apply_summaries",{p_station:code,p_rows:values,p_observed_at:observedAt});
         if(summaryError)throw new Error(summaryError.message);
         enriched+=values.length;

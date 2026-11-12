@@ -17,12 +17,13 @@ const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
   dueToday: { label: "Due today", hint: "Must deliver today" },
   dueTomorrow: { label: "Due tomorrow", hint: "Stage for tomorrow's routes" },
   future: { label: "Future", hint: "EAD more than a day out" },
+  returningToFc: { label: "Return to FC", hint: "Return flow — excluded from delivery EDD" },
   held: { label: "Held", hint: "On hold — excluded from EDD due counts" },
   unknown: { label: "No EAD found", hint: "Missing date fields from Amazon" }
 };
 
-const BUCKET_ORDER: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held"];
-const BUCKET_PRIORITY: Record<EddBucketKey, number> = { overdue: 0, dueToday: 1, dueTomorrow: 2, future: 3, unknown: 4, held: 5 };
+const BUCKET_ORDER: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held", "returningToFc"];
+const BUCKET_PRIORITY: Record<EddBucketKey, number> = { overdue: 0, dueToday: 1, dueTomorrow: 2, future: 3, unknown: 4, held: 5, returningToFc: 6 };
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 type SortColumn = "trackingId" | "ead" | "bucket" | "state" | "driver" | "payment" | "city" | "age" | "orderId";
@@ -235,7 +236,7 @@ export function EddClient({ stationCode, initialOutcome }: { stationCode: string
   }, [payload, selectedDates, stateFilters, paymentFilters, search]);
 
   const cardBucketCounts = useMemo(() => {
-    const counts: Record<EddBucketKey, number> = { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 };
+    const counts: Record<EddBucketKey, number> = { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0, returningToFc: 0 };
     for (const pkg of filteredPackagesBeforeBucket) counts[pkg.bucket] = (counts[pkg.bucket] ?? 0) + 1;
     return counts;
   }, [filteredPackagesBeforeBucket]);

@@ -31,7 +31,7 @@ export default async function EddDashboardPage() {
         hasSnapshot: false,
         fetchedAt: null,
         totalCount: 0,
-        buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 }
+        buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0, returningToFc: 0 }
       });
       run = payload.run;
     } catch (err) {

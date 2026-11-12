@@ -332,3 +332,10 @@ const staleHeld=pkg("375239103687","HELD",{...heldScan,summaryCheckedAt:today+"T
 assert.equal(verification.eddCurrentState(staleHeld),"HELD");
 assert.equal(edd.summarizeStationEdd("TIRC",[staleHeld],today+"T10:00:00Z",today).todayAtStation,0);
 console.log("PASS held EDD regression: newer fetch time cannot override an older status event; genuine release remains possible.");
+const middleMileHistory=[{state:'HELD',time:today+'T03:42:25Z',reasonCode:'PENDING_VERIFICATION'},{state:'RECEIVED',time:today+'T08:33:24Z',reasonCode:'TO_MIDDLE_MILE'}];
+const middleMile=pkg('375239103687','RECEIVED',{stateUpdatedAt:today+'T08:33:24Z',verification:{state:'RECEIVED',...verification.eddHistoryFacts(middleMileHistory)}});
+assert.equal(edd.stationEddPosition(middleMile,today),'returningToFc');
+assert.equal(edd.summarizeStationEdd('TIRC',[middleMile],today+'T10:00:00Z',today).todayAtStation,0);
+assert.equal(edd.stationEddPosition({...middleMile,verification:null,sourceDirection:'DS -> FC'},today),'returningToFc');
+assert.notEqual(edd.stationEddPosition({...middleMile,stateUpdatedAt:today+'T10:01:00Z'},today),'returningToFc','old return evidence cannot override a newer scan');
+console.log('PASS real TIRC history: HELD then RECEIVED / TO_MIDDLE_MILE is return flow, not pending delivery EDD.');

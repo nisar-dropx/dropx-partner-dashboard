@@ -1,9 +1,10 @@
 import { parseDotTotals, type DotTotals } from "./dot-metrics.ts";
-export type EddBucketKey = "overdue" | "dueToday" | "dueTomorrow" | "future" | "unknown" | "held";
+export type EddBucketKey = "overdue" | "dueToday" | "dueTomorrow" | "future" | "unknown" | "held" | "returningToFc";
 
 export type EddPackage = {
   trackingId: string;
   state: string | null;
+  sourceDirection?: string | null;
   internalEAD: string | null;
   promisedDeliveryDate: string | null;
   estimatedArrivalTimeUTC: string | null;
@@ -125,7 +126,7 @@ export function isEddWorkerConfigured() {
 }
 
 function emptyBuckets(): Record<EddBucketKey, number> {
-  return { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 };
+  return { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0, returningToFc: 0 };
 }
 
 function normalizeBuckets(raw: unknown): Record<EddBucketKey, number> {
@@ -139,12 +140,13 @@ function normalizeBuckets(raw: unknown): Record<EddBucketKey, number> {
 
 function normalizePackage(raw: Record<string, unknown>): EddPackage {
   const bucket = String(raw.bucket ?? "unknown");
-  const validBucket: EddBucketKey = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held"].includes(bucket)
+  const validBucket: EddBucketKey = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held", "returningToFc"].includes(bucket)
     ? (bucket as EddBucketKey)
     : "unknown";
   return {
     trackingId: String(raw.trackingId ?? "").trim(),
     state: raw.state == null ? null : String(raw.state),
+    sourceDirection: raw.sourceDirection == null ? null : String(raw.sourceDirection),
     summaryCheckedAt: typeof raw.summaryCheckedAt === "string" ? raw.summaryCheckedAt : undefined,
     stateUpdatedAt: typeof raw.stateUpdatedAt === "string" ? raw.stateUpdatedAt : null,
     internalEAD: raw.internalEAD == null ? null : String(raw.internalEAD),
@@ -382,6 +384,7 @@ export async function refreshEddStation(params: { stationCode: string; timeoutMs
 export type EddPerformancePackage = {
   trackingId: string;
   state: string | null;
+  sourceDirection?: string | null;
   bucket: "delivered" | "returned" | "held" | "yetToDispatch";
   driverId: string | null;
   driverName: string | null;
@@ -465,6 +468,7 @@ function normalizePerformancePackage(raw: Record<string, unknown>): EddPerforman
   return {
     trackingId: String(raw.trackingId ?? "").trim(),
     state: raw.state == null ? null : String(raw.state),
+    sourceDirection: raw.sourceDirection == null ? null : String(raw.sourceDirection),
     bucket: validBucket,
     driverId: raw.driverId == null ? null : String(raw.driverId),
     driverName: raw.driverName == null ? null : String(raw.driverName),

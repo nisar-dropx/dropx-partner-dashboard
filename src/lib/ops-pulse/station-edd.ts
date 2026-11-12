@@ -140,7 +140,7 @@ export function stationEddPackageRow(pkg: EddPackage, stationCode: string, stati
     ...(lifecycle.category === "none" ? {} : { "Attempt Classification": lifecycle.category, "Distinct Attempts Observed": lifecycle.observedAttempts,
     "Attempt Count Complete": lifecycle.complete ? "Yes" : "No — lower bound only",
     "Second Attempt UTC": lifecycle.secondAttemptAt || "", "Returned After Attempt UTC": lifecycle.returnedAt || "",
-    "Source Route Station": pkg.verification?.routeStationCode || "", "FC Readiness": lifecycle.category === "returningToFc" ? "In transit to FC" : "Not confirmed by source" }),
+    "Source Route Station": pkg.verification?.routeStationCode || "", "FC Readiness": lifecycle.category === "returningToFc" ? "Return flow — not delivery EDD" : "Not confirmed by source" }),
     "Forward Delivery": isForwardEdd(pkg) ? "Yes" : "No",
     "EDD Today": stationEddDate(pkg) === today ? "Yes" : "No",
     "Driver ID (source)": pkg.driverId ?? "", "Last Scan By": pkg.lastScanBy ?? "",
