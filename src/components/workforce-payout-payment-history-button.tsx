@@ -44,6 +44,8 @@ type PaymentHistoryEntry = {
   remarks: string;
   generatedAt: string;
   finalizedAt: string;
+  reversedAt?: string;
+  reversalReason?: string;
   redownloadable: boolean;
   creditTransfer: PaymentHistoryCreditTransfer | null;
 };
@@ -81,7 +83,7 @@ type PaymentHoldState = {
 };
 
 type PendingAction = {
-  action: "failed" | "cancelled" | "finalize";
+  action: "failed" | "cancelled" | "finalize" | "reverse";
   operationId: string;
   paymentItemId?: string;
   title: string;
@@ -243,7 +245,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     return () => { controller.abort(); document.removeEventListener("keydown", handleKeys); trigger?.focus(); };
   }, [loadHistory, open]);
 
-  function chooseAction(action: "failed" | "cancelled", title: string, paymentItemId?: string) {
+  function chooseAction(action: "failed" | "cancelled" | "reverse", title: string, paymentItemId?: string) {
     if (!canManageStatus) return;
     setPendingAction({ action, title, paymentItemId, operationId: crypto.randomUUID() });
     setFinalizeFields(emptyFinalizeFields);
@@ -320,13 +322,16 @@ export function WorkforcePayoutPaymentHistoryButton({
           periodStart,
           periodEnd,
           ...(pendingAction.action === "finalize" ? finalizeFields : {}),
+          ...(pendingAction.action === "reverse" ? { bankReversalConfirmed: true } : {}),
           remarks: remarks.trim()
         })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || "Unable to update the payment status.");
       const finalStatus = String(payload?.status ?? payload?.outcome ?? "").toLowerCase();
-      const message = pendingAction.action === "failed"
+      const message = pendingAction.action === "reverse"
+        ? "Bank reversal recorded."
+        : pendingAction.action === "failed"
         ? "Payment marked as failed."
         : pendingAction.action === "cancelled"
           ? "Payment marked as cancelled."
@@ -367,7 +372,9 @@ export function WorkforcePayoutPaymentHistoryButton({
             <strong>{pendingAction.title}</strong>
             <p>{pendingAction.action === "finalize"
               ? `Enter the actual bank-payment details. The paid amount cannot exceed ${money(pendingAction.entry ? finalizableAmount(pendingAction.entry) : 0)}; a lower amount leaves the balance payable and marks the payout Partially Paid.`
-              : "This change is audited. Enter the reason before confirming."}</p>
+              : pendingAction.action === "reverse"
+                ? "Confirm the bank has reversed this transfer. Recording the reversal removes its paid credit from the payout balance."
+                : "This change is audited. Enter the reason before confirming."}</p>
             {pendingAction.action === "finalize" ? <div className="form-grid three">
               <label>Paid amount
                 <input
@@ -403,7 +410,7 @@ export function WorkforcePayoutPaymentHistoryButton({
                 <input className="field" disabled={actionBusy} maxLength={1000} onChange={(event) => setFinalizeField("bankRemarks", event.target.value)} required type="text" value={finalizeFields.bankRemarks} />
               </label>
             </div> : null}
-            <label>Mandatory remarks
+            <label>{pendingAction.action === "reverse" ? "Reversal reason" : "Mandatory remarks"}
               <textarea
                 autoFocus={pendingAction.action !== "finalize"}
                 className="field"
@@ -418,7 +425,7 @@ export function WorkforcePayoutPaymentHistoryButton({
             </label>
             <div className="form-actions">
               <button className="button secondary compact" disabled={actionBusy} onClick={() => { setPendingAction(null); setFinalizeFields(emptyFinalizeFields); setRemarks(""); }} type="button">Cancel</button>
-              <button className="button compact" disabled={actionBusy || (pendingAction.action === "finalize" ? !validFinalizeFields() : remarks.trim().length < 3)} onClick={submitAction} type="button">{actionBusy ? "Saving…" : pendingAction.action === "finalize" ? "Finalize payment" : "Confirm"}</button>
+              <button className="button compact" disabled={actionBusy || (pendingAction.action === "finalize" ? !validFinalizeFields() : remarks.trim().length < 3)} onClick={submitAction} type="button">{actionBusy ? "Saving…" : pendingAction.action === "finalize" ? "Finalize payment" : pendingAction.action === "reverse" ? "Confirm bank reversal" : "Confirm"}</button>
             </div>
           </div> : null}
           {!loading && !error && entries.length ? <div className="table-wrap"><ReportTable>
@@ -436,12 +443,14 @@ export function WorkforcePayoutPaymentHistoryButton({
               <td>{bankRemarksDisplay(entry)}</td>
               <td>{dateTime(entry.generatedAt)}</td>
               <td>{dateTime(entry.finalizedAt)}</td>
-              <td>{finalizationRemarksDisplay(entry)}</td>
+              <td>{finalizationRemarksDisplay(entry)}{entry.reversalReason ? <small>Reversed {dateTime(entry.reversedAt ?? "")} · {entry.reversalReason}</small> : null}</td>
               {canManageStatus ? <td>{entry.status === "processing" ? <div className="payout-detail-actions">
                 <button className="button compact" disabled={actionBusy} onClick={() => chooseFinalize(entry)} type="button">Finalize</button>
                 <button className="button secondary compact" disabled={actionBusy} onClick={() => chooseAction("failed", `Mark ${entry.referenceNo} as Payment Failed`, entry.id)} type="button">Failed</button>
                 <button className="button secondary compact" disabled={actionBusy} onClick={() => chooseAction("cancelled", `Mark ${entry.referenceNo} as Payment Cancelled`, entry.id)} type="button">Cancelled</button>
-              </div> : <span aria-hidden="true">—</span>}</td> : null}
+              </div> : audience === "workforce" && !entry.creditTransfer && ["paid", "partially_paid"].includes(entry.status)
+                ? <button className="button secondary compact" disabled={actionBusy} onClick={() => chooseAction("reverse", `Reverse ${entry.referenceNo}?`, entry.id)} type="button">Mark as reversed</button>
+                : <span aria-hidden="true">—</span>}</td> : null}
             </tr>)}</tbody>
           </ReportTable></div> : null}
           {!loading && !error && !entries.length && !creditTransfers.length ? <div className="empty-state payment-history-empty"><strong>No bank payments yet</strong><p className="subtle">Payment versions appear here after a bank file is generated.</p></div> : null}

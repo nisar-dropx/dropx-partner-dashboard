@@ -96,8 +96,9 @@ export async function GET(request: Request) {
       ? supabaseAdmin.from("helper_payout_payment_hold_events")
       : supabaseAdmin.from("workforce_payout_payment_hold_events");
 
+    const itemFields = "id,batch_id,reference_no,payment_version,instruction_amount,settled_amount,status,bank_response_status,bank_account_no_snapshot,ifsc_snapshot,response_debit_account_no,response_value_date,response_credit_account_no,response_ifsc,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,finalization_remarks,response_import_id,created_at,finalized_at";
     const physicalItemsQuery = itemQuery
-        .select("id,batch_id,reference_no,payment_version,instruction_amount,settled_amount,status,bank_response_status,bank_account_no_snapshot,ifsc_snapshot,response_debit_account_no,response_value_date,response_credit_account_no,response_ifsc,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,finalization_remarks,response_import_id,created_at,finalized_at")
+        .select(audience === "workforce" ? `${itemFields},reversed_amount,reversed_at,reversal_reason` as const : itemFields)
         .eq("company_id", companyId)
         .eq(subjectColumn, workforceId)
         .eq("location_id_snapshot", stationId)
@@ -255,6 +256,7 @@ export async function GET(request: Request) {
         const batch = batches.get(String(item.batch_id));
         const location = locations.get(String(item.location_id_snapshot ?? ""));
         const amounts = paymentAmounts(item.instruction_amount, item.settled_amount, item.status);
+        const reversal = item as typeof item & { reversed_amount?: number; reversed_at?: string; reversal_reason?: string };
         const responseRemarks = item.response_import_id || String(item.bank_response_status ?? "").toUpperCase() === "MANUAL_PAID"
           ? text(item.bank_processing_remarks)
           : "";
@@ -271,8 +273,10 @@ export async function GET(request: Request) {
           referenceNo: String(item.reference_no),
           version: Number(item.payment_version),
           instructionAmount: amounts.instructionAmount,
-          amount: amounts.amount,
-          status: amounts.status,
+          amount: reversal.reversed_at ? Number(reversal.reversed_amount) : amounts.amount,
+          status: reversal.reversed_at ? "reversed" : amounts.status,
+          reversedAt: reversal.reversed_at ?? "",
+          reversalReason: reversal.reversal_reason ?? "",
           bankName: bankNames.get(String(batch?.bank_id ?? "")) ?? "Bank",
           maskedDebitAccount: maskedAccount(debitAccount),
           creditAccount,

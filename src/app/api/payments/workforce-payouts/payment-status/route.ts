@@ -14,7 +14,7 @@ const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
-const actions = new Set(["failed", "cancelled", "finalize", "hold", "release_hold"]);
+const actions = new Set(["failed", "cancelled", "finalize", "reverse", "hold", "release_hold"]);
 const MEANINGLESS_BANK_REFERENCES = new Set(["", "0", "NA", "NIL", "NONE", "NULL", "NOTAVAILABLE", "NOTAPPLICABLE"]);
 
 type PayoutAudience = "workforce" | "helpers";
@@ -240,6 +240,24 @@ export async function POST(request: Request) {
     }
 
     const companyId = requireCompanyId(authorization);
+    if (action === "reverse") {
+      if (audience !== "workforce") return errorResponse("Bank reversals are available for Workforce payments.", 400);
+      const paymentItemId = String(body.paymentItemId ?? "").trim().toLowerCase();
+      if (!UUID.test(paymentItemId) || body.bankReversalConfirmed !== true) {
+        return errorResponse("Select a valid payment and confirm the bank reversed the transfer.", 400);
+      }
+      const scopeError = await paymentItemsScopeError({ audience, authorization, companyId, paymentItemIds: [paymentItemId] });
+      if (scopeError) return scopeError;
+      const result = await supabaseAdmin.rpc("workforce_reverse_payout_payment_item", {
+        p_company_id: companyId,
+        p_actor_user_id: authorization.userId,
+        p_operation_id: operationId,
+        p_payment_item_id: paymentItemId,
+        p_reason: remarks
+      });
+      if (result.error) return errorResponse(result.error.message, databaseStatus(result.error.message));
+      return Response.json(resultRecord(result.data), { headers: noStore });
+    }
     if (action === "finalize") {
       const paymentItemId = String(body.paymentItemId ?? "").trim().toLowerCase();
       const paidAmount = positiveMoney(body.amount);
