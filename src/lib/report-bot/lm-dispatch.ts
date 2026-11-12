@@ -1,3 +1,5 @@
+import {highValueOutputs} from "./lm-high-value-output";
+import {dsrPaceTarget,liveDsrStyle,type DsrPacePoint} from "./lm-dsr-pace";
 import {randomUUID} from 'node:crypto';
 import {queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
 import {dispatchSlotDue,dispatchSlotUpcoming} from './lm-dispatch-window';
@@ -22,7 +24,7 @@ import { dispatchCaption } from "./lm-dispatch-wording";
 
 type Group = { wa_group_id: string; group_name:string|null; location_id: string|null; company_id: string; workspace: string; is_enabled: boolean; bot_in_group: boolean; mode: string };
 type Route = {
-  id: string; group_id:string; cod_workflow?:boolean; cod_shortfalls_since?:string; cod_shortfall_lead_minutes?:number; cod_route_service_url?:string|null; cod_reconciliation_allowance_minutes?:number; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
+  id: string; dsr_pace?:DsrPacePoint[]; high_value_summary?:boolean; high_value_threshold?:number; group_id:string; cod_workflow?:boolean; cod_shortfalls_since?:string; cod_shortfall_lead_minutes?:number; cod_route_service_url?:string|null; cod_reconciliation_allowance_minutes?:number; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
   source_model_codes?: string[];
@@ -223,7 +225,10 @@ export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeL
     percentage="Pickup %"; tone="pickup"; title=performanceTitle('creturn',day,digest.asOf,slot);
   }
   const values=tableRows.map(row=>columns.map(column=>row[column]));
-  if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*`}});
+  const pace=route.report==='dsr'?dsrPaceTarget(digest.asOf,route.dsr_pace||[]):null;
+  if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:route.report==='dsr'
+    ? await reportPngBase64(await tableReportSvg(title,columns,values,percentage,value=>liveDsrStyle(value,pace)))
+    : await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*${pace!==null?`\nPace guide: ${Math.round(pace)}% by this time · green on pace, amber near pace, red behind.`:''}`}});
   if(formats.includes("text")) {
     const lines=[`*${title}*`,...tableRows.map(row=>`${row.Station}: ${row[percentage]}`)];
     splitText(lines).forEach((value,index)=>outputs.push({key:`text_${String(index+1).padStart(3,"0")}`,body:{text:value}}));
@@ -377,7 +382,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
   const now = new Date(), day = istDay(now);
   const activeRoutes=(routes.data as unknown as Route[]).filter(route=>linked(route.group,company));
   // Prewarm each distinct regional source once; schedules stay in configuration.
-  const warming=activeRoutes.filter(route=>["dsr","creturn"].includes(route.report)&&route.times.some(slot=>dispatchSlotUpcoming(day,slot,+now)));
+  const warming=activeRoutes.filter(route=>["dsr","creturn","high_value"].includes(route.report)&&route.times.some(slot=>dispatchSlotUpcoming(day,slot,+now)));
   const regions=new Map<string,Route>();
   for(const route of warming)regions.set(JSON.stringify([route.scope_type,route.source_location_ids,route.source_region_codes,route.source_model_codes]),route);
   await Promise.allSettled([...regions.values()].map(async route=>{
@@ -431,6 +436,11 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             sentSnapshot={rows,asOf:snapshot.asOf};
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
           }
+        } else if(route.report==='high_value') {
+          const mentions=await resolveRouteMentionNumbers(company,sources,route,day);
+          const high=await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||5000,mentions);
+          outputs=high.outputs;sentSnapshot={rows:high.rows.map(r=>[r.stationCode+' · '+r.trackingId,r.shipmentValue!] as [string,number]),asOf:high.asOf};
+          detail=`${high.rows.length} pending high-value shipments`;
         } else if (route.report==="eod") {
           const digest=await loadEodDigest(sources.map(row=>row.station_code),day,{requireCReturn:route.eod_sections?.includes("creturn")??true});
           const region=route.scope_type==="region"

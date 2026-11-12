@@ -943,6 +943,10 @@ export type LoadFlashTrackingRow = {
   shipOption: string;
   dotDispatched?: boolean;
   dotAtStation?: boolean;
+  shipmentValue?:number;
+  paymentMethod?:string;
+  firstSeenAt?:string;
+  inductedAt?:string;
   rtsValue?: number | null;
   lastUpdatedAt?: string;
   rtsReason?: string;
@@ -986,6 +990,7 @@ export type LoadFlashBoardPayload = {
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
   physicalInventoryCount?: number;
+  highValueVersion?: number;
   historyUpdatedAt?: string;
   rtsVersion?: number;
   dotVersion?: number;
@@ -1164,6 +1169,7 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
     historyUpdatedAt: typeof row.historyUpdatedAt === "string" ? row.historyUpdatedAt : undefined,
+    highValueVersion:Number(row.highValueVersion)||0,
     physicalInventoryCount: typeof row.physicalInventoryCount === 'number' && Number.isInteger(row.physicalInventoryCount) && row.physicalInventoryCount >= 0 ? row.physicalInventoryCount : undefined,
     stationInventoryVersion: [0, 1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
     ageingByDay,
@@ -1382,6 +1388,8 @@ export async function fetchLoadFlashTracking(
       shipOption: String(row.shipOption ?? "").trim(),
       dotDispatched: Boolean(row.dotDispatched),
       dotAtStation: Boolean(row.dotAtStation),
+      shipmentValue: row.shipmentValue!=null&&Number.isFinite(Number(row.shipmentValue))?Number(row.shipmentValue):undefined,
+      paymentMethod:String(row.paymentMethod||''),firstSeenAt:String(row.firstSeenAt||''),inductedAt:String(row.inductedAt||''),
       rtsValue: row.rtsValue != null && Number.isFinite(Number(row.rtsValue)) ? Number(row.rtsValue) : null,
       lastUpdatedAt: String(row.lastUpdatedAt || ""), rtsReason: String(row.rtsReason || ""),
       rtsAgeDays: row.rtsAgeDays != null ? Number(row.rtsAgeDays) : undefined,

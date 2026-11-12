@@ -60,6 +60,11 @@ export function reportPalette(title:string) {
 /** Count colours describe status; intensity reflects its share of the row total. */
 export function reportMetricStyle(column: string, value: string | number, total: number): CellStyle {
   if (value === "—" || value === "") return null;
+  if(column==='Status'){
+    if(/held|at station/i.test(String(value)))return {background:'#fef3c7',color:'#92400e'};
+    if(/attempted|check status/i.test(String(value)))return {background:'#fee2e2',color:'#991b1b'};
+    if(/out on road/i.test(String(value)))return {background:'#ede9fe',color:'#5b21b6'};
+  }
   const count = Number(value);
   if (!Number.isFinite(count) || count <= 0) return null;
   const share = total > 0 ? count / total : 0;

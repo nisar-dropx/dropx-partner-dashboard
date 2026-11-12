@@ -1,4 +1,5 @@
 "use server";
+import {parseDsrPace} from "@/lib/report-bot/lm-dsr-pace";
 
 import { pushWorkerConfig } from "@/lib/report-bot/push-config";
 import { cookies } from "next/headers";
@@ -6,7 +7,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { canSeeGroup, type ReportBotAuthorization } from "@/lib/report-bot/access";
-import { dispatchReports, scheduleSlots, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
+import { dispatchReports, scheduleSlots, parseSlots, type ReportKey } from "@/lib/report-bot/lm-dispatch-config";
 import { canSendToGroup, displayDate, formatClock, GROUP_MODES, isTestingGroupName, isValidTimeZone, localClock, normalizeDays, normalizeTimeList, parseClockTime, previewReminderSlots, renderTemplate, type GroupMode } from "@/lib/report-bot/logic";
 import { flushOutbox, queueFeedback } from "@/lib/report-bot/pipeline";
 import {
@@ -972,12 +973,13 @@ export async function saveDispatchRoutes(form: FormData) {
     if (!['station','region'].includes(scopeType)) throw new Error("Choose station or region scope.");
     const formats = [...new Set(form.getAll("format").map(String))];
     if (!formats.length || formats.some(value => !["photo","text","excel"].includes(value))) throw new Error("Choose at least one output format.");
+    if(report==='high_value'&&(formats.length!==1||formats[0]!=='photo'))throw new Error('High-value reports use compact photos only.');
     if (report === "eod" && (formats.length !== 1 || formats[0] !== "photo")) throw new Error("Final EOD sends compact table images only.");
     const eodSections = [...new Set(form.getAll("eod_section").map(String))];
     if (report === "eod" && (!eodSections.length || eodSections.some(value=>!["dsr","dot","creturn"].includes(value)))) throw new Error("Choose at least one valid EOD section.");
     const scheduleStart = field(form,"schedule_start"), scheduleEnd = field(form,"schedule_end");
     const intervalMinutes = Number(field(form,"interval_minutes"));
-    const times = scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
+    const times = report==='high_value' ? parseSlots(String(form.get("explicit_times")||""),report) : scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
     const mentions = [...new Set(field(form,"mentions").split(/[\s,]+/).filter(Boolean).map(n=>n.replace(/^\+/,"")))];
     const question = field(form,"question");
     if (mentions.length > 10 || mentions.some(n=>!/^\d{8,15}$/.test(n))) throw new Error("Enter up to 10 international numbers with country codes.");
@@ -1025,6 +1027,9 @@ export async function saveDispatchRoutes(form: FormData) {
         source_region_codes:scopeType === "region" ? sourceRegionCodes : [],
         source_model_codes:scopeType === "region" ? sourceModelCodes : [],
         eod_sections:report === "eod" ? eodSections : [],
+        dsr_pace:report==='dsr'?parseDsrPace(String(form.get('dsr_pace')||'')):[],
+        high_value_summary:report==='high_value'&&form.get('high_value_view')==='summary',
+        high_value_threshold:report==='high_value'?Math.max(5000,Number(form.get('high_value_threshold'))||5000):5000,
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
