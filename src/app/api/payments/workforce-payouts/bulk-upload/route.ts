@@ -637,7 +637,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const applied = await supabaseAdmin.rpc("workforce_apply_payout_import", {
+    const applied = await supabaseAdmin.rpc("workforce_apply_payout_import_with_review_reopen", {
       p_company_id: companyId,
       p_effective_from: batchFrom,
       p_effective_to: batchTo,
