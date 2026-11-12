@@ -1,6 +1,7 @@
+import {loadProgressScrub} from './lm-scrub-data';
 import {verifiedPhysicalCount,cReturnSummary,requireReportFreshness,type CReturnSummary} from './lm-live-report';
 import "server-only";
-import { fetchLoadFlashBoard, fetchLoadFlashTracking, queueLoadFlashStations, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
+import { fetchLoadFlashBoard, fetchLoadFlashTracking, queueLoadFlashStations, fetchEddStation } from "@/lib/ops-pulse/edd-worker";
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
 import { fetchCodStatus } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadCodPendingReport } from "@/lib/ops-pulse/cod-pending-data";
@@ -12,7 +13,7 @@ import { reportBotDb } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 import { orderEodCReturnRows, orderEodDotRows, orderEodDsrRows } from "./lm-eod-order";
 import { eodDotRow, type EodDotRow } from "./lm-eod-dot";
-import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
+import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, slipReminderState, submittedRemittanceAt } from "./lm-cod-alerts";
 
 export type DispatchReport = {
   asOf: string;
@@ -113,6 +114,8 @@ export async function loadTodayEddSnapshot(stationCodes: string[], day: string):
   });
   const unverifiedStations = requested.filter(code => !verified.includes(code));
   if (!verified.length) throw new Error("Today EDD source is not verified for the configured stations yet.");
+  const stale=verified.filter(code=>{try{requireReportFreshness(byCode.get(code)!.fetchedAt,day,5);return false;}catch{return true;}});
+  if(stale.length){await queueLoadFlashStations(stale,5);throw new Error('Waiting for fresh EDD status: '+stale.join(', '));}
   const tracking = await fetchLoadFlashTracking(day, verified, { buckets: [BOARD_TID.PENDING_TODAY] });
   const allowed = new Set(verified);
   const exact = mapBoardTidExportRows(
@@ -304,17 +307,7 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     }
     return { asOf, pending, rows };
   }
-  if (key === "scrub") {
-    let s = (await fetchScrubNetwork([code])).stations.find(s => s.stationCode === code);
-    // Scheduled scrub is every two hours; refresh only when the saved check is stale.
-    if(!s || !s.fetchedAt || !Number.isFinite(Date.parse(s.fetchedAt)) || Date.now()-Date.parse(s.fetchedAt)>90*60000)
-      s=(await fetchScrubNetwork([code],{refresh:true})).stations.find(s=>s.stationCode===code);
-    if (!s || s.inStation.error || s.onRoad.error) throw new Error("Scrub activity unavailable.");
-    const today = (items: { at: string }[]) => items.filter(item => istDay(new Date(item.at)) === day).length;
-    const station = today(s.inStation.invocations), road = today(s.onRoad.invocations);
-    const alert=scrubAlertState(day,new Date(),station,road);
-    return { asOf: fresh(s.fetchedAt, day), pending: alert.pending, rows: alert.rows };
-  }
+  if (key === "scrub") return loadProgressScrub(company,location,code,day);
   if (key === "edd" || key === "station") {
     if (key === "edd") {
       const exact = await loadTodayEddSnapshot([code], day);

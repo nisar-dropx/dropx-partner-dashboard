@@ -30,3 +30,7 @@ test('missing or incomplete physical rows cannot become a false zero', async () 
  assert.equal(verifiedPhysicalCount(0,new Set()),0);
  assert.equal(verifiedPhysicalCount(2,new Set(['old-HFR','future'])),2);
 });
+
+test('noon DSR uses the EMD title',()=>{
+ assert.match(performanceTitle('dsr',day,day+'T12:01:00+05:30','12:00'),/^EMD live/);
+});

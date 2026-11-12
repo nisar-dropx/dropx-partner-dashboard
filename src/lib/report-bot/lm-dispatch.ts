@@ -228,7 +228,7 @@ export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeL
   const pace=route.report==='dsr'?dsrPaceTarget(digest.asOf,route.dsr_pace||[]):null;
   if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:route.report==='dsr'
     ? await reportPngBase64(await tableReportSvg(title,columns,values,percentage,value=>liveDsrStyle(value,pace)))
-    : await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*${pace!==null?`\nPace guide: ${Math.round(pace)}% by this time · green on pace, amber near pace, red behind.`:''}`}});
+    : await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*`}});
   if(formats.includes("text")) {
     const lines=[`*${title}*`,...tableRows.map(row=>`${row.Station}: ${row[percentage]}`)];
     splitText(lines).forEach((value,index)=>outputs.push({key:`text_${String(index+1).padStart(3,"0")}`,body:{text:value}}));
@@ -421,7 +421,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
         } else if (route.report==="edd" && route.source_rule!=="current_report") {
           const snapshot=await loadTodayEddSnapshot(sources.map(row=>row.station_code),day);
           if (!snapshot.pending && snapshot.unverifiedStations.length) throw new Error(`Today EDD source is not verified for: ${snapshot.unverifiedStations.join(", ")}`);
-          if (route.pending_only && !snapshot.pending) { status="skipped"; detail="Verified Today EDD is clear"; }
+          if (!snapshot.pending) { status="skipped"; detail="Verified Today EDD is clear"; }
           else {
             const scope=route.scope_type==="region" ? (route.source_region_codes||[]).join(", ") : sources.map(row=>row.station_code).join(", ");
             const header=`${scope} · Today EDD pending · ${asIst(snapshot.asOf)}`;
@@ -484,15 +484,16 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             detail=`${scopeLabel} · ${sources.length} source station(s) · Ageing summary + row-level Excel`;
           }
         } else {
-          const reports=await Promise.all(sources.map(source=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day)));
+          const reports=await Promise.all(sources.map(source=>codRuntime.memo(`report:${route.report}:${source.id}`,()=>loadDispatchReport(route.report,company,source.id,source.report_code || source.station_code,day))));
           const pending=reports.some(row=>row.pending);
-          if ((route.report==="bank" ? pending : !route.pending_only||pending)) {
+          if ((["bank","scrub"].includes(route.report) ? pending : !route.pending_only||pending)) {
             const header=`${sources.map(row=>row.station_code).join(", ")} · ${dispatchReports[route.report]} · ${asIst(reports[0].asOf)}`;
             const rows=reports.flatMap((report,index)=>report.rows.map(([label,value]):[string,string|number]=>[sources.length>1?`${sources[index].station_code} · ${label}`:label,value]));
             const prior = await previousSnapshot(route.id, run.id);
             const delta = compareDispatchRows(rows, prior?.rows ?? null);
             const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
-            const mentionNumbers = route.report==="bank"?[]:await resolveRouteMentionNumbers(company, sources, route, day);
+            const pendingSources=sources.filter((_,index)=>reports[index].pending);
+            const mentionNumbers = route.report==="bank"?[]:await resolveRouteMentionNumbers(company, pendingSources, route, day);
             const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(reports[0].asOf), rows.map(([label,value])=>`${label}: ${value}`).join("; "), route.question, mentionNumbers);
             if(route.report==="bank") {
               // Parent/XPT groups can contain several source stations. Each gets

@@ -1,3 +1,4 @@
+import {loadProgressScrub} from '@/lib/report-bot/lm-scrub-data';
 import {highValueOutputs} from '@/lib/report-bot/lm-high-value-output';
 import {loadEodDigest} from '@/lib/report-bot/lm-dispatch-data';
 import {resolveBankReminderMentions} from '@/lib/report-bot/lm-dispatch-mentions';
@@ -32,6 +33,7 @@ export async function POST(request:Request){
   return NextResponse.json({digest,outputs:rendered.outputs,sent:false});
  }
  if(route.report==='high_value'){const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);return NextResponse.json({...await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||3000),sent:false});}
+ if(route.report==='scrub'){const day=codDay(Date.now());return NextResponse.json({reports:await Promise.all(sources.map(s=>loadProgressScrub(company,s.id,s.report_code||s.station_code,day))),sent:false});}
  if(route.report!=='bank')return NextResponse.json({error:'Use the configured report preview operation'},{status:400});
  const source=sources.find(s=>s.station_code===input.station)||sources[0];
  if(!source)throw new Error('No configured station');

@@ -35,7 +35,7 @@ export function requireReportFreshness(stamp:string|null,day:string,maxMinutes:n
 }
 export function performanceTitle(report:'dsr'|'creturn'|'dot',day:string,asOf?:string,slot?:string){
  const date=new Date(`${day}T00:00:00+05:30`).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'});
- const name=report==='creturn'?'C-return':report==='dot'?'DOT':asOf&&slot==='08:00'?'At-station':'DSR';
+ const name=report==='creturn'?'C-return':report==='dot'?'DOT':asOf&&slot==='08:00'?'At-station':asOf&&slot==='12:00'?'EMD':'DSR';
  const clock=asOf?new Date(asOf).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',timeZone:'Asia/Kolkata'}):'';
  return `${name}${asOf?(report==='dsr'&&slot!=='08:00'?' live':' status'):''} · ${date}${clock?' · '+clock+' IST':''}`;
 }

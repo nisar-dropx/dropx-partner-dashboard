@@ -22,9 +22,9 @@ test("final EOD defaults to one configurable 23:30 slot", () => {
   assert.deepEqual(suggestedTimes("eod"), ["23:30"]);
 });
 
-test("Last Mile defaults match the hourly ops windows", () => {
-  assert.deepEqual(suggestedTimes("edd").slice(0, 2), ["07:00", "08:00"]);
-  assert.equal(suggestedTimes("edd").at(-1), "22:00");
+test("Last Mile reminders default to two-hour windows", () => {
+  assert.deepEqual(suggestedTimes("edd").slice(0, 2), ["13:00", "15:00"]);
+  assert.equal(suggestedTimes("edd").at(-1), "23:00");
   assert.deepEqual(suggestedTimes("ageing"), ["10:00"]);
   assert.equal(suggestedTimes("zero")[0], "13:00");
   assert.ok(suggestedTimes("zero").every(time => time > "12:00"));

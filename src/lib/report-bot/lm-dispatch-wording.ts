@@ -3,6 +3,7 @@ import type { ReportBotSettings } from "./settings";
 import type { ReportKey } from "./lm-dispatch-config";
 
 const MAX_CAPTION = 1200;
+const reminder = "Complete this immediately. Reminders will continue every two hours while it remains pending and stop once cleared.";
 
 function fallback(report: ReportKey, status: string, asOf: string, question: string, mentions: string[]) {
   // The bank report rows already carry the timing and conditional escalation.
@@ -16,14 +17,14 @@ function fallback(report: ReportKey, status: string, asOf: string, question: str
     creturn: "Please complete the pending C-Return pickups and improve pickup performance toward the 90% target.",
     ageing: "Ageing is pending. Please prioritize the oldest shipments and confirm clearance progress.",
     zero: "Some DAs have zero deliveries. Please confirm whether they are at the station or out on road and take action.",
-    scrub: "Please complete the overdue scrub stage now. At-station scrub is due by 1:00 PM and on-road scrub by 10:00 PM.",
+    scrub: "Complete the pending scrub stage shown in the report now.",
     cod: "COD pending requires immediate station action. Please update the status and confirm.",
     recon: "The listed DA reconciliation remains pending after the 90-minute grace or the 10:00 PM closing sweep. Complete it now and confirm.",
     deposit: "Out on road is zero and Prepare Deposit remains pending after the operational grace. Complete it now and confirm.",
     slip: "Station TL: the bank deposit slip is still not uploaded after remittance submission. Please upload it in OpsPulse.",
     eod: "Please review the EOD report and close all remaining operational gaps."
   };
-  return [lead[report], `Status: ${status}. As of ${asOf} IST.`, question, mentions.length ? mentions.map(number => "@" + number).join(" ") : ""].filter(Boolean).join("\n");
+  return [lead[report], ["edd","scrub","cod","recon","deposit","slip"].includes(report) ? reminder : "", `Status: ${status}. As of ${asOf} IST.`, question, mentions.length ? mentions.map(number => "@" + number).join(" ") : ""].filter(Boolean).join("\n");
 }
 
 /** Gemini wording is advisory; a stable operational caption is always available as a fallback. */
@@ -31,7 +32,7 @@ export async function dispatchCaption(settings: ReportBotSettings, report: Repor
   const base = fallback(report, status, asOf, question, mentions);
   // COD controls are factual workflow decisions. Deterministic wording keeps
   // pickup-cycle logic exact and avoids spending model credits on every chase.
-  if (["cod","recon","deposit","bank","slip"].includes(report)) return base;
+  if (["edd","scrub","cod","recon","deposit","bank","slip"].includes(report)) return base;
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key || !settings.ai_model) return base;
   const controller = new AbortController();

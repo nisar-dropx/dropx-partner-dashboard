@@ -34,11 +34,11 @@ export async function codWorkflowOutputs(company:string,source:{id:string;statio
  }
  const outputs:Array<{key:string;body:Record<string,unknown>;codAck:CodAck}>=[];
  if(sections.length){
-  const caption=[`*${title}*`,owner,...actions,fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
+  const caption=[`*${title}*`,owner,...actions,sections.some(s=>['recon','prepare','bank'].includes(s.key))?'Complete this immediately. Reminders will continue every two hours while pending and stop once cleared.':'',fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
   if(caption.length>3900)throw new Error('COD caption exceeds compact limit; review section size');
   outputs.push({key:`cod_${source.id}`,body:{image_base64:await codSectionsPng(title,sections),mime:'image/png',caption,mentions:[...new Set([...bankMentionNumbers(groups),...(sections.some(s=>s.owner==='team')?ssa:[])])].map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,keys:[...(held.has('pickup')?[]:report.acks),...(held.has('short')?[]:report.shortAcks)]}});
  }
  const slips=held.has('slip')?[]:report.slips;
- if(slips.length)outputs.push({key:`slip_${source.id}`,body:{text:[`${tags(groups.tl)||'Station TL'} · *${source.station_code} · CMS slip pending*`,...slips.map(s=>`${s.code} · ${codMoney(s.amount)} · remittance submitted ${codClock(s.at)} · ${s.returned?'re-upload required':'slip not uploaded'}`),'Upload the correct bank/CMS deposit slip in OpsPulse now.'].join('\n'),mentions:groups.tl.map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,keys:slips.map(s=>'sent:'+s.key)}});
+ if(slips.length)outputs.push({key:`slip_${source.id}`,body:{text:[`${tags(groups.tl)||'Station TL'} · *${source.station_code} · CMS slip pending*`,...slips.map(s=>`${s.code} · ${codMoney(s.amount)} · remittance submitted ${codClock(s.at)} · ${s.returned?'re-upload required':'slip not uploaded'}`),'Upload the correct bank/CMS deposit slip in OpsPulse now. Reminders will continue every two hours until it is uploaded.'].join('\n'),mentions:groups.tl.map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,keys:slips.map(s=>'sent:'+s.key)}});
  return outputs;
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, scrubAlertState, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
+import { bankRemittanceFollowup, observedBankerWindow, observedNonPickupWeekday, overdueRemittancesAfterGrace, prepareDepositAlertState, reconciliationDriverAlert, slipReminderState, slipUploadOverdue } from "./lm-cod-alerts.ts";
 
 const at=value=>Date.parse(value+"+05:30");
 const row=(created,status="CREATED")=>({id:created,code:"AC1",status,expectedAmount:100,actualAmount:100,variance:0,createdAt:at(created),updatedAt:at(created),submittedAt:status==="SUBMITTED"?at(created):null,createdBy:"station",submittedBy:status==="SUBMITTED"?"station":null});
@@ -46,19 +46,12 @@ test("slip alert starts thirty minutes after submitted remittance",()=>{
   assert.equal(slipUploadOverdue(submitted,new Date(at("2026-11-11T19:30:00"))),true);
 });
 
-test("slip reminder fires after thirty minutes and then hourly, not every half hour",()=>{
+test("slip reminder fires after thirty minutes and then every two hours",()=>{
   const submitted=row("2026-11-11T20:17:00","SUBMITTED");
   assert.deepEqual(slipReminderState(submitted,new Date(at("2026-11-11T20:47:00"))),{due:true,stage:1,elapsedMinutes:30,submittedAt:at("2026-11-11T20:17:00")});
   assert.equal(slipReminderState(submitted,new Date(at("2026-11-11T21:17:00"))).due,false);
-  assert.deepEqual(slipReminderState(submitted,new Date(at("2026-11-11T21:47:00"))),{due:true,stage:2,elapsedMinutes:90,submittedAt:at("2026-11-11T20:17:00")});
+  assert.deepEqual(slipReminderState(submitted,new Date(at("2026-11-11T22:47:00"))),{due:true,stage:2,elapsedMinutes:150,submittedAt:at("2026-11-11T20:17:00")});
   assert.equal(slipReminderState(submitted,new Date(at("2026-11-11T22:17:00"))).due,false);
-});
-
-test("scrub deadlines are independent",()=>{
-  assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T13:00:00")),0,0).pending,true);
-  assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T15:00:00")),1,0).pending,false);
-  assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T22:00:00")),1,0).pending,true);
-  assert.equal(scrubAlertState("2026-11-11",new Date(at("2026-11-11T22:00:00")),1,1).pending,false);
 });
 
 test("DA reconciliation waits 90 minutes, then changes to a full closing sweep at 10 PM",()=>{

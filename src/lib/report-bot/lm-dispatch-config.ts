@@ -34,6 +34,8 @@ export function scheduleSlots(start: string, end: string, intervalMinutes: numbe
 export function suggestedTimes(key: ReportKey) {
   if (key === "eod") return ["23:30"];
   if (key === "ageing") return ["10:00"];
+  if (key === "edd") return scheduleSlots("13:00", "23:00", 120);
+  if (["bank","recon","deposit","slip","scrub"].includes(key)) return scheduleSlots("08:00", "22:00", 120);
   if (key === "zero") return scheduleSlots("13:00", "21:00", 60);
   return ["edd", "station", "dsr", "creturn"].includes(key) ? scheduleSlots("07:00", "22:00", 60) : [];
 }
