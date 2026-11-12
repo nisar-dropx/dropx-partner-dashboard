@@ -32,6 +32,18 @@ function todayIso() {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+function removalDates(entry: PaymentAllocationHistoryEntry, month: string) {
+  if (!month) return { from: entry.effectiveFrom, to: entry.effectiveTo };
+  const start = `${month}-01`;
+  const end = new Date(`${start}T00:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  const lastDay = end.toISOString().slice(0, 10);
+  return {
+    from: entry.effectiveFrom > start ? entry.effectiveFrom : start,
+    to: entry.effectiveTo && entry.effectiveTo < lastDay ? entry.effectiveTo : lastDay
+  };
+}
+
 function statusTone(status: string) {
   if (status === "Current") return "good";
   if (status === "Scheduled") return "warn";
@@ -56,7 +68,7 @@ export function PaymentAllocationHistoryButton({
   buttonLabel?: string;
   loadMappingAudit?: boolean;
   canClearMappingPeriod?: boolean;
-  onClearMappingPeriod?: (entry: PaymentAllocationHistoryEntry) => Promise<{ ok: boolean; message: string }>;
+  onClearMappingPeriod?: (entry: PaymentAllocationHistoryEntry, unlockedMonth?: string) => Promise<{ ok: boolean; message: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [audit, setAudit] = useState<Record<string, MappingAuditEvent[]>>({});
@@ -66,6 +78,7 @@ export function PaymentAllocationHistoryButton({
   const [clearTargetId, setClearTargetId] = useState("");
   const [clearingEntryId, setClearingEntryId] = useState("");
   const [clearError, setClearError] = useState("");
+  const [unlockedMonth, setUnlockedMonth] = useState("");
   const idsKey = entries.map(entry => entry.id).sort().join(",");
   useEffect(() => {
     if (!open || !loadMappingAudit || !idsKey) return;
@@ -102,7 +115,9 @@ export function PaymentAllocationHistoryButton({
     setClearingEntryId(entry.id);
     setClearError("");
     try {
-      const result = await onClearMappingPeriod(entry);
+      const result = unlockedMonth
+        ? await onClearMappingPeriod(entry, unlockedMonth)
+        : await onClearMappingPeriod(entry);
       if (!result.ok) {
         setClearError(result.message || "The mapping could not be cleared. Try again.");
         return;
@@ -169,6 +184,7 @@ export function PaymentAllocationHistoryButton({
               {entries.map((entry) => {
                 const displayStatus = paymentAllocationDisplayStatus(entry, today);
                 const locationLabel = entry.locationLabel?.trim() || "selected location";
+                const removal = removalDates(entry, clearTargetId === entry.id ? unlockedMonth : "");
                 // Past, current and scheduled periods are all removable. Only
                 // unsaved or already-cancelled history cards omit the action.
                 const removableSavedPeriod = Boolean(entry.updatedAt)
@@ -204,13 +220,17 @@ export function PaymentAllocationHistoryButton({
                       <strong>Remove the {locationLabel} mapping for this period?</strong>
                       <p><b>{readableDate(entry.effectiveFrom)} – {readableDate(entry.effectiveTo)}</b>{entry.sourceLabel ? <> · {entry.sourceLabel}</> : null}</p>
                       <p>Both the DropX mapping and the payment method/rates for only this location-period will become unmapped. History remains available, and all other locations and periods remain unchanged.</p>
-                      <p>Removal is blocked only when this period has a published or locked payment, or when this is the registered-location mapping and an additional-location mapping overlaps it.</p>
+                      <p>For a published payout, unlock the associate and month in Workforce Payouts, then select that month here. Review and republish the payout after correcting the mapping.</p>
+                      <label>Limit removal to an unlocked payout month
+                        <input type="month" min={entry.effectiveFrom.slice(0, 7)} max={entry.effectiveTo ? entry.effectiveTo.slice(0, 7) : undefined} value={unlockedMonth} disabled={Boolean(clearingEntryId)} onChange={(event) => { setUnlockedMonth(event.target.value); setClearError(""); }} />
+                      </label>
+                      {unlockedMonth && removal.from <= removal.to ? <p>Dates to remove: <b>{readableDate(removal.from)} – {readableDate(removal.to)}</b></p> : null}
                       {clearError ? <p className="error-text" role="alert">{clearError}</p> : null}
                       <div className="toolbar-actions">
                         <button className="button secondary compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(""); setClearError(""); }} type="button">Cancel</button>
-                        <button aria-busy={clearingEntryId === entry.id} className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => void removeMappingPeriod(entry)} type="button">{clearingEntryId === entry.id ? "Removing…" : "Remove this period"}</button>
+                        <button aria-busy={clearingEntryId === entry.id} className="button danger compact" disabled={Boolean(clearingEntryId) || Boolean(unlockedMonth && removal.from > removal.to)} onClick={() => void removeMappingPeriod(entry)} type="button">{clearingEntryId === entry.id ? "Removing…" : unlockedMonth ? "Remove mapping for this month" : "Remove this period"}</button>
                       </div>
-                    </div> : <button className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(entry.id); setClearError(""); }} type="button">Remove mapping</button>}
+                    </div> : <button className="button danger compact" disabled={Boolean(clearingEntryId)} onClick={() => { setClearTargetId(entry.id); setClearError(""); setUnlockedMonth(""); }} type="button">Remove mapping</button>}
                   </div> : null}
                 </article>;
               })}

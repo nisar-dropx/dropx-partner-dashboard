@@ -1071,13 +1071,13 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     }
   }
 
-  async function clearSavedMappingPeriod(entry: PaymentAllocationHistoryEntry) {
+  async function clearSavedMappingPeriod(entry: PaymentAllocationHistoryEntry, unlockedMonth?: string) {
     if (isSaving) return { ok: false, message: "Another mapping change is still saving. Wait for it to finish and try again." };
     if (!entry.updatedAt) return { ok: false, message: "This mapping period is missing its saved version. Reload the page and try again." };
     setSavingIndexes(new Set([-1]));
     setSaveNotice(null);
     try {
-      const result = await clearProviderMappingPeriod({ mappingId: entry.id, expectedUpdatedAt: entry.updatedAt });
+      const result = await clearProviderMappingPeriod({ mappingId: entry.id, expectedUpdatedAt: entry.updatedAt, ...(unlockedMonth ? { unlockedMonth } : {}) });
       setSaveNotice({ kind: result.ok ? "success" : "error", message: result.message });
       if (result.ok && typeof window !== "undefined") window.location.reload();
       return result;

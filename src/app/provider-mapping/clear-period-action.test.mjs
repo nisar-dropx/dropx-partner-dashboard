@@ -16,7 +16,8 @@ test("exact-period clear requires provider-mapping edit permission and authorize
 });
 
 test("exact-period clear targets the submitted mapping UUID and refreshes every consumer", () => {
-  assert.match(actions, /rpc\("workforce_clear_mapping_period", \{/);
+  assert.match(actions, /rpc\("workforce_clear_mapping_period", clearArgs\)/);
+  assert.match(actions, /rpc\("workforce_clear_unlocked_mapping_month", \{ \.\.\.clearArgs, p_month:/);
   assert.match(actions, /p_workforce: mapping\.workforce_id/);
   assert.match(actions, /p_mapping: normalizedMappingId/);
   assert.match(actions, /p_expected_updated_at: expectedUpdatedAt/);

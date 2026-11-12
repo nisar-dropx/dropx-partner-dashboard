@@ -1948,11 +1948,11 @@ export type ClearProviderMappingPeriodResult = {
 export type ClearProviderMappingPeriodInput = {
   mappingId: string;
   expectedUpdatedAt: string;
+  unlockedMonth?: string;
 };
 
-/** Removes one exact saved provider-mapping period. The mapping row remains in
- * history, but neither its DropX association nor its payment method applies to
- * the stored dates after cancellation. Other periods are never retargeted. */
+/** Removes a saved provider mapping for its entire period or for the portion
+ * covered by an explicitly unlocked payout month. */
 export async function clearProviderMappingPeriod(input: ClearProviderMappingPeriodInput): Promise<ClearProviderMappingPeriodResult> {
   try {
     const authorization = await getAuthorization();
@@ -1965,6 +1965,10 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
 
     const normalizedMappingId = String(input?.mappingId ?? "").trim();
     const expectedUpdatedAt = String(input?.expectedUpdatedAt ?? "").trim();
+    const unlockedMonth = String(input?.unlockedMonth ?? "").trim();
+    if (unlockedMonth && !/^\d{4}-(0[1-9]|1[0-2])$/.test(unlockedMonth)) {
+      return { ok: false, message: "Select a valid payout month." };
+    }
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedMappingId)) {
       return { ok: false, message: "The selected mapping period is invalid. Reload the page and try again." };
     }
@@ -2022,7 +2026,7 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
       .maybeSingle();
     if (stationError) throw new Error(stationError.message);
 
-    const { data: clearResult, error: clearError } = await supabaseAdmin.rpc("workforce_clear_mapping_period", {
+    const clearArgs = {
       p_company: companyId,
       p_actor: authorization.userId,
       p_workforce: mapping.workforce_id,
@@ -2030,8 +2034,16 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
       p_expected_updated_at: expectedUpdatedAt,
       p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null,
       p_actor_name: authorization.fullName || authorization.email || "Dashboard mapping reviewer"
-    });
-    if (clearError) throw new Error(clearError.message);
+    };
+    const { data: clearResult, error: clearError } = unlockedMonth
+      ? await supabaseAdmin.rpc("workforce_clear_unlocked_mapping_month", { ...clearArgs, p_month: `${unlockedMonth}-01` })
+      : await supabaseAdmin.rpc("workforce_clear_mapping_period", clearArgs);
+    if (clearError) {
+      if (!unlockedMonth && clearError.message.includes("was published; this mapping period cannot be removed")) {
+        return { ok: false, message: "This mapping was used in a published payout. Select the unlocked payout month to remove only its dates." };
+      }
+      throw new Error(clearError.message);
+    }
 
     const cleared = (clearResult ?? {}) as Record<string, unknown>;
     const effectiveFrom = String(cleared.effective_from ?? mapping.effective_from ?? "");

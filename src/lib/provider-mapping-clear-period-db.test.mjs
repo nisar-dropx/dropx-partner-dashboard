@@ -212,6 +212,57 @@ const call = (db, {
   `);
 };
 
+test("an open October unlock removes October coverage and preserves a locked November publication", async () => {
+  const db = await database();
+  try {
+    await db.exec(`
+      alter table public.workforce_payout_publications add column notification_status text;
+      create table public.workforce_payout_mapping_unlocks (
+        company_id uuid, workforce_id uuid, period_start date, period_end date, status text,
+        base_mapping_keys jsonb default '[]'::jsonb
+      );
+      create function public.lock_workforce_payment_allocation_company(uuid)
+      returns void language plpgsql as $$ begin return; end $$;
+    `);
+    const guardMigration = await migration("20261009124255_workforce_payout_mapping_unlock_relock.sql");
+    const guardStart = guardMigration.indexOf("create or replace function public.guard_published_workforce_provider_mapping()");
+    const guardEnd = guardMigration.indexOf("comment on function public.guard_published_workforce_provider_mapping()", guardStart);
+    await db.exec(guardMigration.slice(guardStart, guardEnd));
+    await db.exec(`
+      create trigger published_mapping_guard before insert or update or delete
+      on public.field_executive_provider_mappings
+      for each row execute function public.guard_published_workforce_provider_mapping();
+      insert into public.workforce_payout_publications (company_id, workforce_id, period_start, period_end, publication_kind)
+      values ('${company}', '${worker}', '2026-10-01', '2026-10-31', 'worksheet'),
+             ('${company}', '${worker}', '2026-11-01', '2026-11-30', 'worksheet');
+    `);
+    await db.exec(await migration("20261112170618_workforce_mapping_removal_unlocked_month.sql"));
+    const removeOctober = () => db.query(`
+      select public.workforce_clear_unlocked_mapping_month(
+        '${company}', '${actor}', '${worker}', '${currentMapping}',
+        '${mappingVersion}', array['${registeredStation}'::uuid], 'Period reviewer', '2026-10-01'
+      ) as result
+    `);
+    await assert.rejects(removeOctober, /Unlock this associate and month/);
+    await db.exec(`
+      insert into public.workforce_payout_mapping_unlocks (company_id, workforce_id, period_start, period_end, status)
+      values ('${company}', '${worker}', '2026-10-01', '2026-10-31', 'open');
+    `);
+    const { result } = (await removeOctober()).rows[0];
+    assert.equal(result.effective_from, "2026-10-01");
+    assert.equal(result.effective_to, "2026-10-31");
+    assert.deepEqual((await db.query(`
+      select effective_from::text, effective_to::text, status, payment_values
+      from public.field_executive_provider_mappings where id = '${currentMapping}'
+    `)).rows, [{
+      effective_from: "2026-11-01", effective_to: null, status: "active", payment_values: { DELIVERY: 18 }
+    }]);
+    assert.equal((await db.query("select count(*)::int as total from public.workforce_payout_publications")).rows[0].total, 2);
+  } finally {
+    await db.close();
+  }
+});
+
 test("clears one exact mapping period while preserving history and recomputing the current provider", async () => {
   const db = await database();
   try {
