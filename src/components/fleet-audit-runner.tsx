@@ -18,7 +18,7 @@ async function smallPhoto(file:File):Promise<File> {
  const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Photo processing failed.')),'image/jpeg',0.82));return new File([blob],'audit-photo.jpg',{type:'image/jpeg'});
  } finally {URL.revokeObjectURL(url);}
 }
-export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;data:FleetControlData;onClose:()=>void;onDone:(confirmation:string)=>void}) {
+export function FleetAuditRunner({audit,data,onClose,onDone,onDraftSaved}:{audit:FleetAudit;data:FleetControlData;onClose:()=>void;onDone:(confirmation:string)=>void;onDraftSaved?:(draft:Record<string,string>)=>void}) {
  const vehicle=data.vehicles.find(v=>v.id===audit.vehicleId);
  const template=audit.templateId || data.auditTemplates.find(t=>t.isDefault)?.id;
  const items=data.checklistItems.filter(i=>i.templateId===template&&(i.auditMode==='both'||i.auditMode===audit.auditMode)&&auditApplies(i.responseConfig,vehicle?.fuelType||''));
@@ -27,13 +27,14 @@ export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;d
  const bodyRef=useRef<HTMLDivElement>(null);
  useEffect(()=>{if(error)bodyRef.current?.scrollTo({top:0,behavior:'smooth'});},[error]);
  const latest=useRef(values);latest.current=values;
+ const draftSaved=useRef(onDraftSaved);draftSaved.current=onDraftSaved;
  const savingDraft=useRef<Promise<unknown>|null>(null);
  useEffect(()=>{
   if(!dirty || busy) return;
   const snapshot=JSON.stringify(values);
   const timer=window.setTimeout(async()=>{
    if(savingDraft.current)return;savingDraft.current=send('audit.draft',{draft:values});
-   try{await savingDraft.current;if(JSON.stringify(latest.current)===snapshot){setDirty(false);setSaved('Draft saved automatically');}}
+   try{const result=await savingDraft.current as {draft?:Record<string,string>};if(JSON.stringify(latest.current)===snapshot){setDirty(false);setSaved('Draft saved automatically');draftSaved.current?.(result?.draft && typeof result.draft==='object'?result.draft:values);}}
    catch{setSaved('Not saved yet · check your connection and tap Save draft');}
    finally{savingDraft.current=null;}
   },1800);
@@ -43,8 +44,8 @@ export function FleetAuditRunner({audit,data,onClose,onDone}:{audit:FleetAudit;d
  const field=(key:string)=>({value:values[key]||'',onChange:(e:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>changed(key,e.target.value)});
  useEffect(()=>{const prevent=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',prevent);return()=>window.removeEventListener('beforeunload',prevent);},[dirty]);
  async function send(action:string,body:Record<string,unknown>){const response=await fetch('/api/fleet-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,auditId:audit.id,...body})});const result=await response.json();if(!response.ok) throw new Error(result.error||'Could not save. Your answers remain here.');return result;}
- async function save(close=false){setBusy('draft');setError('');try{if(savingDraft.current)await savingDraft.current.catch(()=>{});await send('audit.draft',{draft:latest.current});setDirty(false);setSaved('Draft saved · resume from any device');if(close)onClose();}catch(e){setError(e instanceof Error?e.message:'Save failed.');}finally{setBusy('');}}
- async function upload(key:string,file?:File){if(!file)return;setBusy(key);setError('');try{const photo=await smallPhoto(file);if(photo.size>3500000)throw new Error('Choose a file smaller than 3.5 MB.');const form=new FormData();form.set('auditId',audit.id);form.set('file',photo);const r=await fetch('/api/fleet/audit-evidence',{method:'POST',body:form});const result=await r.json();if(!r.ok)throw new Error(result.error||'Upload failed.');changed(key,result.url);changed(`${key}_type`,result.type);}catch(e){setError(e instanceof Error?e.message:'Upload failed.');}finally{setBusy('');}}
+ async function save(close=false){setBusy('draft');setError('');try{if(savingDraft.current)await savingDraft.current.catch(()=>{});const result=await send('audit.draft',{draft:latest.current});const draft=result?.draft && typeof result.draft==='object'?result.draft as Record<string,string>:latest.current;draftSaved.current?.(draft);setDirty(false);setSaved('Draft saved · resume from any device');if(close)onClose();}catch(e){setError(e instanceof Error?e.message:'Save failed.');}finally{setBusy('');}}
+ async function upload(key:string,file?:File){if(!file)return;setBusy(key);setError('');try{const photo=await smallPhoto(file);if(photo.size>3500000)throw new Error('Choose a file smaller than 3.5 MB.');const form=new FormData();form.set('auditId',audit.id);form.set('file',photo);const r=await fetch('/api/fleet/audit-evidence',{method:'POST',body:form});const result=await r.json();if(!r.ok)throw new Error(result.error||'Upload failed.');const next={...latest.current,[key]:result.url,[`${key}_type`]:result.type||'photo'};setValues(next);latest.current=next;setDirty(true);setSaved('');if(savingDraft.current)await savingDraft.current.catch(()=>{});const pending=send('audit.draft',{draft:next});savingDraft.current=pending;try{const saved=await pending as {draft?:Record<string,string>};draftSaved.current?.(saved?.draft && typeof saved.draft==='object'?saved.draft:next);setDirty(false);setSaved('Attachment saved with draft');}finally{if(savingDraft.current===pending)savingDraft.current=null;}}catch(e){setError(e instanceof Error?e.message:'Upload failed.');}finally{setBusy('');}}
  const answered=items.filter(i=>values[`item_${i.id}`]).length;
  const groups=[...new Set(items.map(i=>i.category))];
  const photoInput=(key:string,index:number)=><div className="fc-photo-slot" key={key}>{values[key]?<><FleetAttachmentPreview href={values[key]}>View attachment {index+1}</FleetAttachmentPreview><button type="button" aria-label="Remove attachment" onClick={()=>changed(key,'')}><X size={16}/></button></>:<label className="fc-photo-button"><Camera size={20}/><span>{busy===key?'Uploading…':`Add photo ${index+1}`}</span><input aria-label={`Upload photo ${index+1}`} disabled={!!busy} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={e=>upload(key,e.target.files?.[0])}/></label>}</div>;
