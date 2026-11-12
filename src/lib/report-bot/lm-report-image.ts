@@ -120,7 +120,7 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
   const rowHeight = 26, titleHeight = 34, headerHeight=compact?36:rowHeight;
   const headerLines=(label:string)=>{
     if(!compact)return [label];
-    const special:Record<string,string[]>= {'EDD at station':['EDD at','station'],'Physical at station':['Physical at','station'],'Verified total':['Assigned'],'Delivery failed':['Delivery','failed'],'Pickup failed':['Pickup','failed'],'At station':['At station','unassigned']};
+    const special:Record<string,string[]>= {'EDD at station':['EDD at','station'],'Physical at station':['Physical at','station'],'Verified total':['Assigned'],'Delivery failed':['Delivery','failed'],'Pickup failed':['Pickup','failed'],'At station':/c[ -]?return/i.test(title)?['At station','unassigned']:['At station']};
     return special[label]|| (label.length>10&&label.includes(' ')?[label.slice(0,label.lastIndexOf(' ')),label.slice(label.lastIndexOf(' ')+1)]:[label]);
   };
   const percentageColumns: readonly string[] = typeof percentageColumn === "string" ? [percentageColumn] : percentageColumn;
