@@ -111,7 +111,34 @@ const filterMap = Object.fromEntries(
 );
 const dropX = Number(process.env.AMAZON_WS_DROP_X || 0.935);
 const dropY = Number(process.env.AMAZON_WS_DROP_Y || 0.195);
-const switchWaitMs = Math.max(1800, Number(process.env.AMAZON_STATION_SWITCH_WAIT_MS || 3200));
+const switchWaitMs = Math.max(1800, Number(process.env.AMAZON_STATION_SWITCH_WAIT_MS || 4500));
+/** Per-station reload waits: TFB7:8000,TTG9:6500 — applied AFTER focus is restored. */
+const switchWaitOverrides = Object.fromEntries(
+  String(process.env.AMAZON_STATION_SWITCH_WAIT_OVERRIDES || "TFB7:8000,TTG9:6500,TCD4:5500")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const i = p.indexOf(":");
+      if (i < 0) return null;
+      const ms = Number(p.slice(i + 1).trim());
+      if (!Number.isFinite(ms) || ms < 1800) return null;
+      return [p.slice(0, i).trim().toUpperCase(), Math.round(ms)];
+    })
+    .filter(Boolean)
+);
+function switchWaitFor(station) {
+  const code = String(station || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^AMAZONNOW\s+/, "")
+    .replace(/_SS$/, "");
+  if (switchWaitOverrides[code]) return switchWaitOverrides[code];
+  const filter = String(stationFilter(station) || "");
+  // _SS AmazonNow sites often reload slower after the chip change.
+  if (/_SS$/i.test(filter)) return Math.max(switchWaitMs, 6000);
+  return switchWaitMs;
+}
 const whatsappUrl = String(process.env.WHATSAPP_WORKER_URL || process.env.REPORT_BOT_WORKER_URL || "").replace(/\/$/, "");
 const whatsappToken = process.env.WHATSAPP_WORKER_TOKEN || process.env.REPORT_BOT_WORKER_TOKEN || "";
 const fallbackGroup = process.env.DARK_STORE_OPS_GROUP_JID
@@ -152,13 +179,13 @@ const siteSummaryUrl = process.env.AMAZON_SITE_SUMMARY_URL
   || "https://eu.store-management.f3.amazon.dev/siteSummary";
 const SWITCH_SCRIPT = path.join(__dirname, "switch-site-summary-station.ps1");
 const KEEPALIVE_SCRIPT = path.join(__dirname, "keepalive-workspaces-window.ps1");
-/** Idle keep-alive interval (seconds). 0 disables. Default 180s to beat typical 5–10 min WorkSpaces lock. */
+/** Idle keep-alive. Default OFF when cycling stations (each switch already wakes WorkSpaces). Enable only on a dedicated laptop if needed. */
 const keepAliveSeconds = Math.max(
   0,
-  Number(process.env.AMAZON_WS_KEEPALIVE_SECONDS ?? "180")
+  Number(process.env.AMAZON_WS_KEEPALIVE_SECONDS ?? "300")
 );
 const keepAliveEnabled = keepAliveSeconds > 0
-  && !["0", "false", "no", "off"].includes(String(process.env.AMAZON_WS_KEEPALIVE ?? "1").trim().toLowerCase());
+  && !["0", "false", "no", "off"].includes(String(process.env.AMAZON_WS_KEEPALIVE ?? "0").trim().toLowerCase());
 let lastKeepAliveAt = 0;
 let lastScreenLockAlertAt = 0;
 const recentImageHashes = new Set();
@@ -190,17 +217,19 @@ function stationFilter(station) {
 
 async function switchStation(station) {
   const tabIndex = stationTabMap.get(String(station).toUpperCase()) || 1;
+  const waitMs = switchWaitFor(station);
   const args = [
     "-Station", stationFilter(station),
     "-TabIndex", String(tabIndex),
     "-Mode", switchMode,
-    "-WaitMs", String(switchWaitMs),
+    "-WaitMs", String(waitMs),
     "-DropX", String(dropX),
     "-DropY", String(dropY)
   ];
   if (switchBackground) args.push("-Background");
   if (process.env.AMAZON_WS_MENU_X) args.push("-MenuX", String(process.env.AMAZON_WS_MENU_X));
   if (process.env.AMAZON_WS_MENU_Y) args.push("-MenuY", String(process.env.AMAZON_WS_MENU_Y));
+  console.log(JSON.stringify({ switch_station: station, filter: stationFilter(station), wait_ms: waitMs, background: switchBackground }));
   return runPowerShell(SWITCH_SCRIPT, args);
 }
 
@@ -639,9 +668,8 @@ async function deliverAlert({ imageBase64, caption, clientRef, station, redPixel
 async function checkStation(sent, station, { cycleHashes }) {
   if (allowStationSwitch && stations.length > 1) {
     try {
+      // WaitMs for reload happens inside the PS script AFTER focus is restored.
       await switchStation(station);
-      // Give Firefox Site Summary a moment after an interruptive tab switch.
-      await new Promise((r) => setTimeout(r, 1500));
     } catch (error) {
       if (isScreenLockError(error)) throw error;
       console.warn(`Station switch to ${station} failed: ${error instanceof Error ? error.message : error}`);
@@ -650,6 +678,7 @@ async function checkStation(sent, station, { cycleHashes }) {
 
   const outFile = path.join(STATE_DIR, `workspaces-capture-${station}-${Date.now()}.png`);
   await mkdir(STATE_DIR, { recursive: true });
+  // Never -Prepare here — Quiet PrintWindow only (no focus / cursor steal).
   const saved = await runPowerShell(CAPTURE_SCRIPT, ["-OutFile", outFile, "-Quiet"]);
   const pngPath = saved || outFile;
   const red = await countRedPixels(pngPath);

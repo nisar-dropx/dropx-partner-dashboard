@@ -201,12 +201,14 @@ $clickY = if ($MenuY -gt 0) { $MenuY } else { [int]($rect.Top + ($height * $Drop
 $usedFilter = $filters[0]
 Open-SiteDropdown $clickX $clickY
 Select-Filtered $usedFilter
-
-Start-Sleep -Milliseconds ([Math]::Max(1800, $WaitMs))
 Clear-PageSelection
 
+# Return the user's cursor/window FIRST, then wait for Site Summary reload in the background.
+# Slow stations (TFB7_SS etc.) need a long WaitMs — that must not hold focus the whole time.
 if ($Background -and $prevHwnd -ne [IntPtr]::Zero -and $prevHwnd -ne $hwnd) {
   [WsFocus]::SetForegroundWindow($prevHwnd) | Out-Null
 }
+
+Start-Sleep -Milliseconds ([Math]::Max(1800, $WaitMs))
 
 Write-Output ("switched-dropdown:{0}|alt:{1}|filter:{2}|click:{3},{4}|size:{5}x{6}|bg:{7}" -f $chipAmazon, $chipSs, $usedFilter, $clickX, $clickY, $width, $height, [int]$Background.IsPresent)

@@ -81,7 +81,28 @@ function expectedChip(station) {
   return `${chipPrefix} ${code}`.trim();
 }
 
-const waitMs = Math.max(1800, Number(process.env.AMAZON_STATION_SWITCH_WAIT_MS || 2500));
+const waitMs = Math.max(1800, Number(process.env.AMAZON_STATION_SWITCH_WAIT_MS || 4500));
+const waitOverrides = Object.fromEntries(
+  String(process.env.AMAZON_STATION_SWITCH_WAIT_OVERRIDES || "TFB7:8000,TTG9:6500,TCD4:5500")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const i = p.indexOf(":");
+      if (i < 0) return null;
+      const ms = Number(p.slice(i + 1).trim());
+      if (!Number.isFinite(ms) || ms < 1800) return null;
+      return [p.slice(0, i).trim().toUpperCase(), Math.round(ms)];
+    })
+    .filter(Boolean)
+);
+function waitForStation(station) {
+  const code = stationCode(station);
+  if (waitOverrides[code]) return waitOverrides[code];
+  const filter = dropdownCode(station);
+  if (/_SS$/i.test(filter) || /TFB7/i.test(code)) return Math.max(waitMs, 7000);
+  return waitMs;
+}
 const dropX = Number(process.env.AMAZON_WS_DROP_X || 0.935);
 const dropY = Number(process.env.AMAZON_WS_DROP_Y || 0.195);
 const switchPs = path.join(root, "scripts", "switch-site-summary-station.ps1");
@@ -268,19 +289,20 @@ async function send(imageBase64, text, station) {
 }
 
 async function switchAndCapture(label, filter) {
+  const stationWait = waitForStation(label);
   const args = [
     "-Station", filter,
     "-Mode", "Dropdown",
-    "-WaitMs", String(waitMs),
+    "-WaitMs", String(stationWait),
     "-DropX", String(dropX),
     "-DropY", String(dropY),
     "-Background"
   ];
+  console.log(JSON.stringify({ station: label, filter, wait_ms: stationWait, background: true }));
   console.log(await ps(switchPs, args));
-  // Extra settle time — WorkSpaces sometimes flashes the SSO/redirect page after a switch.
-  await sleep(Math.max(900, Math.floor(waitMs / 2)));
+  // Switch script already waited after restoring focus. Quiet capture = no cursor steal.
   const out = path.join(state, `hq-${label}-${Date.now()}.png`);
-  const saved = await ps(capturePs, ["-OutFile", out, "-Prepare"]);
+  const saved = await ps(capturePs, ["-OutFile", out, "-Quiet"]);
   const png = saved || out;
   const bytes = await readFile(png);
   await writeFile(path.join(state, `last-${label}.png`), bytes);
