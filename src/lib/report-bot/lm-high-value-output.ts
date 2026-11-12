@@ -1,7 +1,7 @@
 import 'server-only';
 import {fetchLoadFlashBoard,fetchLoadFlashTracking,queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
 import {requireReportFreshness} from './lm-live-report';
-import {highValueCaption,highValueStatus,highValueSummary,pendingHighValue} from './lm-high-value';
+import {highValueCaption,highValueStatus,highValueStatusLabel,highValuePayment,highValueSummary,pendingHighValue} from './lm-high-value';
 import {tableReportSvg,reportPngBase64} from './lm-report-image';
 export async function highValueOutputs(codes:string[],day:string,slot:string,regional:boolean,threshold=5000,mentions:string[]=[]){
  const network=await fetchLoadFlashBoard(day,codes);
@@ -15,7 +15,7 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
  const stamp=new Date(asOf).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
  const title=`High value > ₹${threshold.toLocaleString('en-IN')} · ${regional?'Regional pending':codes.join(', ')} · ${stamp}`;
  const columns=regional?['Station','At station','Held','On road','Attempted','Check','Pending','Value ₹']:['Tracking ID','Value ₹','Payment','Status','Associate','EDD'];
- const values=regional?highValueSummary(rows):rows.map(r=>[...(codes.length>1?[r.stationCode]:[]),r.trackingId,r.shipmentValue!,r.paymentMethod||'—',highValueStatus(r.state),['Out on road','Attempted'].includes(highValueStatus(r.state))?(r.driverName||r.driverId||'Unmapped'):'—',r.edd||'—']);
+ const values=regional?highValueSummary(rows):rows.map(r=>[...(codes.length>1?[r.stationCode]:[]),r.trackingId,r.shipmentValue!,highValuePayment(r.paymentMethod),highValueStatusLabel(r.state),['Out on road','Attempted'].includes(highValueStatus(r.state))?(r.driverName||r.driverId||'Unmapped'):'—',r.edd||'—']);
  if(!regional&&codes.length>1)columns.unshift('Station');
  const caption=`*${title}*\n${mentions.map(n=>'@'+n).join(' ')}\n${highValueCaption(slot)}`.replace(/\n\n/g,'\n');
  const outputs=[];

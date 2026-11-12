@@ -27,3 +27,13 @@ export function highValueCaption(slot:string){
  if(slot<'18:00')return 'Move station-held shipments out on road today. Track the assigned DA through delivery. For attempted shipments, contact the customer and arrange a same-day reattempt where possible. Confirm any delivery restriction.';
  return 'Close today’s pending high-value deliveries. Contact customers for a same-day reattempt where possible. Record a specific reason and owner for anything still held or undelivered.';
 }
+
+export function highValuePayment(value:string|undefined){
+ const code=String(value||'').toUpperCase();return ['CASH','COD','PAY_ON_DELIVERY'].includes(code)?'COD':['PREPAY','PREPAID'].includes(code)?'Prepaid':value||'—';
+}
+export function highValueStatusLabel(state:string){
+ const status=highValueStatus(state);if(status!=='Held at station')return status;
+ if(state==='HOLD_FOR_REDELIVERY')return 'Held · HFR';
+ if(state==='HOLD_FOR_CUSTOMER_REQUEST')return 'Held · HCR';
+ return status;
+}
