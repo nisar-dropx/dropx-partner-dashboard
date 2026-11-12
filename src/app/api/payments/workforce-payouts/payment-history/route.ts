@@ -97,8 +97,11 @@ export async function GET(request: Request) {
       : supabaseAdmin.from("workforce_payout_payment_hold_events");
 
     const itemFields = "id,batch_id,reference_no,payment_version,instruction_amount,settled_amount,status,bank_response_status,bank_account_no_snapshot,ifsc_snapshot,response_debit_account_no,response_value_date,response_credit_account_no,response_ifsc,location_id_snapshot,location_code_snapshot,utr_cin,bank_processing_remarks,finalization_remarks,response_import_id,created_at,finalized_at";
-    const physicalItemsQuery = itemQuery
-        .select(audience === "workforce" ? `${itemFields},reversed_amount,reversed_at,reversal_reason` as const : itemFields)
+    // Parse each projection independently: a union select string is rejected by PostgREST's type parser.
+    const selectedItemsQuery = audience === "workforce"
+      ? itemQuery.select(`${itemFields},reversed_amount,reversed_at,reversal_reason` as const)
+      : itemQuery.select(itemFields);
+    const physicalItemsQuery = selectedItemsQuery
         .eq("company_id", companyId)
         .eq(subjectColumn, workforceId)
         .eq("location_id_snapshot", stationId)
