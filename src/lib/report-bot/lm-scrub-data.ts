@@ -13,7 +13,7 @@ export async function loadProgressScrub(company:string,location:string,code:stri
  const asOf=requireReportFreshness(activity.fetchedAt,day,5);
  const today=(items:{at:string}[])=>items.filter(i=>new Date(Date.parse(i.at)+330*60000).toISOString().slice(0,10)===day).length;
  const stationChecks=today(activity.inStation.invocations),roadChecks=today(activity.onRoad.invocations);
- if(stationChecks&&roadChecks)return {asOf,pending:false,rows:[]};
+ if(stationChecks&&roadChecks)return {asOf,complete:true,pending:false,rows:[]};
  const progress:ScrubProgress={eddClearedPct:null,roadCompletedPct:null,edd95Since:null};
  const board=(await fetchLoadFlashBoard(day,[code])).stations.find(s=>s.stationCode===code&&s.businessDate===day&&s.hasSnapshot);
  let verified=false;
@@ -32,5 +32,5 @@ export async function loadProgressScrub(company:string,location:string,code:stri
  }else await queueLoadFlashStations([code],5);
  // Missing progress never means zero pending. Only the 10 PM deadline can
  // trigger independently, after scrub completion itself was freshly checked.
- return {asOf,...progressScrubAlert(day,now,stationChecks,roadChecks,progress)};
+ return {asOf,complete:false,...progressScrubAlert(day,now,stationChecks,roadChecks,progress)};
 }

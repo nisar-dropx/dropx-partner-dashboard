@@ -1,3 +1,4 @@
+import {quietScrub} from './lm-scrub-quiet';
 import {highValueOutputs} from "./lm-high-value-output";
 import {dsrPaceTarget,liveDsrStyle,type DsrPacePoint} from "./lm-dsr-pace";
 import {randomUUID} from 'node:crypto';
@@ -267,17 +268,13 @@ async function ageingOutputs(route:Route,digest:AgeingDigest,scopeLabel:string,d
     return {bucket,count:cells.reduce((sum,cell)=>sum+cell.count,0),amount:cells.reduce((sum,cell)=>sum+cell.amount,0)};
   });
   const grand={count:totals.reduce((sum,row)=>sum+row.count,0),amount:totals.reduce((sum,row)=>sum+row.amount,0)};
-  const title=`Ageing Report · ${dateLabel} · ${scopeLabel} · ${asIst(digest.asOf)}`;
-  const summaryRows:[string,string|number][]=totals.flatMap(row=>[[`${ageingBucketLabel(row.bucket)} · TIDs`,row.count],[`${ageingBucketLabel(row.bucket)} · Value`,`₹${row.amount.toLocaleString("en-IN",{maximumFractionDigits:2})}`]]) as [string,string|number][];
-  summaryRows.push(["Total TIDs",grand.count],["Total value",`₹${grand.amount.toLocaleString("en-IN",{maximumFractionDigits:2})}`]);
+  const title=`Ageing · ${new Date(day+'T00:00:00+05:30').toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'numeric',month:'short'})} · ${new Date(digest.asOf).toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})} IST`;
+  const stationRows=digest.byStation.slice().sort((a,b)=>b.total.amount-a.total.amount||a.stationCode.localeCompare(b.stationCode)).map(row=>[row.stationCode,row.total.count,Math.round(row.total.amount*100)/100]);
+  stationRows.push(['Grand total',grand.count,Math.round(grand.amount*100)/100]);
+  const summaryRows:[string,string|number][]=digest.byStation.map(row=>[row.stationCode,`${row.total.count} TIDs · ₹${row.total.amount.toLocaleString('en-IN')}`]);
   const outputs:SendOutput[]=[];
   const missing=digest.missingStations.length?`Coverage pending: ${digest.missingStations.join(", ")}`:"";
-  if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:await photo(title,summaryRows,(label,value)=>{
-    if(label.startsWith("1 day")) return caution;
-    if(label.startsWith("2-3")) return {background:"#ffedd5",color:"#9a3412"};
-    if(label.startsWith("4-7")||label.startsWith("8-14")||label.startsWith("15+")) return positive;
-    return numeric(value)!>0?info:clear;
-  }),mime:"image/png",caption:[`*${title}*`,missing].filter(Boolean).join("\n")}});
+  if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:await reportPngBase64(await tableReportSvg(title,['Station','TIDs','Value ₹'],stationRows,[],()=>null)),mime:"image/png",caption:[`*${title}*`,missing].filter(Boolean).join("\n")}});
   if(formats.includes("text")) outputs.push({key:"text_001",body:{text:[`*${title}*`,...summaryRows.map(([label,value])=>`${label}: ${value}`),missing].filter(Boolean).join("\n")}});
   if(formats.includes("excel")) {
     const dayRows=digest.byStation.map(row=>({Station:row.stationCode,...Object.fromEntries(digest.dayBuckets.flatMap(bucket=>[[`${ageingBucketLabel(bucket)} TIDs`,row.byDay[bucket]?.count||0],[`${ageingBucketLabel(bucket)} value`,row.byDay[bucket]?.amount||0]])),"Total TIDs":row.total.count,"Total value":row.total.amount}));
@@ -436,6 +433,17 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             sentSnapshot={rows,asOf:snapshot.asOf};
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
           }
+        } else if(route.report==='scrub') {
+          for(const source of sources){
+            const report=await codRuntime.memo(`quiet-scrub:${route.group_id}:${source.id}`,()=>quietScrub(company,source.id,source.report_code||source.station_code,day,route.group_id));
+            if(!report.pending)continue;
+            const mentions=await resolveRouteMentionNumbers(company,[source],route,day);
+            const header=`${source.station_code} · Scrub · ${asIst(report.asOf)}`;
+            const caption=[`*${header}*`,mentions.map(n=>'@'+n).join(' '),report.escalation?'Escalation: scrub is still pending after the first alert. Please intervene.':'','Complete the listed scrub stage immediately. We will recheck quietly and stop once completed.'].filter(Boolean).join('\n');
+            const rendered=await standardOutputs({...route,mentions},header,report.rows,caption,day);
+            outputs.push(...rendered.map(output=>({...output,key:source.id+'_'+output.key,codAck:report.ack})));
+          }
+          detail=`Scrub · ${sources.length} stations checked · ${outputs.length} updates`;
         } else if(route.report==='high_value') {
           const mentions=await resolveRouteMentionNumbers(company,sources,route,day);
           const high=await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||3000,mentions);

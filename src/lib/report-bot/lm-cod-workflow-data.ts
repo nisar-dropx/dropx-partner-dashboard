@@ -15,7 +15,7 @@ import {codCacheGet,codCachePut,loadCodJourneys} from './lm-cod-journeys';
 
 type Source={id:string;station_code:string;report_code?:string};
 export type CodConfig={cod_route_service_url?:string|null;cod_reconciliation_allowance_minutes?:number;cod_shortfalls_since?:string;cod_shortfall_lead_minutes?:number};
-export type CodWorkflowResult={sections:CodSection[];slips:Array<{key:string;code:string;at:number;amount:number;returned:boolean}>;acks:string[];shortAcks:string[];asOf:string;bankRows:[string,string|number][]};
+export type CodWorkflowResult={cleared:string[];bankIssue?:{ids:string[];amount:number};sections:CodSection[];slips:Array<{key:string;code:string;at:number;amount:number;returned:boolean}>;acks:string[];shortAcks:string[];asOf:string;bankRows:[string,string|number][]};
 const istClock=(at:number)=>new Date(at+330*60000).toISOString().slice(11,16);
 const fresh=(stamp:string,now:number)=>Number.isFinite(Date.parse(stamp))&&now-Date.parse(stamp)<=15*60000&&Date.parse(stamp)<=now+60000;
 export async function loadCodWorkflow(company:string,source:Source,day:string,slot:string,config:CodConfig,runtime:CodRuntime):Promise<CodWorkflowResult>{
@@ -30,7 +30,7 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
   if(s.stationCode!==code||s.date!==day)throw new Error('COD source station/date mismatch');
   const r=s.reconciliation,p=s.prepareDeposit,m=s.remittances;
   if(r.state!=='ok'||!r.data?.complete||p.state!=='ok'||!p.data||m.state!=='ok'||!m.data?.complete||![r.checkedAt,p.checkedAt,m.checkedAt].every(stamp=>fresh(stamp,now)))throw new Error('Fresh complete COD evidence unavailable; station not alerted');
-  const result:CodWorkflowResult={sections:[],slips:[],acks:[],shortAcks:[],asOf:s.fetchedAt,bankRows:[]};
+  const result:CodWorkflowResult={cleared:[],sections:[],slips:[],acks:[],shortAcks:[],asOf:s.fetchedAt,bankRows:[]};
   const submitted=m.data.rows.filter(row=>{const at=submittedTime(row);return at!==null&&codDay(at)===day&&at<=now;});
   const observed=observedBankerWindow(m.data.rows,new Date(now));
   const policy=pickupPolicy(observed?{...settings.data,pickup_window_start:observed.start,pickup_window_end:observed.end}:settings.data);
@@ -39,6 +39,9 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
   const evening=scheduled&&slot>='19:00';
   const closing=evening&&slot>='22:00';
   const pendingDrivers=r.data.drivers.filter(d=>d.pendingAmount>0);
+  if(!pendingDrivers.length)result.cleared.push('recon');
+  if(p.data.actualAmount<=0)result.cleared.push('prepare');
+  if(policy&&!dueBankRows(m.data.rows,policy,now).length||exceptions.some(e=>e.kind==='Banker Not Reported'))result.cleared.push('bank');
   // Route enrichment is only for cash-pending DAs, shared across stages and capped per run.
   let journeys=new Map<string,Journey>();
   if(pendingDrivers.length&&(evening||policy&&istClock(now)>=policy.start&&istClock(now)<=policy.end)){
@@ -59,7 +62,7 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
     if(!closing&&!prior&&(!evening||!overdue))return [];
     return [[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km${approximateJourney(j)?' direct':''} · ~${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?(approximateJourney(j)?'Est. return check':'Overdue'):j?.closed?'Closing check':'On road / unverified']];
    });
-   if(rows.length)result.sections.push({key:'recon',title:evening?'DA reconciliation':'Previous-day DA reconciliation',columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows,owner:'team',tone:'attention',action:!evening?'Previous-day COD reconciliation is still pending. Collect and reconcile the amounts shown now. Reminders continue until cleared.':closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
+   if(rows.length)result.sections.push({issue:{ids:rows.map(row=>String(row[0])),amount:rows.reduce((n,row)=>n+Number(String(row[evening?5:2]).replace(/[^0-9.]/g,'')),0)},key:'recon',title:evening?'DA reconciliation':'Previous-day DA reconciliation',columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows,owner:'team',tone:'attention',action:!evening?'Previous-day COD reconciliation is still pending. Collect and reconcile the amounts shown now.':closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
   }
   // Preparing current-day cash at closure is independent from the next-day bank handover.
   if(scheduled&&(evening||policy&&istClock(now)>=policy.start&&istClock(now)<=policy.end)){
@@ -76,7 +79,7 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
     if(previous.error)throw new Error(previous.error.message);
     carryover=prepareCarryover(previous.data?.payload as CashObservation|undefined,p.data.actualAmount,m.data.rows,day);
    }
-   if(shouldAlertPreparation(trigger,slot,carryover))result.sections.push({key:'prepare',title:carryover?'Prepare Deposit · carried from yesterday':'Prepare Deposit pending',columns:['Reconciled cash','Pickup cycle'],rows:[[codMoney(p.data.actualAmount),policy?.rule||'Not configured']],owner:'team',tone:'attention',action:prepareAction(p.data.actualAmount,trigger==='pickup',carryover)});
+   if(shouldAlertPreparation(trigger,slot,carryover))result.sections.push({issue:{ids:['prepare'],amount:p.data.actualAmount},key:'prepare',title:carryover?'Prepare Deposit · carried from yesterday':'Prepare Deposit pending',columns:['Reconciled cash','Pickup cycle'],rows:[[codMoney(p.data.actualAmount),policy?.rule||'Not configured']],owner:'team',tone:'attention',action:prepareAction(p.data.actualAmount,trigger==='pickup',carryover)});
   }
   // Review each actual submission once. A snapshot AFTER pickup cannot prove what was available BEFORE.
   const reviewed=new Set<string>();
@@ -100,21 +103,26 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
   }
   if(scheduled&&policy&&observed&&!nonPickup&&!exceptions.some(e=>e.kind==='Banker Not Reported')&&now>=Date.parse(`${day}T${observed.end}:00+05:30`)+30*60000){
    const due=dueBankRows(m.data.rows,policy,now);
+   result.bankIssue={ids:due.map(x=>x.row.id),amount:due.reduce((n,x)=>n+x.row.actualAmount,0)};
    if(due.length)result.bankRows=[['CMS usually reports',`${observed.start}–${observed.end} IST`],['Due remittances',`${due.length} · ${codMoney(due.reduce((n,v)=>n+v.row.actualAmount,0))}`],...(submitted.length?[['Submitted today',codClock(Math.max(...submitted.map(row=>submittedTime(row)!)))]]:[]) as [string,string|number][]];
   }
   // Match proof to every submitted remittance, not "some slip exists at station".
+  let missingProofs=0,proofsChecked=!submitted.length;
   if(submitted.length){
    const pending=(await loadCodPendingReport(db,company,[source.id],false,day))[0];
+   if(pending)proofsChecked=true;
    if(pending)for(const remittance of submitted){
     const at=submittedTime(remittance)!,elapsed=(now-at)/60000;if(elapsed<30)continue;
     const reference=remittance.code?.trim().toUpperCase();if(!reference)continue;
     const proofs=pending.entries.filter(e=>String(e.remittance_code||e.reference_no||'').trim().toUpperCase()===reference);
     if(proofs.some(e=>hasSlipProof(e)&&!e.returned_at))continue;
+    missingProofs++;
     const stage=Math.floor((elapsed-30)/120),key=`slip:${remittance.id}:${stage}`;
     if(await codCacheGet(company,source.id,day,'sent:'+key))continue;
     result.slips.push({key,code:reference,at,amount:remittance.actualAmount,returned:proofs.some(e=>!!e.returned_at)});
    }
   }
+  if(proofsChecked&&!missingProofs)result.cleared.push('slip');
   const shorts=await trackCodShortfalls(company,source.id,m.data.rows,m.checkedAt,config.cod_shortfalls_since||day,day,slot,observed?.start||policy?.start||null,nonPickup,config.cod_shortfall_lead_minutes??60);
   if(shorts.section){result.sections.push(shorts.section);result.shortAcks=shorts.acks;}
   return result;

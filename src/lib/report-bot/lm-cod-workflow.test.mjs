@@ -48,7 +48,7 @@ test('morning preparation is not automatically called yesterday cash',()=>{
  assert.equal(prepareCarryover(previous,8523.42,[{...row('new','CREATED','23:30')}],'2026-11-12'),false);
  assert.match(prepareAction(8523.42,true,true),/Yesterday/);
  assert.doesNotMatch(prepareAction(8523.42,true,false),/Yesterday|wait for|30 minutes|one hour/);
- assert.match(prepareAction(8523.42,true,false),/Click Prepare Deposit now.*Reminders continue until completed/);
+ assert.match(prepareAction(8523.42,true,false),/Click Prepare Deposit now/);
 });
 
 test('morning follow-up excludes current-day collections and unproven preparation',()=>{

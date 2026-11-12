@@ -9,7 +9,7 @@ export const cashOpen=(r:CodRemittance)=>['CREATED','PENDING_SUBMISSION'].includ
 export const submittedTime=(r:CodRemittance)=>r.status.toUpperCase()==='SUBMITTED'?(r.submittedAt||r.updatedAt||null):null;
 export type Journey={driverId:string;lastStopAt:number|null;distanceKm:number|null;travelMinutes:number|null;returnAt:number|null;dueAt:number|null;closed:boolean;basis:string};
 export type CashObservation={at:number;prepare:number;remittances:CodRemittance[];drivers:Array<{id:string;name:string;amount:number;dueAt:number|null;lastStopAt:number|null;closed:boolean;packages?:Array<{id:string;amount:number}>}>};
-export type CodSection={key:string;title:string;columns:string[];rows:Array<Array<string|number>>;action:string;owner:'team'|'tl';tone:'attention'|'waiting'};
+export type CodSection={issue?:{ids:string[];amount:number};key:string;title:string;columns:string[];rows:Array<Array<string|number>>;action:string;owner:'team'|'tl';tone:'attention'|'waiting'};
 
 /** Submission time is only a pickup proxy. Late edits cannot prove physical handover. */
 export function pickupReview(before:CashObservation|undefined,after:CashObservation,pickupAt:number) {
@@ -91,7 +91,7 @@ export function prepareCarryover(before:CashObservation|undefined,amount:number,
  return !rows.some(row=>(row.createdAt==null||row.createdAt>before.at)||((submittedTime(row)||0)>before.at));
 }
 export function prepareAction(amount:number,pickup:boolean,carryover:boolean) {
- return `${carryover?"Yesterday’s reconciled cash is still awaiting preparation. ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''} Reminders continue until completed.`;
+ return `${carryover?"Yesterday’s reconciled cash is still awaiting preparation. ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''}`;
 }
 
 export function priorDayCash(packages:Array<{collectedAt?:number|null;amount:number}>,day:string) {

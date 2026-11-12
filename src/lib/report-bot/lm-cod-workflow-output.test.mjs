@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+import * as quiet from './lm-cod-quiet.ts';
 import * as bank from './lm-bank-message.ts';
 const centralCt='919000000004',tl='919000000001',clm='919000000002';
 function fixture(){
- const query={select(){return this},eq(){return this},gte(){return this},ilike(){return this},order(){return this},limit:async()=>({data:[],error:null})};
+ const query={in:async()=>({data:[],error:null}),select(){return this},eq(){return this},gte(){return this},ilike(){return this},order(){return this},limit:async()=>({data:[],error:null})};
  const deps={
- './lm-cod-workflow-data':{loadCodWorkflow:async()=>({sections:[{key:'prepare',title:'Prepare Deposit pending',columns:['Cash'],rows:[['₹8,523.42']],owner:'team',action:'Click Prepare Deposit now. Reminders continue until completed.'}],slips:[{key:'s',code:'AC1',amount:500,at:1}],bankRows:[],acks:[],shortAcks:[]})},
- './lm-cod-runtime':{},'./lm-cod-journeys':{},
+ './lm-cod-workflow-data':{loadCodWorkflow:async()=>({cleared:[],sections:[{key:'prepare',title:'Prepare Deposit pending',columns:['Cash'],rows:[['₹8,523.42']],owner:'team',action:'Click Prepare Deposit now. Reminders continue until completed.'}],slips:[{key:'s',code:'AC1',amount:500,at:1}],bankRows:[],acks:[],shortAcks:[]})},
+ './lm-cod-quiet':quiet,'./lm-cod-runtime':{},'./lm-cod-journeys':{},
  './lm-cod-workflow':{codMoney:String,codClock:String},
  './lm-dispatch-mentions':{resolveBankReminderMentions:async(_c,_s,route)=>{assert.deepEqual(route.mentions,[centralCt]);return {tl:[tl],ct:route.mentions,cluster:[clm],aom:[]}},resolveRouteMentionNumbers:async()=>[]},
  './lm-bank-message':bank,'./lm-cod-alerts':{},'./lm-report-image':{codSectionsPng:async()=>'image'},'./settings':{reportBotDb:()=>({from:()=>query})}
