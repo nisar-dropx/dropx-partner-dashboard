@@ -179,13 +179,13 @@ const siteSummaryUrl = process.env.AMAZON_SITE_SUMMARY_URL
   || "https://eu.store-management.f3.amazon.dev/siteSummary";
 const SWITCH_SCRIPT = path.join(__dirname, "switch-site-summary-station.ps1");
 const KEEPALIVE_SCRIPT = path.join(__dirname, "keepalive-workspaces-window.ps1");
-/** Idle keep-alive. Default OFF when cycling stations (each switch already wakes WorkSpaces). Enable only on a dedicated laptop if needed. */
+/** Keep-alive for the remote WorkSpaces Windows VM (cloud idle lock), not the local PC lock. */
 const keepAliveSeconds = Math.max(
   0,
-  Number(process.env.AMAZON_WS_KEEPALIVE_SECONDS ?? "300")
+  Number(process.env.AMAZON_WS_KEEPALIVE_SECONDS ?? "180")
 );
 const keepAliveEnabled = keepAliveSeconds > 0
-  && !["0", "false", "no", "off"].includes(String(process.env.AMAZON_WS_KEEPALIVE ?? "0").trim().toLowerCase());
+  && !["0", "false", "no", "off"].includes(String(process.env.AMAZON_WS_KEEPALIVE ?? "1").trim().toLowerCase());
 let lastKeepAliveAt = 0;
 let lastScreenLockAlertAt = 0;
 const recentImageHashes = new Set();
