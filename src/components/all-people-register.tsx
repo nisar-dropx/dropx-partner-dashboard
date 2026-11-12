@@ -5,13 +5,14 @@ import { ReportTable } from "@/components/report-table";
 
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Download, EllipsisVertical, Eye, Pencil, Save, Search, ShieldCheck, X } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { allPeopleExportColumns, type AllPeopleExportKey, type AllPeopleExportValues } from "@/lib/all-people-export";
 import { buildVerificationViewSummary, isExpiredPeopleDate, peopleDateKey, vehicleExpiryFieldKeys, type AllPeopleVerificationSummary } from "@/lib/all-people-verification-view";
-import { saveAllPeopleSheetRow } from "@/app/people/all/actions";
+import { recordPeoplePanAadhaarOverride, saveAllPeopleSheetRow } from "@/app/people/all/actions";
+import overrideStyles from "./people-pan-aadhaar-override.module.css";
 
 export type AllPeopleRow = {
   id: string;
@@ -38,7 +39,63 @@ export type AllPeopleRow = {
   exportValues: AllPeopleExportValues;
   verificationNotes?: Partial<Record<AllPeopleExportKey, string>>;
   verificationSummaries?: Partial<Record<AllPeopleExportKey, AllPeopleVerificationSummary>>;
+  panAadhaarOverride?: { linked: boolean; canEdit: boolean };
 };
+
+function PanAadhaarOverride({ row }: { row: AllPeopleRow }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const override = row.panAadhaarOverride;
+  if (!override) return null;
+  const actionLabel = override.linked ? "Remove manual override" : "Mark as linked manually";
+
+  async function save(linked: boolean) {
+    if (saving || !row.version) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await recordPeoplePanAadhaarOverride({
+        categoryCode: row.categoryCode, id: row.id, expectedUpdatedAt: row.version, linked, reason
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setOpen(false);
+      setReason("");
+      router.refresh();
+    } catch {
+      setError("Could not save the PAN–Aadhaar override. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={overrideStyles.override}>
+      {override.linked ? <small className="sheet-view-verification-note success">Linked (manual override)</small> : null}
+      {override.canEdit && !open ? (
+        <button type="button" className="button secondary" onClick={() => setOpen(true)}>{actionLabel}</button>
+      ) : null}
+      {override.canEdit && open ? (
+        <div className={overrideStyles.form}>
+          <label>
+            Reason for {override.linked ? "removing" : "recording"} the override
+            <textarea className="sheet-cell-input" value={reason} maxLength={500} disabled={saving} onChange={(event) => setReason(event.target.value)} />
+          </label>
+          <button type="button" className="button" disabled={saving || reason.trim().length < 10} onClick={() => void save(!override.linked)}>
+            {saving ? "Saving…" : actionLabel}
+          </button>
+          <button type="button" className="button secondary" disabled={saving} onClick={() => { setOpen(false); setReason(""); setError(""); }}>Cancel</button>
+          {error ? <small role="alert">{error}</small> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type PageSize = 20 | 50 | 100 | 500 | "all";
 
@@ -1050,7 +1107,8 @@ export function AllPeopleRegister({ rows, editOptions = {}, today, registerPath 
                           )
                         ) : <span className={`sheet-cell-value ${expiredVehicleDate ? "sheet-expired-date" : ""}`.trim()}>{displayValue || "-"}{expiredVehicleDate ? <span className="sheet-screen-reader-only"> Expired.</span> : null}</span>}
                         {editNote ? <small className="sheet-verification-note">{editNote}</small> : null}
-                        {viewSummary ? <small className={`sheet-view-verification-note ${viewSummary.tone}`}>{viewSummary.text}{viewSummaryStatus ? <span className="sheet-screen-reader-only">. {viewSummaryStatus}.</span> : null}</small> : null}
+                        {column.key === "aadhaarNumber" && !sheetEditMode ? <PanAadhaarOverride row={row} /> : null}
+                        {viewSummary ? <small className={`sheet-view-verification-note ${viewSummary.tone}`}>{column.key === "aadhaarNumber" && row.panAadhaarOverride?.linked ? "Provider: " : ""}{viewSummary.text}{viewSummaryStatus ? <span className="sheet-screen-reader-only">. {viewSummaryStatus}.</span> : null}</small> : null}
                       </td>
                     );
                   })}

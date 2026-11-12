@@ -13,6 +13,7 @@ import { matchNames } from "@/lib/name-match";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { peoplePanAadhaarPairHash } from "@/lib/people-pan-aadhaar-pair";
 import { redirect } from "next/navigation";
 
 const sources = [
@@ -407,6 +408,29 @@ async function loadPeople(
       row.verificationSummaries = summariesByRow.get(key);
     }
   }
+  let overrideError: string | null = null;
+  const supportedCategories = new Set(["employees", "workforce", "contractors", "vendors", "workers"]);
+  const overrideRows = allRows.filter((row) => supportedCategories.has(row.categoryCode));
+  for (let offset = 0; offset < overrideRows.length; offset += 100) {
+    const batch = overrideRows.slice(offset, offset + 100);
+    const result = await supabaseAdmin.from("people_pan_aadhaar_overrides")
+      .select("profile_id, category_code, pair_hash, linked")
+      .eq("company_id", companyId).in("profile_id", batch.map((row) => row.id));
+    if (result.error) {
+      overrideError = "PAN–Aadhaar overrides could not be loaded.";
+      break;
+    }
+    const overrides = new Map((result.data ?? []).map((entry) => [`${entry.category_code}:${entry.profile_id}`, entry]));
+    for (const row of batch) {
+      const hash = peoplePanAadhaarPairHash(row.exportValues.panNumber, row.exportValues.aadhaarNumber);
+      if (!hash) continue;
+      const override = overrides.get(`${row.categoryCode}:${row.id}`);
+      row.panAadhaarOverride = {
+        linked: override?.linked === true && override.pair_hash === hash,
+        canEdit: row.canEdit && !authorization.readOnly && Boolean(row.version)
+      };
+    }
+  }
   return {
     categories,
     rows: allRows,
@@ -421,7 +445,7 @@ async function loadPeople(
           categoryCodes: designation.onboarding_categories ?? []
         }))
     },
-    error: categoryResult.error?.message ?? designationResult.error?.message ?? locationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? verificationError ?? null
+    error: categoryResult.error?.message ?? designationResult.error?.message ?? locationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? verificationError ?? overrideError
   };
 }
 

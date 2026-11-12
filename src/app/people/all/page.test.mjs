@@ -28,7 +28,7 @@ test("verification notes are loaded in bounded batches and query errors remain v
   assert.match(page, /for \(let offset = 0; offset < accountIds\.length; offset \+= 100\)/);
   assert.match(page, /accountIds\.slice\(offset, offset \+ 100\)/);
   assert.match(page, /!isMissingVerificationTable\(verificationResult\.error\)/);
-  assert.match(page, /workforceResult\.error \?\? verificationError \?\? null/);
+  assert.match(page, /workforceResult\.error \?\? verificationError \?\? overrideError/);
 });
 
 test("view verification summaries retain structured provider details separately from edit messages", () => {

@@ -1,0 +1,19 @@
+.override {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+.override:empty { display: none; }
+.override :global(.button) {
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
+  white-space: normal;
+}
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.form label { width: 100%; }
+.form textarea { min-height: 50px; resize: vertical; }

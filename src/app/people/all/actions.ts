@@ -13,6 +13,7 @@ import type { AllPeopleExportKey } from "@/lib/all-people-export";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { canonicalWorkforceStatusEditPatch } from "@/lib/canonical-workforce-status";
 import { saveProfileVerification } from "@/lib/profile-verifications";
+import { peoplePanAadhaarPairHash } from "@/lib/people-pan-aadhaar-pair";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { WorkforceProfileType } from "@/lib/workforce-profiles";
 
@@ -95,6 +96,57 @@ async function resolveSource(companyId: string, rawCode: string): Promise<SheetS
   const category = await supabaseAdmin.from("workforce_categories").select("code")
     .eq("company_id", companyId).eq("code", categoryCode).eq("is_active", true).maybeSingle();
   return category.error || !category.data ? null : source;
+}
+
+export async function recordPeoplePanAadhaarOverride({ categoryCode, id, expectedUpdatedAt, linked, reason }: {
+  categoryCode: string; id: string; expectedUpdatedAt: string; linked: boolean; reason: string;
+}) {
+  const authorization = await getAuthorization();
+  if (!authorization) return failure("Your session has expired.", "UNAUTHORIZED");
+  if (!supabaseAdmin) return failure("Profile storage is not configured.", "STORAGE_UNAVAILABLE");
+  if (authorization.readOnly || currentAccessSurface() !== "dashboard" || !hasPermission(authorization, "people_all", "access")) {
+    return failure("You do not have permission to override PAN–Aadhaar linking.", "FORBIDDEN");
+  }
+  if (typeof categoryCode !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) {
+    return failure("Profile identifier is invalid.");
+  }
+  const note = typeof reason === "string" ? reason.trim() : "";
+  if (typeof linked !== "boolean" || note.length < 10 || note.length > 500) {
+    return failure("Enter a reason between 10 and 500 characters.");
+  }
+  const companyId = requireCompanyId(authorization);
+  const source = await resolveSource(companyId, categoryCode);
+  if (!source || !verificationProfileTypes[source.categoryCode] || !hasPermission(authorization, source.pageCode, "edit")) {
+    return failure("You do not have permission to edit this profile.", "FORBIDDEN");
+  }
+  const designationColumn = source.designationStorage === "id" ? "designation_id" : "designation";
+  const current = await supabaseAdmin.from(source.table)
+    .select(`location_id, updated_at, pan_number, aadhaar_number, ${designationColumn}`)
+    .eq("company_id", companyId).eq("id", id).maybeSingle();
+  if (current.error || !current.data) return failure("Profile could not be loaded.", "NOT_FOUND");
+  const profile = current.data as unknown as Record<string, unknown>;
+  if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(String(profile.location_id ?? ""))) {
+    return failure("You do not have access to this profile location.", "FORBIDDEN");
+  }
+  if (!sameTimestamp(profile.updated_at, expectedUpdatedAt)) {
+    return failure("The profile changed. Refresh it before recording the override.", "CONFLICT");
+  }
+  const designations = await supabaseAdmin.from("designations").select("id, code, name, onboarding_categories, portal_permissions")
+    .eq("company_id", companyId).eq("is_active", true);
+  if (designations.error) return failure("Profile permissions could not be verified.");
+  const designation = findDesignation((designations.data ?? []) as DesignationRow[], profile[designationColumn]);
+  if (!canAccessDesignationPortal(designation, "dashboard", "edit", { isOwner: isCompanyOwner(authorization) })) {
+    return failure("You do not have permission to edit this profile designation.", "FORBIDDEN");
+  }
+  const pairHash = peoplePanAadhaarPairHash(profile.pan_number, profile.aadhaar_number);
+  if (!pairHash) return failure("A valid saved PAN and Aadhaar are required.");
+  const result = await supabaseAdmin.from("people_pan_aadhaar_override_events").insert({
+    company_id: companyId, category_code: source.categoryCode, profile_id: id,
+    pair_hash: pairHash, linked, reason: note, recorded_by: authorization.userId
+  });
+  if (result.error) return failure("Could not save the PAN–Aadhaar override.");
+  revalidatePath("/people/all");
+  return { ok: true as const };
 }
 
 export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expectedUpdatedAt }: {
