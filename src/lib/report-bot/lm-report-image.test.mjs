@@ -72,3 +72,11 @@ test('report types have distinct identities while warning colours remain semanti
  const palettes=['DSR','C-return','Ageing','Scrub','COD','DOT'].map(title=>reportPalette(title).header);
  assert.equal(new Set(palettes).size,6);
 });
+
+
+test('stock data bars compare stations without scaling against grand totals or colouring missing values', async()=>{
+ const result=await tableReportSvg('DSR',['Station','Physical at station','EDD at station'],[['A',100,50],['B',50,'—'],['C',0,0],['Grand Total',150,50]],[],()=>null);
+ assert.equal((result.match(/data-stock-bar="true"/g)||[]).length,3);
+ assert.ok(result.includes('#db2777'));
+ assert.ok(result.includes('#d97706'));
+});

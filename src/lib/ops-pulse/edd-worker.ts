@@ -1467,7 +1467,7 @@ export async function fetchScrubNetwork(stations: string[], options: { refresh?:
 }
 
 /** Selected refreshes persist in the worker queue and survive browser closure. */
-export async function queueLoadFlashStations(stations: string[], maxAgeMinutes?: 5) {
+export async function queueLoadFlashStations(stations: string[], maxAgeMinutes?: 1 | 5) {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) throw new EddWorkerError('EDD worker is not configured.');
   const response = await fetch(`${baseUrl}/api/admin/executive/edd/load-flash/network/refresh-selected`, {

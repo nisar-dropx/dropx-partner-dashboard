@@ -382,7 +382,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
   for(const route of warming)regions.set(JSON.stringify([route.scope_type,route.source_location_ids,route.source_region_codes,route.source_model_codes]),route);
   await Promise.allSettled([...regions.values()].map(async route=>{
     const sources=await routeSources(route,company);
-    await queueLoadFlashStations(sources.map(s=>s.station_code),5);
+    await queueLoadFlashStations(sources.map(s=>s.station_code),1);
   }));
   const jobs = activeRoutes.flatMap(route=>route.times.filter(slot=>
     dispatchSlotDue(day,slot,route.times,route.report,+now)&&Date.parse(route.updated_at)<=Date.parse(day+"T"+slot+":00+05:30")

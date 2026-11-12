@@ -122,6 +122,8 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
   // Keep all configured stations and the actual total, never truncate a report.
   const header = columns.map((label,index)=>rect(left[index],titleHeight,widths[index],headerHeight,palette.soft)+
     headerLines(label).map((line,n,lines)=>text(line,{x:left[index]+(index?widths[index]/2:8),y:titleHeight+(lines.length===1?24:14+n*14),size:compact?12:13,maxWidth:widths[index]-12,anchor:index?"middle":"start",bold:true})).join('')).join('');
+  const stockColumns = columns.map(column => /^(physical at station|EDD at station|at station)$/i.test(column));
+  const stockMaxima = columns.map((_, index) => Math.max(0, ...rows.filter(row => !/^grand total$/i.test(String(row[0]))).map(row => Number(row[index]) || 0)));
   const body = rows.map((row, rowIndex) => {
     const total = /^grand total$/i.test(String(row[0]));
     return columns.map((column, columnIndex) => {
@@ -131,6 +133,8 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
       const style = (!total || compact) && percentageColumns.includes(column) ? percentageStyle(value)
         : compact && !total ? reportMetricStyle(column, value, denominator) : null;
       return rect(left[columnIndex], y, widths[columnIndex], rowHeight, style?.background || (total ? palette.soft : rowIndex % 2 ? palette.stripe : "#fff")) +
+        (compact && !total && stockColumns[columnIndex] && Number(value) > 0 && stockMaxima[columnIndex] > 0
+          ? `<g data-stock-bar="true">${rect(left[columnIndex]+3, y+rowHeight-4, (widths[columnIndex]-6)*Number(value)/stockMaxima[columnIndex], 3, /physical/i.test(column) ? "#db2777" : "#d97706")}</g>` : "") +
         text(value, { x: left[columnIndex] + (columnIndex ? widths[columnIndex] / 2 : 10), y: y + 18, size: 13, maxWidth: widths[columnIndex] - 16, anchor: columnIndex ? "middle" : "start", color: style?.color, bold: total || !!style });
     }).join("");
   }).join("");
