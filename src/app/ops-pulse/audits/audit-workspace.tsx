@@ -394,25 +394,38 @@ function Schedule({
         <div className={styles.inputLabel} hidden={!!booked}>
           Assigned auditor
           <SearchableSelect
-            key={stationId}
+            key={`${stationId}:${workspace.anyStation}`}
             name="assigned_to"
             required={!booked}
             defaultValue={
               workspace.assignees.some(
-                (p) => p.id === viewerId && p.stationIds.includes(stationId),
+                (p) =>
+                  p.id === viewerId &&
+                  (workspace.anyStation || p.stationIds.includes(stationId)),
               )
                 ? viewerId
                 : ""
             }
             placeholder={stationId ? "Search auditor" : "Select station first"}
             disabled={!stationId}
-            maxOptions={100}
+            maxOptions={200}
             options={workspace.assignees
-              .filter((p) => p.stationIds.includes(stationId))
-              .map((p) => ({ value: p.id, label: p.name, helper: p.role }))}
+              .filter(
+                (p) =>
+                  workspace.anyStation || p.stationIds.includes(stationId),
+              )
+              .map((p) => ({
+                value: p.id,
+                label: p.name,
+                helper: p.stationIds.includes(stationId)
+                  ? p.role
+                  : `${p.role} · another station’s team`,
+              }))}
           />
           <small>
-            Only active users with audit access to this station are listed.
+            {workspace.anyStation
+              ? "Any audit manager can be assigned; another station’s team is marked cross-station."
+              : "Only active users with audit access to this station are listed."}
           </small>
         </div>
         <label className={styles.inputLabel}>
@@ -540,15 +553,16 @@ export function AuditWorkspace({
         "Unassigned";
   const auditedBy = new Set(workspace.audits.map(auditAssigneeKey));
   const viewer = workspace.assignees.find((p) => p.id === viewerId);
-  // Seniors and owners also hold access to these stations; list them only when
-  // they actually audit here, so a manager sees their own team.
+  // Cross-audit managers see every assignable auditor. Other managers see their
+  // own team (narrower or equal station scope), plus anyone already auditing.
   const listedAuditors = workspace.assignees.filter(
     (p) =>
       p.id === viewerId ||
       auditedBy.has(p.id) ||
       (!p.ownerOnly &&
         Boolean(viewer) &&
-        (viewer!.scopeSize === null ||
+        (workspace.anyStation ||
+          viewer!.scopeSize === null ||
           (p.scopeSize !== null && p.scopeSize <= viewer!.scopeSize))),
   );
   const auditorOptions: Choice[] = [

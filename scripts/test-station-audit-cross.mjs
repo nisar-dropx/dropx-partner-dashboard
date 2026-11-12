@@ -11,7 +11,7 @@ const types=[{id:'physical',company_id:'company',code:'physical_station',name:'P
 const stations=['A','B'].map(id=>({id,company_id:'company',station_code:id,station_name:`Station ${id}`,is_active:true,hide_from_location_list:false,is_ho:false,location_model_id:null}));
 const settings={company_id:'company',scheduler_role_ids:['manager'],responder_role_ids:['station'],excluded_location_model_ids:[],excluded_location_ids:[],exclude_head_office:true,delete_user_ids:[],cross_audit_role_ids:['head']};
 const tables={ops_audit_types:types,ops_audit_checklist_sections:[],ops_audit_checklist_items:[],ops_audit_reference_options:[],ops_audit_programme_settings:[settings],stations,ops_station_audits:[],ops_station_audit_events:[],ops_station_audit_requests:[],
- profiles:[{id:'ua',company_id:'company',reports_to_user_id:'um',is_active:true},{id:'ux',company_id:'company',reports_to_user_id:'someone-else',is_active:true}]};
+ profiles:[{id:'ua',company_id:'company',reports_to_user_id:'um',is_active:true},{id:'um',company_id:'company',reports_to_user_id:'ul2',is_active:true},{id:'ul2',company_id:'company',reports_to_user_id:null,is_active:true},{id:'ux',company_id:'company',reports_to_user_id:'someone-else',is_active:true}]};
 let seq=0, insertError=null, rpcError=null; const rpcCalls=[];
 const decorate=(name,row)=>name==='ops_station_audits'?{...row,stations:stations.find(s=>s.id===row.location_id),ops_audit_types:types.find(t=>t.id===row.audit_type_id)}:name==='ops_station_audit_requests'?{...row,stations:stations.find(s=>s.id===row.location_id)}:row;
 const db={from(name){const filters=[];let op='select',payload=null,single=false;const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},neq(k,v){filters.push(r=>r[k]!==v);return q},is(k,v){filters.push(r=>(r[k]??null)===v);return q},in(k,v){filters.push(r=>v.includes(r[k]));return q},not(){return q},or(){return q},gte(){return q},lte(){return q},order(){return q},limit(){return q},range(){return q},maybeSingle(){single=true;return q},single(){single=true;return q},insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},
@@ -21,11 +21,11 @@ const db={from(name){const filters=[];let op='select',payload=null,single=false;
   return Promise.resolve({data:single?(rows[0]?decorate(name,rows[0]):null):rows.map(r=>decorate(name,r)),error:null}).then(resolve)}};return q},
  rpc(name,args){rpcCalls.push({name,args});return Promise.resolve({data:null,error:name==='change_station_audit'?rpcError:null})},storage:{from(){return{}}}};
 // Auditors and the stations each one covers; a head covers every station.
-const people=[{id:'ua',name:'Asha',stations:['A']},{id:'ub',name:'Bala',stations:['B']},{id:'um',name:'Manager',stations:['A']},{id:'uh',name:'Head',stations:['A','B']},{id:'ux',name:'Xavier',stations:['A']}];
-const loadAuditAssignees=async(company,roles,stationIds)=>people.map(p=>({id:p.id,name:p.name,email:`${p.id}@example.test`,role:'Auditor',stationIds:p.stations.filter(s=>stationIds.includes(s))})).filter(p=>p.stationIds.length);
+const people=[{id:'ua',name:'Asha',stations:['A']},{id:'ub',name:'Bala',stations:['B']},{id:'um',name:'Manager',stations:['A']},{id:'ul2',name:'LevelTwo',stations:['A']},{id:'uh',name:'Head',stations:['A','B']},{id:'ux',name:'Xavier',stations:['A']}];
+const loadAuditAssignees=async(company,roles,stationIds,pageCode,includeUnscoped)=>people.map(p=>({id:p.id,name:p.name,email:`${p.id}@example.test`,role:'Auditor',stationIds:p.stations.filter(s=>stationIds.includes(s))})).filter(p=>p.stationIds.length||includeUnscoped);
 const lib=moduleFrom('src/lib/ops-pulse/station-audits.ts',{'@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>({byLocation:new Map(),error:null})},'./nl-loss-clusters':moduleFrom('src/lib/ops-pulse/nl-loss-clusters.ts',{}),'@/lib/ops-pulse/station-audit-query':{allAuditRows:async(build)=>build(0,499),auditRowsForIds:async(ids,build)=>build(ids,0,499)},'server-only':{},'node:crypto':{randomUUID:()=>`rand${++seq}-0000-0000`},'./station-audit-planning':planning,'./station-audit-people':{loadAuditAssignees},'@/lib/supabase-admin':{supabaseAdmin:db}});
 const person=(userId,locationScopeIds,roles=['manager'])=>({userId,fullName:userId,email:`${userId}@example.test`,isMasterOwner:false,hasAllLocationAccess:false,locationScopeIds,effectiveRoleIds:roles,roleName:'Role',roleCode:'ROLE',companyId:'company',permissions:{station_audits:{canAdd:true,canEdit:true}}});
-const asha=person('ua',['A']), bala=person('ub',['B']), manager=person('um',['A']), head=person('uh',['A'],['manager','head']), xavier=person('ux',['A']), stationUser=person('us',['A'],['station']);
+const asha=person('ua',['A']), bala=person('ub',['B']), manager=person('um',['A']), levelTwo=person('ul2',['A']), head=person('uh',['A'],['manager','head']), xavier=person('ux',['A']), stationUser=person('us',['A'],['station']);
 let auth=asha;
 const actions=moduleFrom('src/app/ops-pulse/audits/actions.ts',{'@/lib/ops-pulse/station-audit-evidence':{},'@/lib/ops-pulse/station-audit-reconciliation':{},'@/lib/ops-pulse/station-audit-photos':{},'@/lib/ops-pulse/station-audit-scoring':moduleFrom('src/lib/ops-pulse/station-audit-scoring.ts',{}),'next/cache':{revalidatePath(){}},'@/lib/authorization':{async requirePagePermission(){if(auth.readOnly)throw new Error('Preview is read-only');return auth}},'@/lib/company-scope':{requireCompanyId:()=>'company'},'@/lib/ops-pulse/station-audit-email':{},'@/lib/ops-pulse/station-audit-recipients':{},'@/lib/ops-pulse/station-audit-people':{canDeleteStationAudit:()=>false,loadAuditAssignees},'@/lib/ops-pulse/upload':{},'@/lib/ops-pulse/station-audits':lib,'@/lib/ops-pulse/station-audit-planning':planning,'@/lib/supabase-admin':{supabaseAdmin:db}});
 const form=(values)=>{const data=new FormData();for(const [k,v] of Object.entries(values))data.set(k,v);return data};
@@ -76,7 +76,7 @@ result=await as(asha,()=>actions.requestCrossAudit(form({location_id:'B',audit_t
 assert.equal(result.ok,true,result.message);
 const first=requests()[0];assert.equal(first.requested_by,'ua');assert.equal(first.status,'pending');
 
-// 4. Who may decide it: not the requester, not a peer; the reporting manager and a head may.
+// 4. Who may decide it: not the requester, not a peer; the reporting line (L1 or L2) and a head may.
 const approve=(who,request,extra={})=>as(who,()=>actions.startStationAudit(form({request_id:request.id,location_id:request.location_id,audit_type_id:request.audit_type_id,assigned_to:request.requested_by,reason:request.reason,when:'now',...extra})));
 before=audits().length;
 for(const who of [asha,bala,xavier])assert.equal((await approve(who,first)).ok,false,`${who.userId} cannot approve`);
@@ -86,11 +86,13 @@ assert.equal((await approve(manager,first,{location_id:'A'})).ok,false);
 assert.equal((await approve(manager,first,{audit_type_id:'physical'})).ok,false);
 assert.equal((await approve(manager,first,{assigned_to:'ux'})).ok,false);
 assert.equal(audits().length,before);assert.equal(first.status,'pending','a refused approval leaves the request open');
-result=await approve(manager,first);
+// Level-2 manager can bypass waiting on the first manager (skip-level in the reporting line).
+assert.deepEqual(await lib.loadAuditReportees('company','ul2'),['um','ua']);
+result=await approve(levelTwo,first);
 assert.equal(result.ok,true,result.message);
 created=audits().find(a=>a.id===result.auditId);
 assert.equal(created.location_id,'B');assert.equal(created.assigned_to,'ua');assert.equal(created.cross_station,true);assert.equal(created.status_code,'scheduled');assert.equal(created.schedule_source,'unscheduled');
-assert.equal(first.status,'approved');assert.equal(first.audit_id,created.id);assert.equal(first.decided_by,'um');
+assert.equal(first.status,'approved');assert.equal(first.audit_id,created.id);assert.equal(first.decided_by,'ul2');
 // It cannot be approved or declined twice.
 assert.equal((await approve(head,first)).ok,false);
 assert.equal((await as(head,()=>actions.decideAuditRequest(form({operation:'decline',request_id:first.id,note:'Late'})))).ok,false);
@@ -188,4 +190,4 @@ const yesterday=planning.addAuditDays(today,-1);
 result=await redate(asha,yesterday);
 assert.equal(result.ok,true,result.message);
 call=rpcCalls.at(-1);assert.equal(call.name,'reschedule_station_audit');assert.equal(call.args.p_cycle_key,yesterday.slice(0,7));assert.equal(call.args.p_period_slot,'standard');assert.equal(call.args.p_scheduled_for,planning.auditTimestamp(yesterday,'11:00'));
-console.log('Cross-station audit tests passed: own-station surprise start, out-of-scope refusal, request rules, reporting-manager and cross-role approval, single-audit reach, any-station creation, type and auditor change, back-dated visits, and safe behaviour before the database update.');
+console.log('Cross-station audit tests passed: own-station surprise start, out-of-scope refusal, request rules, skip-level and cross-role approval, single-audit reach, any-station creation, type and auditor change, back-dated visits, and safe behaviour before the database update.');

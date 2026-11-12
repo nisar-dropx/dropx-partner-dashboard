@@ -346,7 +346,7 @@ export async function scheduleStationAudit(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const { authorization, companyId } = await assertManager("add");
+    const { authorization, own, companyId, master } = await assertManager("add");
     const { date, time } = auditDateTime(
       clean(formData.get("scheduled_date")),
       clean(formData.get("scheduled_time")),
@@ -361,6 +361,7 @@ export async function scheduleStationAudit(
       periodSlot: clean(formData.get("period_slot")) || undefined,
       assignedUserId: clean(formData.get("assigned_to")) || undefined,
       reason: clean(formData.get("reason")) || undefined,
+      anyStation: canAssignAnyStation(own, master.programmeSettings),
     });
     refreshAudits();
     return { ok: true, message: `${audit.audit_number} scheduled.` };
@@ -571,6 +572,8 @@ export async function loadAuditReach(): Promise<{
           companyId,
           settings.scheduler_role_ids,
           stations.map((station) => station.id),
+          "station_audits",
+          true,
         )
       : [];
     return {
@@ -863,7 +866,13 @@ export async function changeStationAudit(
           )
         : [audit.location_id];
       const choice = (
-        await loadAuditAssignees(companyId, settings.scheduler_role_ids, reach)
+        await loadAuditAssignees(
+          companyId,
+          settings.scheduler_role_ids,
+          reach,
+          "station_audits",
+          anyStation,
+        )
       ).find((p) => p.id === assignedTo);
       if (!choice)
         throw new Error(
@@ -1791,14 +1800,27 @@ export async function manageAuditAssignment(
           "Only the named users authorized in Audit Master can delete audits.",
         );
     } else if (operation === "reassign") {
+      const anyStation = canAssignAnyStation(
+        authorization,
+        master.programmeSettings,
+      );
+      const reach = anyStation
+        ? (
+            await loadAuditStations(companyId, allStations, master.programmeSettings)
+          ).map((station) => station.id)
+        : [audit.location_id];
       const choices = await loadAuditAssignees(
         companyId,
         master.programmeSettings.scheduler_role_ids,
-        [audit.location_id],
+        reach,
+        "station_audits",
+        anyStation,
       );
       if (!choices.some((p) => p.id === clean(formData.get("assigned_to"))))
         throw new Error(
-          "Choose an active auditor authorized for this station.",
+          anyStation
+            ? "Choose an active user who holds an audit manager role."
+            : "Choose an active auditor authorized for this station.",
         );
     } else throw new Error("Invalid audit action.");
     const result = await db().rpc("manage_station_audit", {

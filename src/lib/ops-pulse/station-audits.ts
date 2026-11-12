@@ -669,20 +669,46 @@ const stationColumns =
 const auditColumns =
   "*,ops_audit_types(code,name,requires_video_link,default_response_hours,video_link_help),stations(station_code,station_name,city,cluster,cluster_name)";
 
-/** Active users who report to this person. Empty when the reporting line is not recorded. */
+/**
+ * Active users in this person's reporting line: direct reports and every level
+ * below them. Level-2+ managers can see and decide the whole team's
+ * cross-station requests, not only people who report to them directly.
+ */
 export async function loadAuditReportees(companyId: string, userId: string) {
   const result = await db()
     .from("profiles")
-    .select("id")
+    .select("id,reports_to_user_id")
     .eq("company_id", companyId)
-    .eq("reports_to_user_id", userId)
-    .eq("is_active", true);
-  return result.error ? [] : (result.data ?? []).map((row) => String(row.id));
+    .eq("is_active", true)
+    .not("reports_to_user_id", "is", null);
+  if (result.error) return [];
+  const children = new Map<string, string[]>();
+  for (const row of result.data ?? []) {
+    if (!row.reports_to_user_id) continue;
+    const managerId = String(row.reports_to_user_id);
+    const list = children.get(managerId);
+    if (list) list.push(String(row.id));
+    else children.set(managerId, [String(row.id)]);
+  }
+  const found: string[] = [];
+  const seen = new Set<string>([userId]);
+  const queue = [...(children.get(userId) ?? [])];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    found.push(id);
+    for (const child of children.get(id) ?? []) queue.push(child);
+  }
+  return found;
 }
 
 /**
  * Cross-station requests the viewer raised or may decide: open ones, and those
  * decided in the last 30 days. Empty until the database update is applied.
+ * Managers without any-station reach still see every request from their full
+ * reporting line (skip-level included), so level-2 managers can bypass waiting
+ * on the first manager while the whole team stays visible.
  */
 export async function loadAuditRequests(
   companyId: string,
@@ -754,16 +780,18 @@ export async function loadStationAuditWorkspace(
     master.programmeSettings,
   );
   const stationIds = stations.map((station) => station.id);
+  const anyStation =
+    !stationOnly && canAssignAnyStation(authorization, master.programmeSettings);
   const assignees =
     !stationOnly && stationIds.length
       ? await loadAuditAssignees(
           companyId,
           master.programmeSettings.scheduler_role_ids,
           stationIds,
+          "station_audits",
+          anyStation,
         )
       : [];
-  const anyStation =
-    !stationOnly && canAssignAnyStation(authorization, master.programmeSettings);
   const requests = stationOnly
     ? []
     : await loadAuditRequests(companyId, authorization, anyStation);
@@ -1077,6 +1105,8 @@ export async function createStationAudit(input: {
     input.companyId,
     master.programmeSettings.scheduler_role_ids,
     input.anyStation ? stations.map((row) => row.id) : [station.id],
+    "station_audits",
+    Boolean(input.anyStation),
   );
   const assignee = assignees.find(
     (row) => row.id === (input.assignedUserId || input.authorization.userId),

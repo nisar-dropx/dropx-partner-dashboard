@@ -6,4 +6,7 @@ const mod={exports:{}};new Function('require','module','exports',ts.transpileMod
 assert.deepEqual((await mod.exports.loadAuditAssignees('company',['clm'],['A'])).map(p=>p.id),['person','owner']);
 assert.deepEqual((await mod.exports.loadAuditAssignees('company',[],['A'])).map(p=>p.id),['owner']);
 assert.deepEqual(await mod.exports.loadAuditAssignees('company',['clm'],[]),[]);
-console.log('Auditor directory tests passed: unrelated permissions exceeding row cap do not hide eligible auditors; location and configured-role restrictions hold.');
+const withUnscoped=await mod.exports.loadAuditAssignees('company',['clm'],['A'],'station_audits',true);
+assert.deepEqual(withUnscoped.map(p=>p.id),['person','outside','owner']);
+assert.deepEqual(withUnscoped.find(p=>p.id==='outside')?.stationIds,[]);
+console.log('Auditor directory tests passed: unrelated permissions exceeding row cap do not hide eligible auditors; location and configured-role restrictions hold; unscoped auditors appear for cross-station assigners.');

@@ -271,8 +271,10 @@ export function AuditMasterClient({
                     <legend>Cross-station audit roles</legend>
                     <small className="subtle">
                       Create or assign an audit at any station, to any
-                      auditor, and approve cross-station requests. A reporting
-                      manager can always approve their own team’s requests.
+                      auditor, and approve cross-station requests. Managers
+                      without this role still approve their full reporting
+                      line, including skip-level (they can act without waiting
+                      on the first manager).
                     </small>
                     <input type="hidden" name="cross_audit_roles" value="1" />
                     {roles.map((role) => (

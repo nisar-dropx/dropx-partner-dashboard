@@ -33,6 +33,11 @@ export async function loadAuditAssignees(
   schedulerRoleIds: string[],
   visibleStationIds: string[],
   pageCode = "station_audits",
+  /**
+   * When true, audit managers with no overlapping station still appear so a
+   * cross-station assigner can give them any station (assigned as cross-station).
+   */
+  includeUnscoped = false,
 ) {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
   const [profiles, memberships, roles, pages] = await Promise.all([
@@ -99,7 +104,7 @@ export async function loadAuditAssignees(
         : visibleStationIds.filter((id) =>
             member.some((m) => (m.location_scope_ids || []).includes(id)),
           );
-      if (!ids.length) return [];
+      if (!ids.length && !(includeUnscoped && hasAuditRole)) return [];
       return [
         {
           id: profile.id,
