@@ -156,10 +156,34 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles, initia
   }
 
   async function openAudit(audit: FleetAudit) {
-    if (audit.status === "scheduled") {
-      if (!await act("audit.start", { auditId: audit.id })) return;
-      setComplete({ ...audit, status: "in_progress" });
-    } else setComplete(audit);
+    setSaving("audit.open");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/fleet-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "audit.open", auditId: audit.id })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not open this audit.");
+      const draft = result.draft && typeof result.draft === "object" && !Array.isArray(result.draft) ? result.draft as Record<string, string> : (audit.draft || {});
+      setComplete({
+        ...audit,
+        status: typeof result.status === "string" ? result.status : "in_progress",
+        draft
+      });
+      const restored = Object.keys(draft).filter((key) => key.startsWith("item_") && draft[key]).length;
+      setMessage({
+        tone: "notice",
+        text: restored
+          ? `Opened ${audit.auditMode === "physical" ? "physical" : "virtual"} audit with ${restored} saved draft answer${restored === 1 ? "" : "s"}.`
+          : (result.message || `Opened ${audit.auditMode === "physical" ? "physical" : "virtual"} audit. No checklist draft saved on this audit yet.`)
+      });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Could not open this audit." });
+    } finally {
+      setSaving("");
+    }
   }
 
   useEffect(() => { if(initialAuditId) { const audit = audits.find(a=>a.id===initialAuditId); if(audit) {if(['passed','failed','cancelled'].includes(audit.status))setInspect(audit);else if(data.capabilities.canManageAudits)void openAudit(audit);} onOpened?.(); } }, [initialAuditId]);
@@ -222,7 +246,7 @@ export function FleetAuditsWorkspace({ audits, data, onChanged, vehicles, initia
 
     {cancelling ? <div className="fc-modal-backdrop"><section className="fc-modal fc-reschedule-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setCancelling(null)} type="button"><X size={18} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><CalendarDays size={23} /></span><div><small>{cancelling.vehicleNo} · {modeMeta[cancelling.auditMode].label}</small><h2>Remove scheduled audit</h2><FleetVehicleMeta vehicleNo={cancelling.vehicleNo} stationCode={cancelling.stationCode}/><p>This opens the monthly slot again so it can be scheduled later. The cancellation remains in the audit log.</p></div></div><form className="fc-add-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); if (await act("audit.cancel", { auditId: cancelling.id, reason: form.get("reason") })) setCancelling(null); }}><label className="full"><span>Reason for removing</span><input name="reason" placeholder="Scheduled by mistake, vehicle unavailable…" required /></label><div className="fc-form-actions"><button className="fc-button secondary" onClick={() => setCancelling(null)} type="button">Keep audit</button><button className="fc-button danger" disabled={saving === "audit.cancel"} type="submit">Remove schedule</button></div></form></section></div> : null}
 
-    {complete ? <FleetAuditRunner audit={complete} data={data} onClose={() => setComplete(null)} onDone={(confirmation) => { setComplete(null); setMessage({ tone: "notice", text: confirmation }); onChanged(); }} /> : null}
+    {complete ? <FleetAuditRunner key={complete.id} audit={complete} data={data} onClose={() => { setComplete(null); onChanged(); }} onDraftSaved={(draft) => setComplete((current) => current ? { ...current, status: "in_progress", draft } : current)} onDone={(confirmation) => { setComplete(null); setMessage({ tone: "notice", text: confirmation }); onChanged(); }} /> : null}
 
     {inspect ? <FleetAuditReport auditId={inspect.id} onClose={()=>setInspect(null)} /> : null}
     {emailPreview ? <div className="fc-modal-backdrop"><section className="fc-modal wide fc-audit-email-modal"><button aria-label="Close" className="fc-modal-close" onClick={() => setEmailPreview(false)} type="button"><X size={18} /></button><div className="fc-modal-title"><span className="fc-vehicle-big"><Mail size={23} /></span><div><small>Actual configurable audit email design</small><h2>Audit completion email</h2><p>Sent once after completion to the station mailbox, station manager and configured Fleet approvers.</p></div></div><div className="fc-audit-email-preview" style={{ "--audit-primary": data.settings.auditProgramme.primaryColor, "--audit-accent": data.settings.auditProgramme.accentColor, "--audit-alert": data.settings.auditProgramme.alertColor } as React.CSSProperties}><header><div><small>Vehicle assurance · KGQA</small><h2>{data.settings.auditProgramme.emailTitle}</h2><p>07 Oct 2026 · Physical inspection</p></div><b>DropX Fleet</b></header><section><div className="fc-audit-mail-summary"><div><small>Vehicle</small><strong>KL11CC2758</strong><p>Mahindra Jeeto · KGQA</p></div><span>Attention required</span></div><blockquote><b>Inspector summary</b><p>Vehicle is operational. Front-left tyre wear and first-aid replenishment require follow-up.</p></blockquote><h3>Major findings and action</h3><table><thead><tr><th>Area</th><th>Finding</th><th>Required action</th></tr></thead><tbody><tr><td><b>Tyres</b><small>High</small></td><td>Front-left tyre tread is below the configured safe limit.</td><td>Replace before next route<br /><small>Due 09 Oct 2026</small></td></tr><tr><td><b>Safety</b><small>Medium</small></td><td>Two first-aid items are missing.</td><td>Replenish at station</td></tr></tbody></table><h3>Evidence and attachments</h3><div className="fc-audit-mail-evidence"><span>Tyre photo ↗</span><span>Vehicle walk-around video ↗</span></div></section></div></section></div> : null}

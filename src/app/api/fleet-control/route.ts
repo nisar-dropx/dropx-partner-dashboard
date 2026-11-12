@@ -108,6 +108,7 @@ async function handlePOST(request: Request) {
     if (action === "audit.auto-schedule") return context.canManageFleet ? NextResponse.json({ ok: true, ...await generateFleetAuditProgramme(context.companyId, required(body.month, "Audit month"), context.authorization.userId, true) }) : NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
     if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.open") return await openAuditSession(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.draft") return await saveAuditDraft(context.companyId, context.canManageFleet, body);
     if (action === "finding.update") return await updateFinding(context.companyId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
@@ -283,16 +284,27 @@ async function cancelAudit(companyId: string, userId: string, allowed: boolean, 
 
 async function startAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
   if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const opened = await openAuditSession(companyId, userId, true, body);
+  return opened;
+}
+
+async function openAuditSession(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
   const auditId = required(body.auditId, "Audit");
-  const audit = await supabaseAdmin!.from("fleet_audits").select("id,status").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  const audit = await supabaseAdmin!.from("fleet_audits").select("id,status,draft").eq("company_id", companyId).eq("id", auditId).maybeSingle();
   if (audit.error) throw new Error(audit.error.message);
   if (!audit.data) throw new Error("Audit was not found.");
-  if (audit.data.status === "in_progress") return NextResponse.json({ ok: true, message: "Audit is already in progress." });
-  if (audit.data.status !== "scheduled") throw new Error("Only a scheduled audit can be started.");
-  const update = await supabaseAdmin!.from("fleet_audits").update({ status: "in_progress", started_at: new Date().toISOString(), assigned_to: userId, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).eq("status", "scheduled");
+  const draft = audit.data.draft && typeof audit.data.draft === "object" && !Array.isArray(audit.data.draft) ? audit.data.draft as Record<string, string> : {};
+  if (audit.data.status === "in_progress") {
+    return NextResponse.json({ ok: true, status: "in_progress", draft, message: "Continuing saved audit draft." });
+  }
+  if (audit.data.status !== "scheduled") throw new Error("Only an open audit can be continued.");
+  const update = await supabaseAdmin!.from("fleet_audits").update({ status: "in_progress", started_at: new Date().toISOString(), assigned_to: userId, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).eq("status", "scheduled").select("id,status,draft").maybeSingle();
   if (update.error) throw new Error(update.error.message);
+  if (!update.data) throw new Error("Audit was started by someone else. Refresh and try again.");
   await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_started", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: {} });
-  return NextResponse.json({ ok: true, message: "Audit started. Complete the checklist and attach the required evidence." });
+  const startedDraft = update.data.draft && typeof update.data.draft === "object" && !Array.isArray(update.data.draft) ? update.data.draft as Record<string, string> : draft;
+  return NextResponse.json({ ok: true, status: "in_progress", draft: startedDraft, message: "Audit started. Complete the checklist and attach the required evidence." });
 }
 
 async function completeAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
@@ -664,9 +676,9 @@ async function saveAuditDraft(companyId:string,allowed:boolean,body:Payload) {
  const draft=body.draft && typeof body.draft==='object' ? body.draft : {};
  if(Array.isArray(draft) || Object.values(draft).some(value=>typeof value!=='string')) throw new Error('Draft answers must be text values.');
  if(JSON.stringify(draft).length>200000) throw new Error('Draft is too large.');
- const result=await supabaseAdmin!.from('fleet_audits').update({draft,updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.auditId,'Audit')).in('status',['scheduled','in_progress']).select('id').maybeSingle();
+ const result=await supabaseAdmin!.from('fleet_audits').update({draft,status:'in_progress',updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.auditId,'Audit')).in('status',['scheduled','in_progress']).select('id,draft,status').maybeSingle();
  if(result.error || !result.data) throw new Error(result.error?.message || 'Audit is no longer open.');
- return NextResponse.json({ok:true,message:'Draft saved. You can continue on any device.'});
+ return NextResponse.json({ok:true,status:result.data.status,draft:result.data.draft || {},message:'Draft saved. You can continue on any device.'});
 }
 async function updateFinding(companyId:string,allowed:boolean,body:Payload) {
  if(!allowed) return NextResponse.json({error:'Maintenance permission denied.'},{status:403});
