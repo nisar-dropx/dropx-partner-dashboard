@@ -1,3 +1,4 @@
+import { getAuthorization, hasPermission } from '@/lib/authorization';
 import { auditAccess } from '@/lib/fleet/audit-access';
 import { loadAuditReport } from '@/lib/fleet/audit-report-data';
 export const runtime='nodejs';
@@ -17,6 +18,11 @@ export async function GET(request:Request) {
    return new Response(new Uint8Array(bytes),{headers:{'Content-Type':'application/pdf','Content-Disposition':`attachment; filename="Audit-${report.vehicleNo.replace(/[^A-Za-z0-9-]/g,'')}-${report.date}.pdf"`,'Cache-Control':'private, no-store'}});
   }
   try { await auditAccess(id,'followup');report.canManageActions=true; } catch {report.canManageActions=false;}
+  const auth=await getAuthorization();
+  const canEditAudit=Boolean(auth && (auth.isMasterOwner || hasPermission(auth,'fleet_audits','edit')));
+  const completedMs=report.completedAt?new Date(report.completedAt).getTime():NaN;
+  const withinWindow=Number.isFinite(completedMs) && (Date.now()-completedMs) <= 7*24*60*60*1000;
+  report.canRevise=canEditAudit && ['passed','failed'].includes(report.status) && (Boolean(auth?.isMasterOwner) || withinWindow);
   return Response.json(report,{headers:{'Cache-Control':'private, no-store'}});
  } catch { return Response.json({error:'The audit report could not be prepared. Your audit is saved. Please retry.'},{status:500}); }
 }

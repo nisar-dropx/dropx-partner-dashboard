@@ -15,6 +15,7 @@ type AuditEmailInput = {
   findings: Finding[];
   evidence: Evidence[];
   config?: FleetAuditProgrammeConfig;
+  amended?: boolean;
 };
 
 const raw = (value: unknown) => String(value ?? "").trim();
@@ -29,7 +30,7 @@ export function buildFleetAuditEmail(input: AuditEmailInput) {
   const findings = input.findings.length ? input.findings : [{ category: "Audit result", finding: "No material finding was recorded.", severity: "low", actionRequired: "No action required" }];
   const evidence = config.includeEvidence ? input.evidence.filter((item) => safeUrl(item.url)) : [];
   const reportUrl = `https://fleet.dropxlogistics.com/fleet-control?section=audits&auditId=${encodeURIComponent(input.auditId)}`;
-  const subject = `${config.emailSubjectPrefix} · ${input.stationCode} · ${input.vehicleNo} · ${labelDate(input.auditDate)}`;
+  const subject = `${input.amended ? "Amended · " : ""}${config.emailSubjectPrefix} · ${input.stationCode} · ${input.vehicleNo} · ${labelDate(input.auditDate)}`;
   const text = `${config.emailTitle}\n${input.stationCode} · ${input.vehicleNo} · ${input.model}\n${input.auditMode === "video" ? "Virtual video audit" : "Physical inspection"} · ${labelDate(input.auditDate)}\nResult: ${result}${input.score == null ? "" : ` · Score ${input.score}%`}\n\n${input.summary || result}\n\nMajor findings\n${findings.map((item) => `- ${raw(item.finding)}${raw(item.actionRequired) ? ` | Action: ${raw(item.actionRequired)}` : ""}`).join("\n")}\n\nEvidence\n${evidence.length ? evidence.map((item) => `- ${raw(item.caption) || raw(item.type)}: ${safeUrl(item.url)}`).join("\n") : "- No evidence link included."}`;
   const findingRows = findings.map((item) => `<tr><td style="padding:12px;border-bottom:1px solid #e6eaf0"><b>${escape(item.category || "General")}</b><br><span style="color:${config.alertColor};font-size:12px;text-transform:uppercase">${escape(item.severity || "medium")}</span></td><td style="padding:12px;border-bottom:1px solid #e6eaf0">${escape(item.finding)}</td><td style="padding:12px;border-bottom:1px solid #e6eaf0">${escape(item.actionRequired || "Review and close")}${raw(item.expectedCompletionDate) ? `<br><small>Due ${escape(item.expectedCompletionDate)}</small>` : ""}</td></tr>`).join("");
   const evidenceCards = evidence.map((item, index) => `<a href="${escape(safeUrl(item.url))}" style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;border-radius:9px;background:#eef7f5;color:#08766b;text-decoration:none;font-weight:700">${escape(item.caption || `${raw(item.type) || "Evidence"} ${index + 1}`)} ↗</a>`).join("");

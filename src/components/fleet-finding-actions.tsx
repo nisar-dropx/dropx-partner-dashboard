@@ -4,7 +4,7 @@ import {useState} from 'react';
 import {findingUrgency,type AuditReport,type FindingAction,type FindingProof} from '@/lib/fleet/audit-health';
 const date=(value:string|null)=>value?new Date(`${value}T12:00:00+05:30`).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:'Asia/Kolkata'}):'Not set';
 const stamp=(value:string)=>new Date(value).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});
-const closed=(f:FindingAction)=>['resolved','accepted'].includes(f.status);
+const closed=(f:FindingAction)=>['resolved','accepted','superseded'].includes(f.status);
 export function FleetFindingActions({report,onSaved}:{report:AuditReport;onSaved:()=>void}) {
  const [filter,setFilter]=useState('open');
  const today=new Date(report.generatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});

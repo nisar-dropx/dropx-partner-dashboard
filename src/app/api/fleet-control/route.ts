@@ -109,9 +109,11 @@ async function handlePOST(request: Request) {
     if (action === "audit.cancel") return await cancelAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.start") return await startAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
     if (action === "audit.open") return await openAuditSession(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.begin-revision") return await beginAuditRevision(context.companyId, context.authorization.userId, context.canManageFleet, context.authorization.isMasterOwner, body);
     if (action === "audit.draft") return await saveAuditDraft(context.companyId, context.canManageFleet, body);
     if (action === "finding.update") return await updateFinding(context.companyId, context.canManageFleet, body);
     if (action === "audit.complete") return await completeAudit(context.companyId, context.authorization.userId, context.canManageFleet, body);
+    if (action === "audit.revise") return await reviseAudit(context.companyId, context.authorization.userId, context.canManageFleet, context.authorization.isMasterOwner, body);
     if (action === "checklist.create") return await createChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.update") return await updateChecklistItem(context.companyId, context.canManageSettings, body);
     if (action === "checklist.remove") return await removeChecklistItem(context.companyId, context.canManageSettings, body);
@@ -330,13 +332,57 @@ async function openAuditSession(companyId: string, userId: string, allowed: bool
   return NextResponse.json({ ok: true, status: "in_progress", draft: startedDraft, message: "Audit started. Complete the checklist and attach the required evidence." });
 }
 
-async function completeAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
-  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
-  const auditId = required(body.auditId, "Audit");
-  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,status,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
-  if (auditResult.error) throw new Error(auditResult.error.message);
-  if (!auditResult.data) throw new Error("Audit was not found.");
-  if (!["scheduled", "in_progress"].includes(clean(auditResult.data.status))) throw new Error("Only an open audit can be completed.");
+const AUDIT_REVISION_WINDOW_DAYS = 7;
+
+function assertRevisionWindow(completedAt: string | null, isMasterOwner: boolean) {
+  if (isMasterOwner) return;
+  if (!completedAt) throw new Error("This audit has no completion time and cannot be amended.");
+  const completedMs = new Date(completedAt).getTime();
+  if (!Number.isFinite(completedMs)) throw new Error("This audit has an invalid completion time.");
+  const ageMs = Date.now() - completedMs;
+  if (ageMs < 0 || ageMs > AUDIT_REVISION_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+    throw new Error(`Amendments are only allowed within ${AUDIT_REVISION_WINDOW_DAYS} days of completion (company owners can amend anytime).`);
+  }
+}
+
+function hydrateRevisionDraft(responses: Payload[], evidence: Payload[], summary: string, odometerKm: number | null): Record<string, string> {
+  const draft: Record<string, string> = {};
+  if (summary) draft.summary = summary;
+  if (odometerKm != null && Number.isFinite(Number(odometerKm))) draft.odometer = String(odometerKm);
+  draft.sendEmail = "no";
+  for (const row of responses) {
+    const itemId = clean(row.checklist_item_id);
+    const snapshot = row.response_value && typeof row.response_value === "object" ? row.response_value as Payload : {};
+    if (snapshot.value != null && snapshot.value !== "") draft[`item_${itemId}`] = String(snapshot.value);
+    if (clean(row.comments)) draft[`comment_${itemId}`] = clean(row.comments);
+    if (clean(snapshot.action)) draft[`action_${itemId}`] = clean(snapshot.action);
+    if (snapshot.days != null && snapshot.days !== "") draft[`days_${itemId}`] = String(snapshot.days);
+  }
+  const photosByItem = new Map<string, Payload[]>();
+  for (const row of evidence) {
+    const url = clean(row.media_url);
+    if (!url) continue;
+    const itemId = clean(row.checklist_item_id);
+    if (!itemId && clean(row.media_type) === "video") {
+      draft.video = url;
+      continue;
+    }
+    if (!itemId) continue;
+    const list = photosByItem.get(itemId) ?? [];
+    list.push(row);
+    photosByItem.set(itemId, list);
+  }
+  for (const [itemId, rows] of photosByItem) {
+    rows.forEach((row, index) => {
+      draft[`photo_${itemId}_${index}`] = clean(row.media_url);
+      draft[`photo_${itemId}_${index}_type`] = clean(row.media_type) || "photo";
+    });
+  }
+  return draft;
+}
+
+async function prepareAuditSubmission(companyId: string, audit: Payload, body: Payload) {
+  const auditId = clean(audit.id);
   const input = Array.isArray(body.responses) ? body.responses : [];
   const evidence = Array.isArray(body.evidence) ? body.evidence.filter((item: Payload) => clean(item.url)) : [];
   for (const item of evidence) {
@@ -345,14 +391,14 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
     if (!/^https:\/\//i.test(url) && !url.startsWith('/api/fleet/audit-evidence?')) throw new Error('Evidence must be a secure link or an uploaded file.');
     if (url.startsWith('/api/fleet/audit-evidence?') && !new URL(url,'https://fleet.dropxlogistics.com').searchParams.get('path')?.startsWith(`${companyId}/audits/${auditId}/`)) throw new Error('Evidence belongs to a different audit.');
   }
-  const auditMode = /^\[mode:video\]/i.test(clean(auditResult.data.scheduled_reason)) ? "video" : "physical";
+  const auditMode = /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical";
   const settings = await supabaseAdmin!.from('fleet_control_settings').select('audit_video_required,audit_email_enabled').eq('company_id',companyId).maybeSingle();
   if(settings.error) throw new Error(settings.error.message);
   if (auditMode === 'video' && settings.data?.audit_video_required !== false && !evidence.some((item: Payload)=>item.type==='video' && !item.itemId)) throw new Error('Attach the complete walk-around video.');
-  const vehicle = await supabaseAdmin!.from('fleet_vehicles').select('fuel_type').eq('company_id',companyId).eq('id',auditResult.data.vehicle_id).single();
+  const vehicle = await supabaseAdmin!.from('fleet_vehicles').select('fuel_type').eq('company_id',companyId).eq('id',audit.vehicle_id).single();
   if(vehicle.error) throw new Error(vehicle.error.message);
   let query = supabaseAdmin!.from('fleet_audit_checklist_items').select('*').eq('company_id',companyId).eq('is_active',true);
-  if(auditResult.data.template_id) query=query.eq('template_id',auditResult.data.template_id);
+  if(audit.template_id) query=query.eq('template_id',audit.template_id);
   const checklist = await query;
   if(checklist.error) throw new Error(checklist.error.message);
   const items = (checklist.data ?? []).filter(item=>(item.audit_mode === 'both' || item.audit_mode === auditMode) && auditApplies(normalizeAuditConfig(item.response_config),vehicle.data.fuel_type));
@@ -388,17 +434,92 @@ async function completeAudit(companyId: string, userId: string, allowed: boolean
   if(clean(body.finding)) findings.push({category:clean(body.findingCategory)||'General',finding:clean(body.finding),severity:['low','medium','high','critical'].includes(body.severity)?body.severity:'medium',actionRequired:clean(body.actionRequired),expectedCompletionDate:clean(body.expectedCompletionDate)||null});
   const failed=findings.length>0;
   const score=summarizeHealth(responses.map(r=>({category:r.snapshot.category,...r.snapshot.scoring}))).score;
-  const update = await supabaseAdmin!.rpc('fleet_complete_audit_v2',{p_company:companyId,p_audit:auditId,p_user:userId,p_data:{responses,evidence,findings,status:failed?'failed':'passed',score,summary:clean(body.summary),odometerKm:numberOrNull(body.odometerKm)}});
+  return { responses, evidence, findings, failed, score, settings: settings.data, summary: clean(body.summary), odometerKm: numberOrNull(body.odometerKm) };
+}
+
+async function beginAuditRevision(companyId: string, userId: string, allowed: boolean, isMasterOwner: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const audit = await supabaseAdmin!.from("fleet_audits").select("id,status,completed_at,summary,odometer_km,revision_draft,revision_count").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (audit.error) throw new Error(audit.error.message);
+  if (!audit.data) throw new Error("Audit was not found.");
+  if (!["passed", "failed"].includes(clean(audit.data.status))) throw new Error("Only a completed audit can be amended.");
+  assertRevisionWindow(audit.data.completed_at, isMasterOwner);
+  const existing = audit.data.revision_draft && typeof audit.data.revision_draft === "object" && !Array.isArray(audit.data.revision_draft) ? audit.data.revision_draft as Record<string, string> : {};
+  if (Object.keys(existing).length) {
+    return NextResponse.json({ ok: true, status: audit.data.status, draft: existing, revisionCount: Number(audit.data.revision_count || 0), message: "Continuing saved amendment draft." });
+  }
+  const [responses, evidence] = await Promise.all([
+    supabaseAdmin!.from("fleet_audit_responses").select("checklist_item_id,response_value,comments").eq("company_id", companyId).eq("audit_id", auditId),
+    supabaseAdmin!.from("fleet_audit_evidence").select("checklist_item_id,media_type,media_url,caption,created_at").eq("company_id", companyId).eq("audit_id", auditId).order("created_at").order("id")
+  ]);
+  if (responses.error) throw new Error(responses.error.message);
+  if (evidence.error) throw new Error(evidence.error.message);
+  const draft = hydrateRevisionDraft(responses.data ?? [], evidence.data ?? [], clean(audit.data.summary), audit.data.odometer_km == null ? null : Number(audit.data.odometer_km));
+  const update = await supabaseAdmin!.from("fleet_audits").update({ revision_draft: draft, updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", auditId).in("status", ["passed", "failed"]).select("id,status,revision_count").maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) throw new Error("Audit could not be opened for amendment.");
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_revision_started", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: {} });
+  return NextResponse.json({ ok: true, status: update.data.status, draft, revisionCount: Number(update.data.revision_count || 0), message: "Editing completed audit. Previous version will be kept when you save the amendment." });
+}
+
+async function completeAudit(companyId: string, userId: string, allowed: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,status,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (auditResult.error) throw new Error(auditResult.error.message);
+  if (!auditResult.data) throw new Error("Audit was not found.");
+  if (!["scheduled", "in_progress"].includes(clean(auditResult.data.status))) throw new Error("Only an open audit can be completed.");
+  const prepared = await prepareAuditSubmission(companyId, auditResult.data, body);
+  const update = await supabaseAdmin!.rpc('fleet_complete_audit_v2',{p_company:companyId,p_audit:auditId,p_user:userId,p_data:{responses:prepared.responses,evidence:prepared.evidence,findings:prepared.findings,status:prepared.failed?'failed':'passed',score:prepared.score,summary:prepared.summary,odometerKm:prepared.odometerKm}});
   if(update.error) throw new Error(update.error.message);
   let emailStatus = "not_sent";
-  if (body.sendEmail !== false && settings.data?.audit_email_enabled !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, failed, score, clean(body.summary), findings, evidence);
-  const completionMessage = failed
+  if (body.sendEmail !== false && prepared.settings?.audit_email_enabled !== false) emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, prepared.failed, prepared.score, prepared.summary, prepared.findings, prepared.evidence);
+  const completionMessage = prepared.failed
     ? "Audit submitted successfully · Needs attention. Your answers and evidence are saved; follow up on the recorded vehicle issues in Need Attention."
     : "Audit submitted successfully · Passed. Your answers and evidence are saved.";
   return NextResponse.json({ ok: true, message: `${completionMessage}${emailStatus === "sent" ? " Summary emailed." : ""}`, emailStatus });
 }
 
-async function sendAuditEmail(companyId: string, auditId: string, audit: Payload, failed: boolean, score: number | null, summary: string, findings: Payload[], evidence: Payload[]) {
+async function reviseAudit(companyId: string, userId: string, allowed: boolean, isMasterOwner: boolean, body: Payload) {
+  if (!allowed) return NextResponse.json({ error: "Fleet audit permission denied." }, { status: 403 });
+  const auditId = required(body.auditId, "Audit");
+  const auditResult = await supabaseAdmin!.from("fleet_audits").select("id,vehicle_id,template_id,scheduled_for,scheduled_reason,status,completed_at,revision_count,fleet_vehicles!inner(vehicle_no,station_code,model)").eq("company_id", companyId).eq("id", auditId).maybeSingle();
+  if (auditResult.error) throw new Error(auditResult.error.message);
+  if (!auditResult.data) throw new Error("Audit was not found.");
+  if (!["passed", "failed"].includes(clean(auditResult.data.status))) throw new Error("Only a completed audit can be amended.");
+  assertRevisionWindow(auditResult.data.completed_at, isMasterOwner);
+  const prepared = await prepareAuditSubmission(companyId, auditResult.data, body);
+  const sendEmail = body.sendEmail === true;
+  const update = await supabaseAdmin!.rpc("fleet_revise_audit_v1", {
+    p_company: companyId,
+    p_audit: auditId,
+    p_user: userId,
+    p_data: {
+      responses: prepared.responses,
+      evidence: prepared.evidence,
+      findings: prepared.findings,
+      status: prepared.failed ? "failed" : "passed",
+      score: prepared.score,
+      summary: prepared.summary,
+      odometerKm: prepared.odometerKm,
+      sendEmail
+    }
+  });
+  if (update.error) throw new Error(setupError(update.error.message));
+  await supabaseAdmin!.from("dashboard_app_event_logs").insert({ company_id: companyId, module: "fleet", platform: "dashboard", event_code: "fleet_audit_revised", subject_id: auditId, subject_code: auditId, actor_user_id: userId, actor_label: "Fleet user", metadata: { status: prepared.failed ? "failed" : "passed", score: prepared.score } });
+  let emailStatus = "not_sent";
+  if (sendEmail && prepared.settings?.audit_email_enabled !== false) {
+    emailStatus = await sendAuditEmail(companyId, auditId, auditResult.data as Payload, prepared.failed, prepared.score, prepared.summary, prepared.findings, prepared.evidence, true);
+  }
+  const revisionNo = Number(auditResult.data.revision_count || 0) + 1;
+  const message = prepared.failed
+    ? `Amendment saved (revision ${revisionNo}) · Needs attention. Prior submission kept in history.`
+    : `Amendment saved (revision ${revisionNo}) · Passed. Prior submission kept in history.`;
+  return NextResponse.json({ ok: true, message: `${message}${emailStatus === "sent" ? " Amended summary emailed." : ""}`, emailStatus, revisionCount: revisionNo });
+}
+
+async function sendAuditEmail(companyId: string, auditId: string, audit: Payload, failed: boolean, score: number | null, summary: string, findings: Payload[], evidence: Payload[], amended = false) {
   const vehicle = Array.isArray(audit.fleet_vehicles) ? audit.fleet_vehicles[0] : audit.fleet_vehicles;
   const station = await supabaseAdmin!.from("stations").select("station_email,station_manager_email").eq("company_id", companyId).eq("station_code", vehicle.station_code).maybeSingle();
   const admins = await supabaseAdmin!.from("fleet_portal_memberships").select("profiles:user_id(email)").eq("company_id", companyId).eq("is_active", true).in("access_level", ["administrator", "approver"]);
@@ -407,8 +528,9 @@ async function sendAuditEmail(companyId: string, auditId: string, audit: Payload
   if (!to.length) { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed" }).eq("id", auditId); return "failed"; }
   const settings = await supabaseAdmin!.from("fleet_control_settings").select("risk_weights").eq("company_id", companyId).maybeSingle();
   const config = auditProgrammeFromRiskWeights(settings.data?.risk_weights);
-  const mail = buildFleetAuditEmail({ auditId, auditDate: audit.scheduled_for, auditMode: /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical", stationCode: vehicle.station_code, vehicleNo: vehicle.vehicle_no, model: vehicle.model, failed, score, summary, findings, evidence: evidence.map(item=>({...item,url:clean(item.url).startsWith("/api/fleet/audit-evidence?") ? `https://fleet.dropxlogistics.com${item.url}` : item.url})), config });
-  try { await sendEmail({ companyId, subject: mail.subject, body: mail.text, html: mail.html, to, cc, messageId: `<dropx.fleet-audit.${auditId}@partner.dropxlogistics.com>` }); await supabaseAdmin!.from("fleet_audits").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_recipients: { to, cc } }).eq("id", auditId); return "sent"; }
+  const mail = buildFleetAuditEmail({ auditId, auditDate: audit.scheduled_for, auditMode: /^\[mode:video\]/i.test(clean(audit.scheduled_reason)) ? "video" : "physical", stationCode: vehicle.station_code, vehicleNo: vehicle.vehicle_no, model: vehicle.model, failed, score, summary, findings, evidence: evidence.map(item=>({...item,url:clean(item.url).startsWith("/api/fleet/audit-evidence?") ? `https://fleet.dropxlogistics.com${item.url}` : item.url})), config, amended });
+  const messageId = amended ? `<dropx.fleet-audit.${auditId}.r${Date.now()}@partner.dropxlogistics.com>` : `<dropx.fleet-audit.${auditId}@partner.dropxlogistics.com>`;
+  try { await sendEmail({ companyId, subject: mail.subject, body: mail.text, html: mail.html, to, cc, messageId }); await supabaseAdmin!.from("fleet_audits").update({ email_status: "sent", email_sent_at: new Date().toISOString(), email_recipients: { to, cc } }).eq("id", auditId); return "sent"; }
   catch { await supabaseAdmin!.from("fleet_audits").update({ email_status: "failed", email_recipients: { to, cc } }).eq("id", auditId); return "failed"; }
 }
 
@@ -699,7 +821,16 @@ async function saveAuditDraft(companyId:string,allowed:boolean,body:Payload) {
  const draft=body.draft && typeof body.draft==='object' ? body.draft : {};
  if(Array.isArray(draft) || Object.values(draft).some(value=>typeof value!=='string')) throw new Error('Draft answers must be text values.');
  if(JSON.stringify(draft).length>200000) throw new Error('Draft is too large.');
- const result=await supabaseAdmin!.from('fleet_audits').update({draft,status:'in_progress',updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',required(body.auditId,'Audit')).in('status',['scheduled','in_progress']).select('id,draft,status').maybeSingle();
+ const auditId=required(body.auditId,'Audit');
+ const current=await supabaseAdmin!.from('fleet_audits').select('id,status').eq('company_id',companyId).eq('id',auditId).maybeSingle();
+ if(current.error) throw new Error(current.error.message);
+ if(!current.data) throw new Error('Audit was not found.');
+ if(['passed','failed'].includes(clean(current.data.status))) {
+  const result=await supabaseAdmin!.from('fleet_audits').update({revision_draft:draft,updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',auditId).in('status',['passed','failed']).select('id,revision_draft,status').maybeSingle();
+  if(result.error || !result.data) throw new Error(result.error?.message || 'Amendment draft could not be saved.');
+  return NextResponse.json({ok:true,status:result.data.status,draft:result.data.revision_draft || {},message:'Amendment draft saved. Live answers stay unchanged until you save the amendment.'});
+ }
+ const result=await supabaseAdmin!.from('fleet_audits').update({draft,status:'in_progress',updated_at:new Date().toISOString()}).eq('company_id',companyId).eq('id',auditId).in('status',['scheduled','in_progress']).select('id,draft,status').maybeSingle();
  if(result.error || !result.data) throw new Error(result.error?.message || 'Audit is no longer open.');
  return NextResponse.json({ok:true,status:result.data.status,draft:result.data.draft || {},message:'Draft saved. You can continue on any device.'});
 }

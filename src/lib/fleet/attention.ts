@@ -6,7 +6,7 @@ export type AttentionItem={id:string;title:string;detail:string;station:string;v
 export function fleetAttention(data:FleetControlData):AttentionItem[]{
  const ownedIds=new Set(data.vehicles.filter(isOwnedVehicle).map(v=>v.id));
  const rows:AttentionItem[]=[];const can=(s:string)=>data.capabilities.visibleSections.includes(s);
- if(can('audits'))for(const f of data.findings)if(ownedIds.has(f.vehicleId))rows.push({id:`finding-${f.id}`,title:f.finding,detail:f.actionRequired,station:f.stationCode,vehicle:f.vehicleNo,vehicleId:f.vehicleId,due:f.dueDate,priority:f.severity==='critical'?0:f.severity==='high'?1:2,category:'Audit findings',section:'audits',findingId:f.id,resolved:['resolved','accepted'].includes(f.status)});
+ if(can('audits'))for(const f of data.findings)if(ownedIds.has(f.vehicleId))rows.push({id:`finding-${f.id}`,title:f.finding,detail:f.actionRequired,station:f.stationCode,vehicle:f.vehicleNo,vehicleId:f.vehicleId,due:f.dueDate,priority:f.severity==='critical'?0:f.severity==='high'?1:2,category:'Audit findings',section:'audits',findingId:f.id,resolved:['resolved','accepted','superseded'].includes(f.status)});
  for(const v of data.vehicles){
   if(['sold','disposed','returned','archived'].includes(v.status))continue;
   if(can('vehicles')&&(v.rentAmount==null||!['monthly','daily'].includes(v.rentPeriod||'')))rows.push({id:`rent-${v.id}`,title:'Rent not set',detail:'Set an amount and Per month / Per day. Used by CPS and P&L.',station:v.stationCode,vehicle:v.vehicleNo,vehicleId:v.id,due:null,priority:2,category:'Rent setup',section:'vehicles'});

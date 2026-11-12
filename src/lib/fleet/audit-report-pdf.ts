@@ -33,8 +33,8 @@ export async function renderAuditPdf(report:AuditReport,load:(e:AuditReport['evi
  link('Open interactive report and vehicle history',online);
  newPage('Action plan / closure tracker');
  const today=new Date(report.generatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
- const actions=[...(report.actions||[])].sort((a,b)=>Number(['resolved','accepted'].includes(a.status))-Number(['resolved','accepted'].includes(b.status))||(['critical','high','medium','low'].indexOf(a.severity)-['critical','high','medium','low'].indexOf(b.severity))||(a.due||'9999').localeCompare(b.due||'9999'));
- const pending=actions.filter(f=>!['resolved','accepted'].includes(f.status));
+ const actions=[...(report.actions||[])].sort((a,b)=>Number(['resolved','accepted','superseded'].includes(a.status))-Number(['resolved','accepted','superseded'].includes(b.status))||(['critical','high','medium','low'].indexOf(a.severity)-['critical','high','medium','low'].indexOf(b.severity))||(a.due||'9999').localeCompare(b.due||'9999'));
+ const pending=actions.filter(f=>!['resolved','accepted','superseded'].includes(f.status));
  text(`${pending.length} open actions  |  ${actions.length-pending.length} closed`,14,teal,true);
  text(`Action status at export: ${new Date(report.generatedAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} IST`,9,muted);
  if(!actions.length)text('No action points recorded.',11,teal);
