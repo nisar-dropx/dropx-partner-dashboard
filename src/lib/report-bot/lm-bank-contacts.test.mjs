@@ -32,6 +32,7 @@ for(const hasCluster of [true,false]) test(hasCluster?'CLM email takes precedenc
   assert.deepEqual(result.cluster,hasCluster?['919000000002']:[]);
   assert.deepEqual(result.aom,hasCluster?[]:['919000000003']);
   assert.deepEqual(result.tl,['919000000001']);
+  assert.deepEqual(result.ct,['919000000004']);
 });
 
 test('personal account email is never used as a fallback',async()=>{

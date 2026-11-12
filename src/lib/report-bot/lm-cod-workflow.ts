@@ -84,3 +84,12 @@ export function parseCodHold(text:string,station:string,messageAt:number,now:num
  if(until<=now||until<=messageAt||until-messageAt>4*3600000)return null;
  return {key:match[2].toLowerCase(),until,reason:match[4]};
 }
+
+/** Date attribution requires evidence; a morning aggregate alone has no collection date. */
+export function prepareCarryover(before:CashObservation|undefined,amount:number,rows:CodRemittance[],day:string) {
+ if(!before||codDay(before.at)!==codDay(Date.parse(day+'T00:00:00+05:30')-1)||amount<=0||before.prepare+0.01<amount)return false;
+ return !rows.some(row=>(row.createdAt==null||row.createdAt>before.at)||((submittedTime(row)||0)>before.at));
+}
+export function prepareAction(amount:number,pickup:boolean,carryover:boolean) {
+ return `${carryover?"Yesterday’s reconciled cash is still awaiting preparation. ":""}Click Prepare Deposit now for ${codMoney(amount)}.${pickup?' Include it in this CMS pickup.':''} Reminders continue until completed.`;
+}

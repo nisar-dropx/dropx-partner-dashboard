@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {pickupReview,dueBankRows,prepareTrigger,parseCodHold} from './lm-cod-workflow.ts';
+import {pickupReview,dueBankRows,prepareTrigger,parseCodHold,prepareCarryover,prepareAction} from './lm-cod-workflow.ts';
 import {CodRuntime} from './lm-cod-runtime.ts';
 const at=t=>Date.parse('2026-11-11T'+t+':00+05:30');
 const row=(id,status,time,amount=100000)=>({id,code:id,status,actualAmount:amount,expectedAmount:amount,variance:0,createdAt:at(time),updatedAt:at(time),submittedAt:status==='SUBMITTED'?at(time):null,createdBy:'',submittedBy:null});
@@ -38,4 +38,15 @@ test('shared budget caps concurrency and avoids duplicate enrichment',async()=>{
  const task=()=>run.external(async()=>{active++;max=Math.max(max,active);calls++;await new Promise(r=>setTimeout(r,5));active--;return 42;});
  await Promise.all([run.memo('same',task),run.memo('same',task),task(),task(),task(),task()]);
  assert.equal(calls,5);assert.equal(max,2);await assert.rejects(()=>task(),/budget/);
+});
+
+test('morning preparation is not automatically called yesterday cash',()=>{
+ const previous={at:at('23:00'),prepare:8523.42,remittances:[],drivers:[]};
+ assert.equal(prepareCarryover(previous,8523.42,[],'2026-11-12'),true);
+ assert.equal(prepareCarryover(undefined,8523.42,[],'2026-11-12'),false);
+ assert.equal(prepareCarryover({...previous,prepare:0},8523.42,[],'2026-11-12'),false);
+ assert.equal(prepareCarryover(previous,8523.42,[{...row('new','CREATED','23:30')}],'2026-11-12'),false);
+ assert.match(prepareAction(8523.42,true,true),/Yesterday/);
+ assert.doesNotMatch(prepareAction(8523.42,true,false),/Yesterday|wait for|30 minutes|one hour/);
+ assert.match(prepareAction(8523.42,true,false),/Click Prepare Deposit now.*Reminders continue until completed/);
 });

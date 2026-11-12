@@ -12,7 +12,7 @@ export async function acknowledgeCodOutput(ack:CodAck){for(const key of ack.keys
 export async function codWorkflowOutputs(company:string,source:{id:string;station_code:string;report_code?:string},day:string,slot:string,route:CodConfig&MentionRouteConfig&{group_id:string},runtime:CodRuntime){
  const report=await loadCodWorkflow(company,source,day,slot,route,runtime);
  if(!report.sections.length&&!report.slips.length&&!report.bankRows.length)return [];
- const groups=await resolveBankReminderMentions(company,[source],{...route,mentions:[]},day);
+ const groups=await resolveBankReminderMentions(company,[source],route,day);
  const ssa=await resolveRouteMentionNumbers(company,[source],{mentions:[],mention_manager_policy:'none',mention_latest_shift_designation_codes:['SSA']},day);
  const numbers=[...new Set([...bankMentionNumbers(groups),...ssa])];
  const events=await reportBotDb().from('report_bot_inbound_events').select('sender_jid,text_body,message_at').eq('company_id',company).eq('group_id',route.group_id).eq('from_me',false).gte('message_at',new Date(Date.now()-4*3600000).toISOString()).ilike('text_body','COD HOLD %').order('message_at',{ascending:false}).limit(100);

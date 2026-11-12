@@ -1,3 +1,4 @@
+import {resolveBankReminderMentions} from '@/lib/report-bot/lm-dispatch-mentions';
 import {NextResponse} from 'next/server';
 import {timingSafeEqual} from 'node:crypto';
 import {reportBotDb} from '@/lib/report-bot/settings';
@@ -25,6 +26,7 @@ export async function POST(request:Request){
  if(!source)throw new Error('No configured station');
  const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);
  if(input.operation==='refresh-edd')return NextResponse.json(await queueLoadFlashStations([source.station_code]));
+ if(input.operation==='contacts')return NextResponse.json({station:source.station_code,contacts:await resolveBankReminderMentions(company,[source],route,day),sent:false});
  if(input.operation==='source')return NextResponse.json(await fetchCodStatus(source.report_code||source.station_code,false));
  const runtime=new CodRuntime(Date.now()+100000);
  const report=await loadCodWorkflow(company,source,day,slot,route,runtime);

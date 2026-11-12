@@ -47,6 +47,16 @@ const rect = (x: number, y: number, width: number, height: number, fill: string)
 const svg = (width: number, height: number, body: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${body}</svg>`;
 export type CellStyle = { background: string; color: string } | null;
 
+/** Stable report identities; red/amber/green still retain their status meaning. */
+export function reportPalette(title:string) {
+  if(/c-return|pickup status/i.test(title))return {header:'#115e59',soft:'#ccfbf1',stripe:'#f0fdfa'};
+  if(/ageing|aging|shortfall|shortage/i.test(title))return {header:'#92400e',soft:'#fef3c7',stripe:'#fffbeb'};
+  if(/scrub/i.test(title))return {header:'#6b21a8',soft:'#f3e8ff',stripe:'#faf5ff'};
+  if(/cod|recon|deposit|remittance|cash|cms/i.test(title))return {header:'#7c2d12',soft:'#ffedd5',stripe:'#fff7ed'};
+  if(/dot/i.test(title))return {header:'#3730a3',soft:'#e0e7ff',stripe:'#eef2ff'};
+  return {header:'#193456',soft:'#dce8f6',stripe:'#f6f8fb'};
+}
+
 /** Count colours describe status; intensity reflects its share of the row total. */
 export function reportMetricStyle(column: string, value: string | number, total: number): CellStyle {
   if (value === "—" || value === "") return null;
@@ -70,27 +80,39 @@ export async function summaryReportSvg(title: string, rows: [string, string | nu
   const text = (value: string | number, options: TextOptions) => outlinedText(available, value, options);
   const visible = rows.slice(0, 70);
   if (visible.length < rows.length) visible.push(["Additional stations", rows.length - visible.length]);
-  return svg(900, 50 + visible.length * 34,
-    rect(0, 0, 900, 50, "#193456") + text(title, { x: 18, y: 32, size: 18, maxWidth: 864, color: "white", bold: true }) +
+  const palette=reportPalette(title), width=620, valueWidth=210, labelWidth=width-valueWidth;
+  return svg(width, 36 + visible.length * 28,
+    rect(0, 0, width, 36, palette.header) + text(title, { x: 10, y: 24, size: 15, maxWidth: width-20, color: 'white', bold: true }) +
     visible.map(([label, value], index) => {
-      const y = 50 + index * 34;
+      const y = 36 + index * 28;
       const style = rowStyle?.(label, value) ?? null;
-      return rect(0, y, 690, 34, index % 2 ? "#f2f5f9" : "#fff") +
-        rect(690, y, 210, 34, style?.background || (index % 2 ? "#e7edf5" : "#eef3f8")) +
-        text(label, { x: 18, y: y + 23, size: 18, maxWidth: 650 }) +
-        text(value, { x: 875, y: y + 23, size: 18, maxWidth: 170, anchor: "end", color: style?.color, bold: true });
-    }).join(""));
+      return rect(0,y,labelWidth,28,index%2?palette.stripe:'#fff')+
+        rect(labelWidth,y,valueWidth,28,style?.background||palette.soft)+
+        text(label,{x:10,y:y+19,size:13,maxWidth:labelWidth-20})+
+        text(value,{x:labelWidth+valueWidth/2,y:y+19,size:13,maxWidth:valueWidth-16,anchor:'middle',color:style?.color,bold:true});
+    }).join(''));
+
 }
 
-export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string | readonly string[], percentageStyle: (value: string | number) => CellStyle, minimumWidth=0, compact=false) {
+export async function tableReportSvg(title: string, columns: string[], rows: Array<Array<string | number>>, percentageColumn: string | readonly string[], percentageStyle: (value: string | number) => CellStyle, minimumWidth=0, compact=true) {
   if (!columns.length) throw new Error("Report image requires columns");
   const available = await fonts();
   const text = (value: string | number, options: TextOptions) => outlinedText(available, value, options);
   const columnWidth = Math.max(Math.floor(minimumWidth/columns.length),102, Math.min(158, Math.floor(1264 / columns.length)));
-  const widths = columns.map((column,index)=>compact?(index===0?86:column==='Physical at station'||column==='Unpickupable'?88:72):columnWidth);
+  const widths = columns.map((column,index)=>{
+    if(!compact)return columnWidth;
+    const values=rows.map(row=>String(row[index]??''));
+    const content=Math.max(0,...values.map(value=>value.length));
+    const label=Math.max(...column.split(/\s+/).map(word=>word.length));
+    const isText=index===0||values.some(value=>/[a-z]/i.test(value)&&!/^[-+\d.,%₹ km~:–—/]+$/i.test(value));
+    return Math.max(index===0?82:64,Math.min(isText?200:110,Math.max(label*6.3+16,content*(isText?6:7)+16)));
+  });
+  const naturalWidth=widths.reduce((n,w)=>n+w,0);
+  if(compact&&minimumWidth>naturalWidth)widths.forEach((_,i)=>{widths[i]+=(minimumWidth-naturalWidth)/widths.length;});
   const left = widths.map((_,i)=>widths.slice(0,i).reduce((n,w)=>n+w,0));
   const width = widths.reduce((n,w)=>n+w,0);
-  const rowHeight = 29, titleHeight = 45, headerHeight=compact?43:rowHeight;
+  const palette=reportPalette(title);
+  const rowHeight = 26, titleHeight = 34, headerHeight=compact?36:rowHeight;
   const headerLines=(label:string)=>{
     if(!compact)return [label];
     const special:Record<string,string[]>= {'EDD at station':['EDD at','station'],'Physical at station':['Physical at','station'],'Verified total':['Assigned'],'Delivery failed':['Delivery','failed'],'Pickup failed':['Pickup','failed'],'At station':['At station','unassigned']};
@@ -98,8 +120,8 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
   };
   const percentageColumns: readonly string[] = typeof percentageColumn === "string" ? [percentageColumn] : percentageColumn;
   // Keep all configured stations and the actual total, never truncate a report.
-  const header = columns.map((label,index)=>rect(left[index],titleHeight,widths[index],headerHeight,"#dce8f6")+
-    headerLines(label).map((line,n,lines)=>text(line,{x:left[index]+(index?widths[index]/2:8),y:titleHeight+(lines.length===1?27:17+n*16),size:compact?12:13,maxWidth:widths[index]-12,anchor:index?"middle":"start",bold:true})).join('')).join('');
+  const header = columns.map((label,index)=>rect(left[index],titleHeight,widths[index],headerHeight,palette.soft)+
+    headerLines(label).map((line,n,lines)=>text(line,{x:left[index]+(index?widths[index]/2:8),y:titleHeight+(lines.length===1?24:14+n*14),size:compact?12:13,maxWidth:widths[index]-12,anchor:index?"middle":"start",bold:true})).join('')).join('');
   const body = rows.map((row, rowIndex) => {
     const total = /^grand total$/i.test(String(row[0]));
     return columns.map((column, columnIndex) => {
@@ -108,14 +130,14 @@ export async function tableReportSvg(title: string, columns: string[], rows: Arr
       const denominator = Number(row[columns.findIndex(c => ["Assigned", "Scheduled", "Verified total"].includes(c))]) || 0;
       const style = (!total || compact) && percentageColumns.includes(column) ? percentageStyle(value)
         : compact && !total ? reportMetricStyle(column, value, denominator) : null;
-      return rect(left[columnIndex], y, widths[columnIndex], rowHeight, style?.background || (total ? "#e8eef6" : rowIndex % 2 ? "#f6f8fb" : "#fff")) +
-        text(value, { x: left[columnIndex] + (columnIndex ? widths[columnIndex] / 2 : 10), y: y + 20, size: 13, maxWidth: widths[columnIndex] - 16, anchor: columnIndex ? "middle" : "start", color: style?.color, bold: total || !!style });
+      return rect(left[columnIndex], y, widths[columnIndex], rowHeight, style?.background || (total ? palette.soft : rowIndex % 2 ? palette.stripe : "#fff")) +
+        text(value, { x: left[columnIndex] + (columnIndex ? widths[columnIndex] / 2 : 10), y: y + 18, size: 13, maxWidth: widths[columnIndex] - 16, anchor: columnIndex ? "middle" : "start", color: style?.color, bold: total || !!style });
     }).join("");
   }).join("");
   const bottom = titleHeight + headerHeight + rowHeight * rows.length;
   const grid = compact ? `<g stroke="#d7e0ec" stroke-width="0.65">${[0,...left.slice(1),width-.5].map(x=>`<path d="M${x} ${titleHeight}V${bottom}"/>`).join('')}${Array.from({length:rows.length+1},(_,i)=>`<path d="M0 ${titleHeight+headerHeight+i*rowHeight}H${width}"/>`).join('')}</g>` : '';
-  return svg(width, bottom, rect(0, 0, width, titleHeight, "#193456") +
-    text(title, { x: 12, y: 29, size: 17, maxWidth: width - 24, color: "white", bold: true }) + header + body + grid);
+  return svg(width, bottom, rect(0, 0, width, titleHeight, palette.header) +
+    text(title, { x: 10, y: 23, size: 15, maxWidth: width - 24, color: "white", bold: true }) + header + body + grid);
 }
 
 export async function reportPngBase64(svgSource: string) {
@@ -124,11 +146,14 @@ export async function reportPngBase64(svgSource: string) {
 
 /** One data-only image; instructions and mentions belong to its WhatsApp caption. */
 export async function codSectionsPng(title:string,sections:Array<{title:string;columns:string[];rows:Array<Array<string|number>>}>) {
-  const parts=await Promise.all(sections.map(async section=>Buffer.from(await reportPngBase64(await tableReportSvg(section.title,section.columns,section.rows,[],()=>null,1100)),'base64')));
-  const width=1100;
-  const header=Buffer.from(await reportPngBase64(await summaryReportSvg(title,[])),'base64');
-  const inputs=[header,...parts];let top=0;
-  const composites=[];
-  for(const input of inputs){const resized=await sharp(input).resize({width}).png().toBuffer();const meta=await sharp(resized).metadata();composites.push({input:resized,left:0,top});top+=meta.height!+8;}
-  return (await sharp({create:{width,height:top,channels:4,background:'#eef2f7'}}).composite(composites).png().toBuffer()).toString('base64');
+  const drafts=await Promise.all(sections.map(section=>tableReportSvg(section.title,section.columns,section.rows,[],()=>null,0,true)));
+  const width=Math.max(360,...drafts.map(draft=>Number(draft.match(/width="([\d.]+)"/)?.[1]||0)));
+  const rendered=await Promise.all(sections.map(async (section,index)=>Buffer.from(await reportPngBase64(Number(drafts[index].match(/width="([\d.]+)"/)?.[1])===width?drafts[index]:await tableReportSvg(section.title,section.columns,section.rows,[],()=>null,width,true)),'base64')));
+  const sizes=await Promise.all(rendered.map(input=>sharp(input).metadata()));
+  const available=await fonts();
+  const header=Buffer.from(await reportPngBase64(svg(width,34,rect(0,0,width,34,reportPalette(title).header)+outlinedText(available,title,{x:10,y:23,size:15,maxWidth:width-20,color:'white',bold:true}))),'base64');
+  let top=34;
+  const composites=[{input:header,left:0,top:0}];
+  rendered.forEach((input,index)=>{composites.push({input,left:0,top});top+=sizes[index].height!+3;});
+  return (await sharp({create:{width,height:top,channels:4,background:'#ffffff'}}).composite(composites).png().toBuffer()).toString('base64');
 }
