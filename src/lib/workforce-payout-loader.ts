@@ -277,7 +277,7 @@ export async function loadWorkforcePayoutRows(
     }),
     loadPostgrestInFilterBatches({
       values: workforceIds,
-      loadBatch: (workforceIdChunk) => admin.from("connect_profile_verifications").select("account_id, verified").eq("company_id", companyId).eq("profile_type", "workforce").eq("kind", "pan_aadhaar").in("account_id", workforceIdChunk)
+      loadBatch: (workforceIdChunk) => admin.from("workforce_payout_linked_pan_aadhaar").select("account_id").eq("company_id", companyId).in("account_id", workforceIdChunk)
     }),
     paymentMethodIds.length ? readAllRows(supabaseAdmin.from("payment_method_components").select("payment_method_id,payment_field_id,component_code,component_type,label,pay_schedule,sort_order,payment_fields(id,code,label,pay_schedule,field_type,calculation_type,calculation_source,is_custom_production)").eq("company_id", companyId).eq("is_active", true).in("payment_method_id", paymentMethodIds).order("payment_method_id").order("sort_order").order("id")) : Promise.resolve({ data: [], error: null })
   ]);
@@ -730,7 +730,7 @@ export async function loadWorkforcePayoutRows(
     else productionAllocationsByProviderId.set(allocation.provider_id, [allocation]);
   }
   const deductionHeads = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
-  const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
+  const panAadhaarLinkedByWorkforceId = new Set((panAadhaarResult.data ?? []).map((row: any) => row.account_id));
   const historyByWorkforceId = new Map<string, PaymentAllocationHistoryEntry[]>();
   const historyByProviderMember = new Map<string, PaymentAllocationHistoryEntry[]>();
   const providerHistoryKey = (stationId: unknown, providerMemberId: unknown) => `${String(stationId ?? "")}|${normalizePayoutIdentity(providerMemberId)}`;
@@ -1384,7 +1384,7 @@ export async function loadWorkforcePayoutRows(
     }));
     const paymentMethodBreakdown = summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }]);
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
-    const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.get(worker.id) === true : false;
+    const panAadhaarLinked = worker?.id ? panAadhaarLinkedByWorkforceId.has(worker.id) : false;
     const additions = 0; const grossPayment = baseAmount + additions;
     const status = paymentSetupConflict || missingAttendanceConfiguration || missingThresholdConfiguration ? "Configuration incomplete" : missingRouteDistance ? "Route distance pending" : baseAmount > 0 ? "Ready for review" : attendanceDates.length ? "No eligible attendance" : "Awaiting production";
     return [{
@@ -1737,7 +1737,7 @@ export async function loadWorkforcePayoutRows(
     const paymentMethodBreakdown = summarizePaymentMethodAmounts([...configuredMethodAmounts, ...rawDailyBreakdown.flatMap((day) => day.methodAmounts.map((item) => ({ methodId: item.id, label: item.label, amount: item.amount })))]);
     const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, deductionHeads, { categoryCode: "workforce", panNumber: worker?.pan_number ?? null });
     const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0);
-    const panAadhaarLinked = panAadhaarLinkedByWorkforceId.get(workforceId) === true;
+    const panAadhaarLinked = panAadhaarLinkedByWorkforceId.has(workforceId);
     const location: any = locationId ? locationById.get(locationId) : null;
     const methodNames = paymentMethodBreakdown.map((item) => item.label);
     const payoutRow = { id: `direct-${workforceId}-${locationId || "unassigned"}`, reviewSubjectType: "workforce", reviewSubjectId: workforceId, dropxId: worker?.dropx_id ?? "", dropxStatus: workforcePayoutDropxStatus(worker), name: worker?.full_name ?? "Unlinked workforce", designation: workforceDesignation(worker), designationCode: workforceDesignationCode(worker), providerMemberId: "No provider ID", providerMemberName: "Direct allocation", locationId: locationId || null, location: String(location?.station_code ?? "-"), provider: "Direct", model: "Attendance / fixed", paymentMethod: methodNames.join(" / ") || "-", mappingStatus: "Not required", paymentDetailsAvailable: true, workDays, workDaysSource, history: historyByWorkforceId.get(workforceId) ?? [], paymentMethodBreakdown, production: productionBreakdown.reduce((sum, line) => sum + line.count, 0), productionBreakdown, dailyBreakdown: dailyBreakdown.map(({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange }) => ({ date, baseAmount, lines, workDayUnits, attendanceSource, methodAmounts, attendanceRange })), baseAmount, additions: 0, grossPayment: baseAmount, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: baseAmount - deductions, status: dailyBreakdown.some((day) => day.missing) ? "Configuration incomplete" : baseAmount > 0 ? "Ready for review" : "No eligible accrual" } satisfies WorkforcePayoutRow;
@@ -1955,7 +1955,7 @@ export async function loadWorkforcePayoutRows(
       grossPayment: 0,
       deductions: 0,
       deductionBreakdown: [],
-      panAadhaarStatus: panAadhaarLinkedByWorkforceId.get(workforceId) === true ? "LINKED" : "NOT LINKED",
+      panAadhaarStatus: panAadhaarLinkedByWorkforceId.has(workforceId) ? "LINKED" : "NOT LINKED",
       netAmount: 0,
       status: "Ready for review"
     };
