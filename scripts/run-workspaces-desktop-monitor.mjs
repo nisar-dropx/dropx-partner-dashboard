@@ -229,6 +229,7 @@ async function countRedPixels(pngPath) {
         if (r >= 160 && g <= 110 && b <= 110 && (r - Math.max(g, b)) >= 40) red += 1;
       }
       let white = 0;
+      let blueish = 0;
       let samples = 0;
       for (let i = 0; i < data.length; i += 64) {
         const r = data[i];
@@ -238,19 +239,30 @@ async function countRedPixels(pngPath) {
         if (a < 180) continue;
         samples += 1;
         if (r >= 235 && g >= 235 && b >= 235) white += 1;
+        // Windows Bloom lock wallpaper + dark login: strong blue dominance, little UI chrome.
+        if (b > r + 25 && b > g + 10 && b >= 80 && b <= 210 && r <= 120) blueish += 1;
       }
       const white_ratio = samples ? white / samples : 0;
+      const blue_ratio = samples ? blueish / samples : 0;
       // Loading / disconnect pages are mostly white and must not page Dark Store Ops.
       const invalid_workspace =
         white_ratio >= 0.72
         || (white_ratio >= 0.55 && red >= threshold * 8);
+      // Locked WorkSpaces session (Ctrl+Alt+Delete / password prompt) — not Site Summary.
+      const locked_workspace =
+        !invalid_workspace
+        && red < Math.max(10, threshold / 4)
+        && white_ratio < 0.18
+        && blue_ratio >= 0.35;
       return {
-        detected: !invalid_workspace && red >= threshold,
+        detected: !invalid_workspace && !locked_workspace && red >= threshold,
         red_pixels: red,
         width: canvas.width,
         height: canvas.height,
         white_ratio: Number(white_ratio.toFixed(3)),
-        invalid_workspace
+        blue_ratio: Number(blue_ratio.toFixed(3)),
+        invalid_workspace,
+        locked_workspace
       };
     }, { imageBase64: bytes.toString("base64"), threshold: minRedPixels });
   } finally {
@@ -623,7 +635,9 @@ async function checkStation(sent, station, { cycleHashes }) {
     attention_detected: red.detected,
     attention_score: red.red_pixels,
     white_ratio: red.white_ratio,
+    blue_ratio: red.blue_ratio ?? null,
     invalid_workspace: Boolean(red.invalid_workspace),
+    locked_workspace: Boolean(red.locked_workspace),
     image_hash: imageHash.slice(0, 12),
     size: `${red.width}x${red.height}`,
     checked_at: new Date().toISOString()
@@ -632,6 +646,11 @@ async function checkStation(sent, station, { cycleHashes }) {
   if (red.width < minWidth || red.height < minHeight) {
     await unlink(pngPath).catch(() => null);
     throw new Error(`Amazon WorkSpaces window is too small (${red.width}x${red.height}). Keep WorkSpaces open (not minimized).`);
+  }
+
+  if (red.locked_workspace) {
+    await unlink(pngPath).catch(() => null);
+    throw new Error("Amazon WorkSpaces screen lock detected. Unlock/restore the screen.");
   }
 
   if (red.invalid_workspace) {
