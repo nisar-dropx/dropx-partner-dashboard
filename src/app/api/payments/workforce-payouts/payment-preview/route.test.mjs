@@ -10,12 +10,13 @@ const worker = "22222222-2222-4222-8222-222222222222";
 const otherStation = "33333333-3333-4333-8333-333333333333";
 function setup(options = {}) {
   const calls = [];
-  const auth = { locationScopeIds: [station], hasAllLocationAccess: false, companyId: "trusted-company" };
+  const auth = { locationScopeIds: [station], hasAllLocationAccess: false, readOnly: options.readOnly, companyId: "trusted-company" };
   const deps = {
     "@/lib/access-surface": { currentAdminAccessSurface: () => "ops" },
-    "@/lib/authorization": { getAuthorization: async () => options.signedOut ? null : auth, hasPermission: (_auth, code, action) => options.denied ? false : code === "ops_workforce_payouts" && action === "access" },
+    "@/lib/authorization": { getAuthorization: async () => options.signedOut ? null : auth, hasPermission: (_auth, code, action) => options.denied ? false : code === "ops_workforce_payouts" && (action === "access" || (action === "edit" && options.canEdit)) },
     "@/lib/company-scope": { requireCompanyId: (authorization) => authorization.companyId },
-    "@/lib/supabase-admin": { supabaseAdmin: { rpc: async (name, args) => { calls.push({ name, args }); return options.failure ? { data: null, error: { message: "sensitive database error" } } : { data: [{ workforce_id: worker, station_id: station, eligible: false, eligibility_code: "payout_dispute_open" }], error: null }; } } },
+    "@/lib/supabase-admin": { supabaseAdmin: { rpc: async (name, args) => { calls.push({ name, args }); return options.failure ? { data: null, error: { message: "sensitive database error" } } : { data: [{ workforce_id: worker, station_id: station, payment_status: options.processing ? "Payment Processing" : null, eligible: false, eligibility_code: "payout_dispute_open" }], error: null }; } } },
+    "@/lib/payout-processing-instructions": { loadPayoutProcessingInstructions: async (_admin, company, audience, start, end, rows) => { calls.push({ company, audience, start, end, rows }); return new Map([[worker + "|" + station, { id: "instruction", instructionAmount: 125 }]]); } },
     "@/lib/payout-payment-preview-batching": { loadPayoutPaymentPreviews: ({ rows, loadBatch }) => loadBatch(rows) }
   };
   const module = { exports: {} };
@@ -51,4 +52,22 @@ test("preview failure is explicit and does not leak database errors", async () =
   const response = await s.post(s.request());
   assert.equal(response.status, 503);
   assert.doesNotMatch(await response.text(), /sensitive database/);
+});
+
+test("deferred previews return processing instruction IDs only to payment editors", async () => {
+  for (const options of [{ canEdit: true }, {}, { canEdit: true, readOnly: true }]) {
+    const s = setup({ ...options, processing: true });
+    const response = await s.post(s.request());
+    assert.equal(response.status, 200);
+    const [row] = (await response.json()).rows;
+    assert.equal(row.payment_status, "Payment Processing");
+    if (options.canEdit && !options.readOnly) {
+      assert.equal(row.processingPaymentItemId, "instruction");
+      assert.equal(row.processingInstructionAmount, 125);
+      assert.equal(s.calls[1].company, "trusted-company");
+    } else {
+      assert.equal(row.processingPaymentItemId, undefined);
+      assert.equal(s.calls.length, 1);
+    }
+  }
 });

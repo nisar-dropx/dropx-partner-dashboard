@@ -43,6 +43,8 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
             const paidAmount = Number(preview.paid_amount ?? 0);
             summaries.set(`${String(preview.workforce_id).toLowerCase()}|${String(preview.station_id).toLowerCase()}`, {
               currentNetAmount, paidAmount,
+              processingPaymentItemId: preview.processingPaymentItemId ?? null,
+              processingInstructionAmount: preview.processingInstructionAmount ?? null,
               processingAmount: Number(preview.processing_amount ?? 0),
               balancePayable: Number(preview.balance_payable ?? 0),
               availableToPay: Number(preview.available_to_pay ?? 0),

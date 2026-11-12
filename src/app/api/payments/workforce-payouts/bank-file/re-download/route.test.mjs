@@ -63,11 +63,12 @@ test("bulk re-download preserves immutable instructions and separates original b
   assert.match(route, /X-Workforce-Payout-Redownload": "true"/);
 });
 
-test("dashboard loads bank-action details with one paginated period query scoped to visible payout rows", () => {
-  assert.match(page, /\.from\(audience === "helpers" \? "helper_payout_payment_items" : "workforce_payout_payment_items"\)[\s\S]{0,700}\.eq\("company_id", companyId\)[\s\S]{0,300}\.eq\("period_start", fromDate\)[\s\S]{0,200}\.eq\("period_end", toDate\)[\s\S]{0,200}\.eq\("status", "processing"\)/);
-  assert.match(page, /\.range\(offset, offset \+ 999\)/);
-  assert.match(page, /visiblePayoutKeys\.has\([\s\S]{0,150}item\.subject_id[\s\S]{0,150}item\.location_id_snapshot/);
-  assert.match(page, /includeProcessingActionDetails[\s\S]{0,100}\? loadProcessingItems\(\)/);
+test("dashboard loads bank-action details with paginated, subject-scoped period queries scoped to visible payout rows", () => {
+  const instructions = readFileSync(new URL("../../../../../../lib/payout-processing-instructions.ts", import.meta.url), "utf8");
+  assert.match(instructions, /\.from\(audience === "helpers" \? "helper_payout_payment_items" : "workforce_payout_payment_items"\)[\s\S]{0,700}\.eq\("company_id", companyId\)[\s\S]{0,300}\.eq\("period_start", fromDate\)[\s\S]{0,200}\.eq\("period_end", toDate\)[\s\S]{0,200}\.eq\("status", "processing"\)/);
+  assert.match(instructions, /\.range\(offset, offset \+ 999\)/);
+  assert.match(instructions, /visiblePayoutKeys\.has\([\s\S]{0,150}item\.subject_id[\s\S]{0,150}item\.location_id_snapshot/);
+  assert.match(page, /includeProcessingActionDetails[\s\S]{0,100}\? loadPayoutProcessingInstructions\(/);
   assert.doesNotMatch(page, /chunkedValues\(visiblePayoutKeys/);
 });
 

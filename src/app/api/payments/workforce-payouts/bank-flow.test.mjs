@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { payoutBankResponseImportIdentity } from "../../../../lib/payout-bank-response-import-identity.ts";
 
+const instructions = readFileSync(new URL("../../../../lib/payout-processing-instructions.ts", import.meta.url), "utf8");
 const bankFileRoute = readFileSync(new URL("./bank-file/route.ts", import.meta.url), "utf8");
 const bankResponseRoute = readFileSync(new URL("./bank-response/route.ts", import.meta.url), "utf8");
 const historyRoute = readFileSync(new URL("./payment-history/route.ts", import.meta.url), "utf8");
@@ -342,15 +343,16 @@ test("payment history presents immutable bank evidence in the requested columns"
 });
 
 test("selected processing rows can be cancelled atomically with one mandatory remark", () => {
-  assert.match(page, /"id,workforce_id,location_id_snapshot,instruction_amount"/);
-  assert.match(page, /"id,helper_id,location_id_snapshot,instruction_amount"/);
-  assert.match(page, /from\("workforce_payout_payment_allocations"\)/);
-  assert.match(page, /const isExactLocationInstruction = allocations\.length === 1/);
-  assert.match(page, /allocations\[0\]\?\.station_id[\s\S]*?item\.location_id_snapshot/);
-  assert.match(page, /Math\.round\(allocationAmount \* 100\) === Math\.round\(instructionAmount \* 100\)/);
+  const instructions = readFileSync(new URL("../../../../lib/payout-processing-instructions.ts", import.meta.url), "utf8");
+  assert.match(instructions, /"id,workforce_id,location_id_snapshot,instruction_amount"/);
+  assert.match(instructions, /"id,helper_id,location_id_snapshot,instruction_amount"/);
+  assert.match(instructions, /from\("workforce_payout_payment_allocations"\)/);
+  assert.match(instructions, /const isExactLocationInstruction = allocations\.length === 1/);
+  assert.match(instructions, /allocations\[0\]\?\.station_id[\s\S]*?item\.location_id_snapshot/);
+  assert.match(instructions, /Math\.round\(allocationAmount \* 100\) === Math\.round\(instructionAmount \* 100\)/);
   assert.match(page, /processingPaymentItemId: processingInstruction\?\.id \?\? null/);
   assert.match(page, /processingInstructionAmount: processingInstruction\?\.instructionAmount \?\? null/);
-  assert.match(page, /\.eq\("status", "processing"\)/);
+  assert.match(instructions, /\.eq\("status", "processing"\)/);
   assert.match(table, /function canCancelProcessingPayment/);
   assert.match(table, /processingInstructionAmount \?\? 0/);
   assert.match(table, /const processingSelectedRows = useMemo\(\(\) => selectedRows\.filter\(canCancelProcessingPayment\)/);
@@ -402,7 +404,7 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(table, /\{canEdit \? <div className="payout-global-actions">/);
   assert.match(table, /canViewPaymentHistory && row\.reviewSubjectId && row\.locationId && row\.paymentSummary/);
   assert.match(table, /canManageStatus=\{canProcessPayments\}/);
-  assert.match(page, /"helper_payout_payment_items" : "workforce_payout_payment_items"[\s\S]{0,300}instruction_amount/);
+  assert.match(instructions, /"helper_payout_payment_items" : "workforce_payout_payment_items"[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
   assert.match(table, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);

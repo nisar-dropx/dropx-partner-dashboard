@@ -57,7 +57,7 @@ test("every monthly viewer receives payment status while bank action details sta
   assert.match(pageSource, /const canLoadPaymentSummaries = period\.mode === ["']monthly["'];/);
   assert.match(pageSource, /loadWorkforcePayoutBanks\(companyId, canProcessPayments\)/);
   assert.match(pageSource, /loadError \|\| !canLoadPaymentSummaries[\s\S]*?withPayoutPaymentSummaries\([\s\S]*?includeProcessingActionDetails: canProcessPayments/);
-  assert.match(pageSource, /includeProcessingActionDetails[\s\S]*?\? loadProcessingItems\(\)[\s\S]*?: Promise\.resolve\(\{ data: \[\] as ProcessingPaymentItem\[\], error: null \}\)/);
+  assert.match(pageSource, /includeProcessingActionDetails[\s\S]*?\? loadPayoutProcessingInstructions\(/);
   assert.match(source, /row\.paymentSummary\?\.status !== ["']Payment Processing["']/);
 });
 

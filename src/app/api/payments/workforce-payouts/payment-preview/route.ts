@@ -1,3 +1,4 @@
+import { loadPayoutProcessingInstructions } from "@/lib/payout-processing-instructions";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -12,7 +13,8 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function POST(request: Request) {
   const authorization = await getAuthorization();
   if (!authorization) return Response.json({ error: "Sign in to view payment status." }, { status: 401, headers });
-  const pageCode = currentAdminAccessSurface() === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
+  const accessSurface = currentAdminAccessSurface();
+  const pageCode = accessSurface === "ops" ? "ops_workforce_payouts" : "workforce_payouts";
   if (!hasPermission(authorization, pageCode, "access")) return Response.json({ error: "Workforce Payouts access is required." }, { status: 403, headers });
   if (!supabaseAdmin) return Response.json({ error: "Payment status is temporarily unavailable." }, { status: 503, headers });
   try {
@@ -44,17 +46,27 @@ export async function POST(request: Request) {
       rows.push({ workforce_id: row.workforceId, station_id: row.stationId });
     }
     const admin = supabaseAdmin;
-    const result = await loadPayoutPaymentPreviews({
+    const companyId = requireCompanyId(authorization);
+    const canProcessPayments = !authorization.readOnly && hasPermission(authorization, pageCode, "edit")
+      && (accessSurface === "ops" || hasPermission(authorization, "payment_process", "edit"));
+    const result = await loadPayoutPaymentPreviews<{ workforce_id: string; station_id: string }, { workforce_id: string; station_id: string; payment_status?: string }, { message: string }>({
       rows,
       loadBatch: async (batch) => admin.rpc("workforce_preview_payout_payment_rows", {
-        p_company_id: requireCompanyId(authorization),
+        p_company_id: companyId,
         p_period_start: periodStart,
         p_period_end: periodEnd,
         p_rows: batch
       })
     });
     if (result.error) return Response.json({ error: "Payment status could not load. Please retry." }, { status: 503, headers });
-    return Response.json({ rows: result.data }, { headers });
+    const processingRows = result.data.filter((row) => row.payment_status === "Payment Processing");
+    if (!canProcessPayments || !processingRows.length) return Response.json({ rows: result.data }, { headers });
+
+    const instructions = await loadPayoutProcessingInstructions(admin, companyId, "workforce", periodStart, periodEnd, processingRows);
+    return Response.json({ rows: result.data.map((row) => {
+      const instruction = instructions.get(`${row.workforce_id.toLowerCase()}|${row.station_id.toLowerCase()}`);
+      return instruction ? { ...row, processingPaymentItemId: instruction.id, processingInstructionAmount: instruction.instructionAmount } : row;
+    }) }, { headers });
   } catch {
     return Response.json({ error: "Payment status could not load. Please retry." }, { status: 400, headers });
   }
