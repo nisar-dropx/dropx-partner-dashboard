@@ -151,26 +151,40 @@ function clientRefFor(signature) {
   return `wsdesk_${signature.slice(0, 24)}`;
 }
 
-function fallbackCaption(station, redPixels) {
+function fallbackCaption(station) {
   return [
-    `Dark Store Ops · WorkSpaces Site Summary red alert`,
-    `Station focus: ${station}`,
-    `Red alert pixels detected: ${redPixels}`,
+    `Amazon Quick Commerce · ${station} · Site Summary attention`,
+    `Attention is showing on one or more store metrics.`,
     "",
-    "Question: Which red metric should we break first, and who owns the next 15 minutes?"
+    `Need now:`,
+    `1) Clear which first for customer promise — Waiting for Orders, Pending Acceptance, Idle, or Productivity?`,
+    `2) Who owns recovery for the next 15 minutes, and what is ETA to clear?`
   ].join("\n");
 }
 
 async function geminiCaption(station, redPixels, imageBase64) {
-  if (!geminiKey) return fallbackCaption(station, redPixels);
+  if (!geminiKey) return fallbackCaption(station);
   const prompt = [
-    "You write WhatsApp captions for DropX Dark Store Ops.",
-    "This screenshot is Amazon Site Summary inside Amazon WorkSpaces (Firefox).",
-    "Read only the red/attention metrics. Do not invent numbers.",
-    "Return plain text only.",
-    "Format: short headline with station, up to 5 bullets breaking the metrics, exactly one follow-up question about which metric to attack first.",
-    `Station focus: ${station}`,
-    `Approximate red alert pixels: ${redPixels}`
+    "You write WhatsApp ops alerts for DropX Amazon Quick Commerce (dark store / NOW) stations.",
+    "Audience: store leads and Dark Store Ops in a busy WhatsApp group.",
+    "Screenshot = Amazon Site Summary from WorkSpaces (Firefox).",
+    "CRITICAL wording rules:",
+    "- Do NOT use the words red, green, amber, color, pixel, screenshot, AI, Gemini, or the phrase 'Site Summary header'.",
+    "- Always use the EXACT on-screen metric names/titles (examples: Waiting for Orders, Pending Acceptance, Idle, Productivity).",
+    "- Only include metrics that currently need attention. Do not invent names or numbers.",
+    "Tone: calm, direct, operations.",
+    "Return plain text only (no markdown fences, no emoji).",
+    "Format exactly:",
+    "Line 1: Amazon Quick Commerce · <station> · Site Summary attention",
+    "Next: 3 to 5 short bullets. Each bullet starts with the exact metric name, then the value if visible, then store impact in a few words.",
+    "Then a blank line.",
+    "Then 'Need now:' with exactly 2 short questions that NAME the exact metrics from the bullets, for example:",
+    "  1) Clear Waiting for Orders or Pending Acceptance first for customer promise?",
+    "  2) Who owns Waiting for Orders recovery for the next 15 minutes, and what is ETA to clear?",
+    "Do not ask generic 'which header' questions — put the real metric names into the questions.",
+    "Keep total under 900 characters.",
+    `Station code: ${station}`,
+    `Internal signal only (do not mention): attention_score=${redPixels}`
   ].join("\n");
   try {
     const response = await fetch(
@@ -193,13 +207,13 @@ async function geminiCaption(station, redPixels, imageBase64) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       console.error(`Gemini caption failed (${response.status}): ${data?.error?.message || "unknown"}`);
-      return fallbackCaption(station, redPixels);
+      return fallbackCaption(station);
     }
     return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim()
-      || fallbackCaption(station, redPixels);
+      || fallbackCaption(station);
   } catch (error) {
     console.error(`Gemini caption error: ${error instanceof Error ? error.message : error}`);
-    return fallbackCaption(station, redPixels);
+    return fallbackCaption(station);
   }
 }
 

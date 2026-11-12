@@ -97,43 +97,53 @@ function alertSignature(alert) {
 function fallbackCaption(alert) {
   const metricLines = (alert.metrics || [])
     .slice(0, 8)
-    .map((metric) => `• ${metric.label ? `${metric.label}: ` : ""}${metric.value}`)
+    .map((metric) => `• ${metric.label || "Metric"}${metric.value ? `: ${metric.value}` : ""}`)
     .join("\n");
-  const question = (alert.metrics || []).length > 1
-    ? "Which red metric should we break first, and who owns the fix for the next 15 minutes?"
-    : "What is the immediate recovery action for this red metric?";
+  const named = (alert.metrics || []).map((metric) => metric.label).filter(Boolean).slice(0, 4);
+  const firstAsk = named.length
+    ? `1) Clear which first for customer promise — ${named.join(", ")}?`
+    : `1) Clear which first for customer promise — Waiting for Orders, Pending Acceptance, Idle, or Productivity?`;
   return [
-    `Dark Store Ops · Site Summary red alert`,
-    `Station: ${alert.station}`,
-    metricLines || "Red condition detected on Site Summary.",
+    `Amazon Quick Commerce · ${alert.station} · Site Summary attention`,
+    metricLines || "Attention is showing on one or more store metrics.",
     "",
-    `Question: ${question}`
+    "Need now:",
+    firstAsk,
+    named[0]
+      ? `2) Who owns ${named[0]} recovery for the next 15 minutes, and what is ETA to clear?`
+      : `2) Who owns recovery for the next 15 minutes, and what is ETA to clear?`
   ].join("\n");
 }
 
 async function geminiCaption(alert) {
   if (!geminiKey) return fallbackCaption(alert);
   const metricBlock = (alert.metrics || [])
-    .map((metric) => `- ${metric.label || "metric"} = ${metric.value}`)
-    .join("\n") || alert.page_text?.slice(0, 1200) || "Red metric detected.";
+    .map((metric) => `- header: ${metric.label || "unknown"} | value: ${metric.value || "n/a"}`)
+    .join("\n") || alert.page_text?.slice(0, 1200) || "Attention metrics detected.";
   const useVision = Boolean(alert.needs_vision_caption || alert.capture_mode === "workspace-stream")
     && Boolean(alert.image_base64);
   const prompt = [
-    "You write WhatsApp captions for DropX Dark Store Ops.",
-    "Use only the facts visible in the provided metrics/screenshot. Do not invent numbers.",
-    "Return plain text only (no markdown fences).",
+    "You write WhatsApp ops alerts for DropX Amazon Quick Commerce (dark store / NOW) stations.",
+    "Audience: store leads and Dark Store Ops.",
+    "CRITICAL wording rules:",
+    "- Do NOT use the words red, green, amber, color, pixel, screenshot, AI, Gemini, or the phrase 'Site Summary header'.",
+    "- Always use the EXACT on-screen metric names (Waiting for Orders, Pending Acceptance, Idle, Productivity, etc.).",
+    "- Only include metrics that need attention. Do not invent names or numbers.",
+    "Tone: calm, direct, operations.",
+    "Return plain text only (no markdown fences, no emoji).",
     "Format:",
-    "1) One short headline with the station code",
-    "2) Up to 5 bullet lines that break the red metrics into clear actions",
-    "3) Exactly one follow-up question asking the group which metric to attack first / how to split ownership",
-    "Do not mention AI, Gemini, OCR, or screenshots.",
+    "Line 1: Amazon Quick Commerce · <station> · Site Summary attention",
+    "Then 3 to 5 short bullets. Each bullet starts with the exact metric name, then value if known, then store impact.",
+    "Then 'Need now:' with exactly 2 questions that NAME those exact metrics, e.g.",
+    "  1) Clear Waiting for Orders or Pending Acceptance first for customer promise?",
+    "  2) Who owns Waiting for Orders recovery for the next 15 minutes, and what is ETA to clear?",
+    "Do not ask generic which-header questions.",
     "",
     `Station: ${alert.station}`,
-    `Capture mode: ${alert.capture_mode || "dom"}`,
-    "Red metrics / context:",
+    "Metrics / values:",
     metricBlock,
     useVision
-      ? "If a screenshot is attached, read only the red/attention numbers from Amazon Site Summary inside the WorkSpaces desktop and break those metrics into actions."
+      ? "If an image is attached, read the exact metric names and values that need attention and use those names in bullets and questions."
       : ""
   ].filter(Boolean).join("\n");
 

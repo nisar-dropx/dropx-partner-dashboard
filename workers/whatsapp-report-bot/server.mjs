@@ -23,6 +23,8 @@ import {
   bearerMatches,
   EventQueue,
   GROUP_JID,
+  DIRECT_JID,
+  parseDirectAllowlist,
   ChatLog,
   chatEntry,
   cleanMentions,
@@ -376,15 +378,18 @@ async function sendToGroup(body) {
   const cached = sentRefs.get(body.client_ref);
   if (cached) return cached;
   if (!session.sock || session.state !== "open") throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
-  if (!session.groups.has(body.to)) await refreshGroups();
-  const group = session.groups.get(body.to);
-  if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
-  if (group.announce) {
-    // Only admins can post; WhatsApp would reject a non-admin silently.
-    const metadata = await session.sock.groupMetadata(body.to);
-    const mine = myIds(session.sock);
-    const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
-    if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+  const isDirect = DIRECT_JID.test(body.to);
+  if (!isDirect) {
+    if (!session.groups.has(body.to)) await refreshGroups();
+    const group = session.groups.get(body.to);
+    if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
+    if (group.announce) {
+      // Only admins can post; WhatsApp would reject a non-admin silently.
+      const metadata = await session.sock.groupMetadata(body.to);
+      const mine = myIds(session.sock);
+      const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
+      if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+    }
   }
   const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;
   const quoted = quotedId
@@ -537,7 +542,10 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/send") {
     // Text sends are tiny; image flashes carry base64 (up to ~16 MB JSON).
     const body = await readBody(req, 17_000_000);
-    const invalid = validateSend(body, config);
+    const invalid = validateSend(body, {
+      ...config,
+      direct_jids: parseDirectAllowlist(process.env.DIRECT_ALERT_JIDS || "")
+    });
     if (invalid) return json(res, 422, { error: invalid });
     return json(res, 200, await sendToGroup(body));
   }

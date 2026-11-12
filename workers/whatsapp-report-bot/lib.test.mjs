@@ -113,9 +113,20 @@ test("send is refused unless Live and the group is enabled", () => {
   assert.equal(validateSend(body, live), null);
   assert.match(validateSend(body, { ...live, mode: "listen" }), /Live/);
   assert.match(validateSend({ ...body, to: "120363000000000009@g.us" }, live), /not enabled/);
-  assert.match(validateSend({ ...body, to: "919876543210@s.whatsapp.net" }, live), /group id/);
+  assert.match(validateSend({ ...body, to: "919876543210@s.whatsapp.net" }, live), /allowlisted|direct/);
   assert.match(validateSend({ ...body, text: " " }, live), /text/);
   assert.match(validateSend({ ...body, client_ref: "x" }, live), /client_ref/);
+});
+
+test("send allows allowlisted direct chats for ops alerts", () => {
+  const live = { mode: "live", groups: [GROUP], direct_jids: ["919645881397@s.whatsapp.net"] };
+  const body = {
+    client_ref: "screenlock_alert_001",
+    to: "919645881397@s.whatsapp.net",
+    text: "WorkSpaces screen lock detected."
+  };
+  assert.equal(validateSend(body, live), null);
+  assert.match(validateSend(body, { ...live, direct_jids: [] }), /allowlisted/);
 });
 
 test("send accepts an image with optional caption instead of plain text", () => {

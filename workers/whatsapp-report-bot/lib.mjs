@@ -4,7 +4,22 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path";
 
 export const GROUP_JID = /^[0-9-]+@g\.us$/;
+export const DIRECT_JID = /^\d{10,15}@s\.whatsapp\.net$/;
 export const MEDIA_REF = /^[A-Za-z0-9_-]{8,128}$/;
+
+/** Normalize +91... / 91... / bare local into WhatsApp direct JID. */
+export function toDirectJid(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return "";
+  return `${digits}@s.whatsapp.net`;
+}
+
+export function parseDirectAllowlist(value) {
+  return String(value || "")
+    .split(",")
+    .map((part) => toDirectJid(part.trim()))
+    .filter(Boolean);
+}
 
 /** Constant-time bearer check. An unset secret never authorises anything. */
 export function bearerMatches(header, secret) {
@@ -313,9 +328,17 @@ const SEND_DOCUMENT_MIMES = new Set([
 export function validateSend(body, config) {
   if (!body || typeof body !== "object") return "Body must be a JSON object.";
   if (typeof body.client_ref !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(body.client_ref)) return "client_ref is required.";
-  if (typeof body.to !== "string" || !GROUP_JID.test(body.to)) return "to must be a group id.";
+  if (typeof body.to !== "string") return "to is required.";
   if (config.mode !== "live") return "The bot is not in Live mode.";
-  if (!config.groups.includes(body.to)) return "This group is not enabled in the portal.";
+
+  const isGroup = GROUP_JID.test(body.to);
+  const isDirect = DIRECT_JID.test(body.to);
+  if (!isGroup && !isDirect) return "to must be a group id or an allowlisted direct chat.";
+  if (isGroup && !config.groups.includes(body.to)) return "This group is not enabled in the portal.";
+  if (isDirect) {
+    const allowed = Array.isArray(config.direct_jids) ? config.direct_jids : [];
+    if (!allowed.includes(body.to)) return "This direct chat is not allowlisted for alerts.";
+  }
 
   const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
   const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
