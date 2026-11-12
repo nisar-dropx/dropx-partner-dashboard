@@ -1,0 +1,8 @@
+node_modules/
+.amazon-portal-sessions/
+.station-summary-state/
+.env
+.env.*
+!.env.example
+!.env.station-summary.example
+debug-artifacts/

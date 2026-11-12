@@ -2,7 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromium, firefox } from "playwright";
 
 const PORT = Number(process.env.PORT || 8080);
 const WORKER_SECRET = process.env.OPS_PORTAL_WORKER_SECRET || process.env.WORKER_SECRET || "";
@@ -130,7 +130,14 @@ function workerInfo() {
     biometric_middleware_host: "bio.dropxlogistics.com is not used by this worker",
     session_state_dir: SESSION_STATE_DIR,
     manual_approval_wait_ms: MANUAL_APPROVAL_WAIT_MS,
-    worker_timeout_ms: WORKER_TIMEOUT_MS
+    worker_timeout_ms: WORKER_TIMEOUT_MS,
+    station_summary_timeout_ms: STATION_SUMMARY_TIMEOUT_MS,
+    station_summary_path: "/station-summary",
+    station_summary_cdp_env: "AMAZON_CDP_URL",
+    workspaces_web_url: WORKSPACES_WEB_DEFAULT_URL,
+    capture_modes: ["auto", "dom", "workspace-stream"],
+    station_summary_browser: "firefox",
+    station_summary_note: "Run /station-summary inside Amazon WorkSpaces so Firefox opens on the remote desktop."
   };
 }
 
@@ -695,10 +702,49 @@ function isAuthenticatedPortalPage(text, url) {
     /station command center/i.test(String(text || ""));
 }
 
+function isSiteSummaryAuthenticated(text, url) {
+  const pageUrl = String(url || "");
+  if (!/store-management|siteSummary|site.?summary/i.test(pageUrl)) return false;
+  if (/\/ap\/signin|signin|\/login/i.test(pageUrl)) return false;
+  const body = String(text || "");
+  return /site summary|station summary|idle|acceptance|productivity|throughput/i.test(body);
+}
+
 function isLoginVisible(text, url) {
-  if (isAuthenticatedPortalPage(text, url)) return false;
+  if (isAuthenticatedPortalPage(text, url) || isSiteSummaryAuthenticated(text, url)) return false;
   if (/signin|login/i.test(url)) return true;
   return /(?:^|\n)\s*(?:sign in|log in|login)\s*(?:$|\n)|enter\s+(?:your\s+)?(?:password|email|username)/i.test(text);
+}
+
+const SITE_SUMMARY_DEFAULT_URL = "https://eu.store-management.f3.amazon.dev/siteSummary";
+const WORKSPACES_WEB_DEFAULT_URL = process.env.AMAZON_WORKSPACES_URL
+  || "https://ap-southeast-1.webclient.amazonworkspaces.com/wsp.html";
+const STATION_SUMMARY_TIMEOUT_MS = Math.min(
+  Number(process.env.STATION_SUMMARY_TIMEOUT_MS || 420000),
+  600000
+);
+
+function resolveCaptureMode(payload = {}) {
+  const raw = String(payload.capture_mode || process.env.AMAZON_CAPTURE_MODE || "auto").trim().toLowerCase();
+  if (raw === "dom" || raw === "site-summary") return "dom";
+  if (raw === "workspace-stream" || raw === "workspaces" || raw === "stream") return "workspace-stream";
+  // auto: prefer stream when a WorkSpaces URL/session is explicitly configured.
+  if (payload.workspaces_url || process.env.AMAZON_WORKSPACES_URL) return "workspace-stream";
+  return "dom";
+}
+
+async function withTimeout(task, timeoutMs, label = "Worker task") {
+  let timer;
+  try {
+    return await Promise.race([
+      task,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms.`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function sessionStatePath(payload) {
@@ -771,6 +817,7 @@ async function waitForLoginToClear(page, waitMs) {
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => null);
     const text = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
     if (isAuthenticatedPortalPage(text, page.url()) ||
+      isSiteSummaryAuthenticated(text, page.url()) ||
       (!hasMfaOrHumanBlocker(text) && !isLoginVisible(text, page.url()))) {
       return true;
     }
@@ -875,7 +922,11 @@ async function maybeLogin(page, payload, initialUrl = "") {
   await page.waitForTimeout(750);
 
   let text = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
-  if (isAuthenticatedPortalPage(text, page.url()) || !isLoginVisible(text, page.url())) {
+  if (
+    isAuthenticatedPortalPage(text, page.url()) ||
+    isSiteSummaryAuthenticated(text, page.url()) ||
+    !isLoginVisible(text, page.url())
+  ) {
     return { loggedIn: true, message: "Session already active." };
   }
 
@@ -1012,6 +1063,402 @@ async function setStation(page, stationCode) {
   }
 
   return { changed: false, message: "Station selector was not found; inspected currently active station." };
+}
+
+/**
+ * Site Summary keeps the active site in the top header menu. Prefer that
+ * control so we can rotate the five stores without leaving the page shell.
+ */
+async function setSiteSummaryStation(page, stationCode) {
+  const station = String(stationCode ?? "").trim();
+  if (!station) return { changed: false, message: "No station code provided." };
+  const escaped = station.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const stationPattern = new RegExp(escaped, "i");
+
+  const alreadyActive = await page.evaluate((expected) => {
+    const header = document.querySelector("header, [role='banner'], nav") || document.body;
+    const text = (header?.innerText || "").replace(/\s+/g, " ").toLowerCase();
+    return text.includes(String(expected).toLowerCase());
+  }, station).catch(() => false);
+
+  const openCandidates = [
+    page.getByRole("button", { name: stationPattern }).first(),
+    page.getByRole("combobox", { name: /site|station|store|location/i }).first(),
+    page.locator("header [role='button'], header button, header [aria-haspopup], nav [role='button'], nav button").filter({ hasText: stationPattern }).first(),
+    page.locator("[aria-label*='site' i], [aria-label*='station' i], [data-testid*='site' i], [data-testid*='station' i]").first(),
+    page.locator("header button, header [role='button'], nav button, nav [role='button']").first()
+  ];
+
+  for (const opener of openCandidates) {
+    if (!(await opener.count().catch(() => 0))) continue;
+    if (!(await opener.isVisible().catch(() => false))) continue;
+    await opener.click({ timeout: 4000 }).catch(() => null);
+    await page.waitForTimeout(400);
+
+    const search = page.locator("input[placeholder*='search' i], input[aria-label*='search' i], [role='listbox'] input, [role='menu'] input").first();
+    if (await search.isVisible().catch(() => false)) {
+      await search.fill(station).catch(() => null);
+      await page.waitForTimeout(350);
+    }
+
+    const option = page.getByRole("option", { name: stationPattern }).first()
+      .or(page.locator("[role='option'], [role='menuitem'], li, button, a").filter({ hasText: stationPattern }).first());
+    if (await option.count().catch(() => 0)) {
+      await option.click({ timeout: 4000 }).catch(() => null);
+      await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => null);
+      await page.waitForTimeout(900);
+      return { changed: true, method: "top-menu", message: `Site Summary station switched to ${station}.` };
+    }
+  }
+
+  const fallback = await setStation(page, station);
+  if (fallback.changed) return { ...fallback, method: "generic-selector" };
+  if (alreadyActive) return { changed: false, method: "already-active", message: `Station ${station} already appears active in the header.` };
+  return { changed: false, method: "not-found", message: `Could not switch Site Summary to ${station}.` };
+}
+
+async function detectRedSiteSummaryMetrics(page) {
+  return page.evaluate(() => {
+    const parseChannels = (value) => {
+      const raw = String(value || "").trim().toLowerCase();
+      if (!raw || raw === "transparent" || raw === "rgba(0, 0, 0, 0)") return null;
+      const rgb = raw.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+      if (rgb) return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) };
+      const hex = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+      if (!hex) return null;
+      const h = hex[1];
+      if (h.length === 3) {
+        return {
+          r: Number.parseInt(h[0] + h[0], 16),
+          g: Number.parseInt(h[1] + h[1], 16),
+          b: Number.parseInt(h[2] + h[2], 16)
+        };
+      }
+      return {
+        r: Number.parseInt(h.slice(0, 2), 16),
+        g: Number.parseInt(h.slice(2, 4), 16),
+        b: Number.parseInt(h.slice(4, 6), 16)
+      };
+    };
+    const isRed = (value) => {
+      const channels = parseChannels(value);
+      if (!channels) {
+        const raw = String(value || "").toLowerCase();
+        return /(^|\s)(red|tomato|crimson|indianred|firebrick)(\s|$)/.test(raw);
+      }
+      const { r, g, b } = channels;
+      return r >= 160 && g <= 110 && b <= 110 && (r - Math.max(g, b)) >= 40;
+    };
+
+    const metrics = [];
+    const seen = new Set();
+    const nodes = Array.from(document.querySelectorAll("span, div, p, td, th, strong, b, label, li, h1, h2, h3, h4, h5, h6"));
+    for (const el of nodes) {
+      if (!(el instanceof HTMLElement)) continue;
+      const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 120) continue;
+      if (!/\d/.test(text)) continue;
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || "1") < 0.2) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4 || rect.width > 900 || rect.height > 220) continue;
+      const redText = isRed(style.color);
+      const redFill = isRed(style.backgroundColor) || isRed(style.borderTopColor) || isRed(style.outlineColor);
+      if (!redText && !redFill) continue;
+
+      let label = "";
+      const parent = el.closest("section, article, li, tr, [class*='card' i], [class*='metric' i], [class*='tile' i], [class*='kpi' i], [data-testid]");
+      if (parent) {
+        const parentText = (parent.innerText || "").replace(/\s+/g, " ").trim();
+        const lines = parentText.split(/(?<=\.)\s+|\n| {2,}/).map((line) => line.trim()).filter(Boolean);
+        label = lines.find((line) => line !== text && line.length <= 80) || lines[0] || "";
+      }
+      const key = `${label}|${text}`.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      metrics.push({
+        label: label.slice(0, 120),
+        value: text.slice(0, 80),
+        color: style.color,
+        via: redText ? "text" : "surface"
+      });
+      if (metrics.length >= 25) break;
+    }
+
+    const pageText = (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 5000);
+    return {
+      detected: metrics.length > 0,
+      matching_elements: metrics.length,
+      metrics,
+      text: pageText,
+      title: document.title || "",
+      url: location.href
+    };
+  });
+}
+
+function pickSessionPage(pages, captureMode) {
+  const list = Array.isArray(pages) ? pages : [];
+  if (captureMode === "workspace-stream") {
+    return list.find((candidate) => /amazonworkspaces\.com|webclient\.amazonworkspaces/i.test(candidate.url()))
+      || list[0]
+      || null;
+  }
+  return list.find((candidate) => /siteSummary|store-management/i.test(candidate.url()))
+    || list.find((candidate) => /amazonworkspaces\.com/i.test(candidate.url()))
+    || list[0]
+    || null;
+}
+
+/**
+ * Site Summary monitoring always uses Firefox. Run this worker inside Amazon
+ * WorkSpaces so Firefox opens on the remote desktop (not on the local laptop).
+ */
+async function openStationSummarySession(payload = {}) {
+  const captureMode = resolveCaptureMode(payload);
+  await mkdir(SESSION_STATE_DIR, { recursive: true });
+  const portalCode = captureMode === "workspace-stream" ? "workspaces-web" : "site-summary";
+  const statePath = sessionStatePath({ ...payload, portal_code: portalCode });
+  const profileDir = path.join(
+    SESSION_STATE_DIR,
+    `firefox-${compactIdentifier(portalCode) || "site-summary"}-${compactIdentifier(payload.company_id || "local") || "local"}`
+  );
+  await mkdir(profileDir, { recursive: true });
+
+  // Channel "firefox" keeps Site Summary on Firefox only (no Chromium/CDP attach).
+  const context = await firefox.launchPersistentContext(profileDir, {
+    headless: HEADLESS,
+    slowMo: Number.isFinite(SLOW_MO_MS) ? SLOW_MO_MS : 0,
+    locale: "en-IN",
+    timezoneId: "Asia/Kolkata",
+    viewport: { width: 1536, height: 900 },
+    ...(await pathExists(statePath) ? { storageState: statePath } : {})
+  });
+  const page = pickSessionPage(context.pages(), captureMode) || context.pages()[0] || await context.newPage();
+  // Persistent context owns the browser; closeBrowserSafely no-ops on missing browser.
+  return {
+    browser: context.browser() || { close: async () => context.close() },
+    context,
+    page,
+    mode: "firefox",
+    keepBrowserOpen: false,
+    statePath,
+    captureMode,
+    browser_name: "firefox"
+  };
+}
+
+async function ensureWorkspacesWebSession(page, payload = {}, settleMs = 1400) {
+  const workspacesUrl = String(
+    payload.workspaces_url || process.env.AMAZON_WORKSPACES_URL || WORKSPACES_WEB_DEFAULT_URL
+  ).trim();
+  if (!/amazonworkspaces\.com/i.test(page.url())) {
+    await page.goto(workspacesUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => null);
+    await page.waitForTimeout(settleMs);
+  }
+
+  const text = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
+  const hasCanvas = await page.locator("canvas").count().catch(() => 0);
+  const connected = hasCanvas > 0
+    || /disconnect|connected|session|workspace/i.test(text);
+  const needsLogin = /sign in|log in|register|one-time password|enter code|username|password/i.test(text)
+    && hasCanvas === 0;
+
+  if (needsLogin) {
+    return {
+      loggedIn: false,
+      manualReview: true,
+      message: `Open ${workspacesUrl}, complete Amazon WorkSpaces Web Access login, wait until the remote desktop canvas is visible, then retry. Site Summary red checks run against that streamed desktop.`
+    };
+  }
+  return {
+    loggedIn: true,
+    message: connected
+      ? "Amazon WorkSpaces Web Access session is available."
+      : "WorkSpaces page loaded; waiting for the remote desktop stream.",
+    workspaces_url: workspacesUrl
+  };
+}
+
+async function captureWorkspacesStreamPng(page) {
+  const canvas = page.locator("canvas").first();
+  if (await canvas.count().catch(() => 0)) {
+    const box = await canvas.boundingBox().catch(() => null);
+    if (box && box.width > 40 && box.height > 40) {
+      return page.screenshot({
+        type: "png",
+        clip: {
+          x: Math.max(0, box.x),
+          y: Math.max(0, box.y),
+          width: Math.min(box.width, 2400),
+          height: Math.min(box.height, 1600)
+        }
+      });
+    }
+    return canvas.screenshot({ type: "png" }).catch(() => page.screenshot({ type: "png" }));
+  }
+  return page.screenshot({ type: "png", fullPage: true });
+}
+
+async function countRedPixelsInPng(page, pngBuffer, minPixels = 80) {
+  const b64 = Buffer.from(pngBuffer).toString("base64");
+  return page.evaluate(async ({ imageBase64, threshold }) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${imageBase64}`;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("Unable to decode WorkSpaces screenshot."));
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let red = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      // Sample every 4th pixel for speed on large WorkSpaces frames.
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      if (a < 180) continue;
+      if (r >= 160 && g <= 110 && b <= 110 && (r - Math.max(g, b)) >= 40) red += 1;
+    }
+    return {
+      detected: red >= threshold,
+      red_pixels: red,
+      width: canvas.width,
+      height: canvas.height,
+      sample_stride: 4
+    };
+  }, { imageBase64: b64, threshold: minPixels }).catch((error) => ({
+    detected: false,
+    red_pixels: 0,
+    error: error instanceof Error ? error.message : "Red pixel scan failed."
+  }));
+}
+
+/**
+ * Best-effort station switch inside the streamed WorkSpaces desktop.
+ * Clicks are forwarded through the remote canvas; exact coordinates vary by
+ * resolution, so this is optional and configurable.
+ */
+async function switchStationInWorkspacesStream(page, stationCode, payload = {}) {
+  const station = String(stationCode || "").trim();
+  if (!station) return { changed: false, method: "none", message: "No station provided." };
+
+  const canvas = page.locator("canvas").first();
+  if (!(await canvas.count().catch(() => 0))) {
+    return { changed: false, method: "no-canvas", message: "WorkSpaces canvas not found." };
+  }
+
+  const box = await canvas.boundingBox().catch(() => null);
+  if (!box) return { changed: false, method: "no-box", message: "WorkSpaces canvas has no box." };
+
+  const clicks = payload.station_clicks || {};
+  const preset = clicks[station];
+  const menuX = Number(preset?.menu_x ?? payload.menu_x ?? process.env.AMAZON_WS_MENU_X ?? (box.x + box.width * 0.18));
+  const menuY = Number(preset?.menu_y ?? payload.menu_y ?? process.env.AMAZON_WS_MENU_Y ?? (box.y + Math.min(48, box.height * 0.05)));
+
+  await page.mouse.click(menuX, menuY);
+  await page.waitForTimeout(500);
+  await page.keyboard.type(station, { delay: 40 });
+  await page.waitForTimeout(350);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(Number(payload.settle_ms || 1600));
+  return {
+    changed: true,
+    method: "workspace-stream-click",
+    message: `Sent WorkSpaces stream click/type for ${station}.`,
+    click: { x: menuX, y: menuY }
+  };
+}
+
+async function runWorkspaceStreamMonitor(payload = {}, session) {
+  const stations = Array.isArray(payload.stations)
+    ? payload.stations.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const settleMs = Math.max(400, Number(payload.settle_ms || 1600));
+  const minRedPixels = Math.max(20, Number(payload.min_red_pixels || process.env.AMAZON_MIN_RED_PIXELS || 80));
+  const { browser, context, page, keepBrowserOpen, statePath, mode } = session;
+
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+
+  const login = await ensureWorkspacesWebSession(page, payload, settleMs);
+  if (!login.loggedIn) {
+    return {
+      status: "Manual Review",
+      summary: login.message,
+      stations,
+      alert_count: 0,
+      alerts: [],
+      checked_at: new Date().toISOString(),
+      browser_mode: mode,
+      capture_mode: "workspace-stream",
+      workspaces_url: login.workspaces_url || WORKSPACES_WEB_DEFAULT_URL
+    };
+  }
+
+  const alerts = [];
+  const stationResults = [];
+  const targets = stations.length ? stations : ["ACTIVE"];
+
+  for (const station of targets) {
+    const stationResult = targets.length === 1 && station === "ACTIVE"
+      ? { changed: false, method: "visible-desktop", message: "Capturing the currently visible WorkSpaces desktop." }
+      : await switchStationInWorkspacesStream(page, station, payload);
+    await page.waitForTimeout(settleMs);
+
+    const image = await captureWorkspacesStreamPng(page);
+    const red = await countRedPixelsInPng(page, image, minRedPixels);
+    stationResults.push({
+      station,
+      switched: Boolean(stationResult.changed),
+      station_selector: stationResult,
+      red_detected: Boolean(red.detected),
+      matching_elements: red.red_pixels || 0,
+      metrics: []
+    });
+
+    if (!red.detected) continue;
+
+    const metricSignature = `ws-red:${station}:${red.red_pixels}:${red.width}x${red.height}`;
+    alerts.push({
+      station,
+      station_selector: stationResult,
+      reason: "workspace-stream-red",
+      matching_elements: red.red_pixels,
+      metrics: [],
+      metric_signature: metricSignature,
+      page_text: `Amazon WorkSpaces stream showed about ${red.red_pixels} red alert pixels for ${station}.`,
+      page_url: page.url(),
+      page_title: await page.title().catch(() => "Amazon WorkSpaces"),
+      image_base64: Buffer.from(image).toString("base64"),
+      mime: "image/png",
+      capture_mode: "workspace-stream",
+      needs_vision_caption: true,
+      captured_at: new Date().toISOString()
+    });
+  }
+
+  if (statePath) await context.storageState({ path: statePath }).catch(() => null);
+
+  return {
+    status: "Ready",
+    stations: targets,
+    station_results: stationResults,
+    alert_count: alerts.length,
+    alerts,
+    checked_at: new Date().toISOString(),
+    browser_mode: mode,
+    capture_mode: "workspace-stream",
+    workspaces_url: String(payload.workspaces_url || process.env.AMAZON_WORKSPACES_URL || WORKSPACES_WEB_DEFAULT_URL),
+    summary: alerts.length
+      ? `Captured ${alerts.length} red WorkSpaces stream screenshot(s).`
+      : `Checked WorkSpaces stream for ${targets.length} station target(s); no red alert pixels detected.`
+  };
 }
 
 async function setDate(page, checkDate) {
@@ -1548,6 +1995,175 @@ async function handleRun(req, res) {
   jsonResponse(res, 200, result);
 }
 
+/**
+ * Capture Amazon Site Summary for several stations in one authenticated browser
+ * session. Screenshots are returned as base64 so the report-bot runner can post
+ * them to WhatsApp without writing Amazon data into the dashboard filesystem.
+ *
+ * capture_mode:
+ * - dom: read Site Summary HTML/CSS directly (best accuracy; run where the portal is reachable)
+ * - workspace-stream: watch Amazon WorkSpaces Web Access canvas in the browser
+ *   (https://ap-southeast-1.webclient.amazonworkspaces.com/wsp.html) and detect red pixels
+ */
+async function runStationSummaryMonitor(payload = {}) {
+  const stations = Array.isArray(payload.stations)
+    ? payload.stations.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  if (!stations.length) throw new Error("stations must contain at least one station code.");
+
+  const captureMode = resolveCaptureMode(payload);
+  const session = await openStationSummarySession({ ...payload, capture_mode: captureMode });
+  const { browser, context, page, keepBrowserOpen, statePath, mode } = session;
+
+  try {
+    if (captureMode === "workspace-stream") {
+      return await runWorkspaceStreamMonitor(payload, session);
+    }
+
+    const targetUrl = String(payload.url || process.env.AMAZON_SITE_SUMMARY_URL || SITE_SUMMARY_DEFAULT_URL).trim() || SITE_SUMMARY_DEFAULT_URL;
+    const settleMs = Math.max(400, Number(payload.settle_ms || 1400));
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(45000);
+
+    const loginPayload = {
+      ...payload,
+      portal_code: "site-summary",
+      login_url: targetUrl
+    };
+    let login = mode === "cdp"
+      ? await (async () => {
+        if (!/siteSummary|store-management/i.test(page.url())) {
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => null);
+          await page.waitForTimeout(settleMs);
+        }
+        const text = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
+        if (isSiteSummaryAuthenticated(text, page.url()) || !isLoginVisible(text, page.url())) {
+          return { loggedIn: true, message: "Attached to an already authenticated browser session." };
+        }
+        return {
+          loggedIn: false,
+          manualReview: true,
+          message: "Connected over CDP, but Site Summary still shows a login screen. Complete Amazon login in that Chrome window, then retry."
+        };
+      })()
+      : await maybeLogin(page, loginPayload, targetUrl);
+
+    // Interactive local/dev runs keep the browser open so the operator can finish
+    // Amazon login/MFA with the same WorkSpaces credentials, then continue.
+    if (!login.loggedIn && (!HEADLESS || ENABLE_VNC || mode === "cdp")) {
+      const waitMs = Math.min(
+        Number(payload.login_wait_ms || process.env.AMAZON_LOGIN_WAIT_MS || 300000),
+        600000
+      );
+      console.log(`Waiting up to ${Math.round(waitMs / 1000)}s for Site Summary Amazon login in the open browser...`);
+      const deadline = Date.now() + waitMs;
+      let approved = false;
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(3000).catch(() => null);
+        const text = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
+        if (isSiteSummaryAuthenticated(text, page.url()) ||
+          (!isLoginVisible(text, page.url()) && /store-management|siteSummary/i.test(page.url()) && !hasMfaOrHumanBlocker(text))) {
+          approved = true;
+          break;
+        }
+      }
+      if (approved) {
+        login = { loggedIn: true, message: "Amazon Site Summary login completed interactively." };
+        if (statePath) await context.storageState({ path: statePath }).catch(() => null);
+      }
+    }
+
+    if (!login.loggedIn) {
+      return {
+        status: "Manual Review",
+        summary: login.message || "Complete Amazon Site Summary login in the worker browser, then retry.",
+        stations,
+        alert_count: 0,
+        alerts: [],
+        checked_at: new Date().toISOString(),
+        browser_mode: mode,
+        capture_mode: "dom"
+      };
+    }
+
+    const alerts = [];
+    const stationResults = [];
+
+    for (const station of stations) {
+      if (!/siteSummary/i.test(page.url())) {
+        await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => null);
+        await page.waitForTimeout(settleMs);
+      }
+
+      const stationResult = await setSiteSummaryStation(page, station);
+      await page.waitForTimeout(settleMs);
+      const red = await detectRedSiteSummaryMetrics(page);
+      stationResults.push({
+        station,
+        switched: stationResult.changed || stationResult.method === "already-active",
+        station_selector: stationResult,
+        red_detected: Boolean(red.detected),
+        matching_elements: red.matching_elements || 0,
+        metrics: red.metrics || []
+      });
+
+      if (!red.detected) continue;
+
+      const image = await page.screenshot({ type: "png", fullPage: true });
+      const metricSignature = (red.metrics || [])
+        .map((metric) => `${metric.label}:${metric.value}`)
+        .sort()
+        .join("|");
+      alerts.push({
+        station,
+        station_selector: stationResult,
+        reason: "red-metric",
+        matching_elements: red.matching_elements,
+        metrics: red.metrics,
+        metric_signature: metricSignature,
+        page_text: red.text,
+        page_url: red.url || page.url(),
+        page_title: red.title,
+        image_base64: image.toString("base64"),
+        mime: "image/png",
+        capture_mode: "dom",
+        captured_at: new Date().toISOString()
+      });
+    }
+
+    if (statePath) await context.storageState({ path: statePath }).catch(() => null);
+
+    return {
+      status: "Ready",
+      stations,
+      station_results: stationResults,
+      alert_count: alerts.length,
+      alerts,
+      checked_at: new Date().toISOString(),
+      browser_mode: mode,
+      capture_mode: "dom",
+      summary: alerts.length
+        ? `Captured ${alerts.length} red Site Summary screenshot(s) across ${stations.length} station(s).`
+        : `Checked ${stations.length} station(s); no red Site Summary metrics detected.`
+    };
+  } finally {
+    if (!keepBrowserOpen) {
+      await context.close().catch(() => null);
+      await closeBrowserSafely(browser);
+    }
+  }
+}
+
+async function handleStationSummary(req, res) {
+  if (!assertAuthorized(req, res)) return;
+  const payload = await parseJsonBody(req);
+  jsonResponse(res, 200, await withTimeout(
+    runStationSummaryMonitor(payload),
+    STATION_SUMMARY_TIMEOUT_MS,
+    "Station summary monitor"
+  ));
+}
+
 async function handleWarmup(req, res) {
   if (!assertAuthorized(req, res)) return;
   const payload = await parseJsonBody(req);
@@ -1565,6 +2181,7 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, 200, workerInfo());
     }
     if (req.method === "POST" && url.pathname === "/warmup") return await handleWarmup(req, res);
+    if (req.method === "POST" && url.pathname === "/station-summary") return await handleStationSummary(req, res);
     if (req.method === "POST" && (url.pathname === "/run" || url.pathname === "/")) {
       return await handleRun(req, res);
     }

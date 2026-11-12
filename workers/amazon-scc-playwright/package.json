@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs"
+    "check": "node --check server.mjs",
+    "monitor:station-summary": "node ../../scripts/run-amazon-station-summary.mjs",
+    "monitor:workspaces-desktop": "node ../../scripts/run-workspaces-desktop-monitor.mjs"
   },
+
   "dependencies": {
     "playwright": "1.49.1"
   }
