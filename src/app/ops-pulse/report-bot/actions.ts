@@ -554,9 +554,9 @@ export async function setGroupMode(form: FormData) {
     const mode = field(form, "mode") as GroupMode;
     if (!GROUP_MODES.has(mode)) throw new Error("Choose Observe, Review or Live.");
     const name = (check(await reportBotDb().from("report_bot_groups").select("group_name").eq("id", group.id).maybeSingle(), "Load name") as { group_name: string | null } | null)?.group_name ?? "";
-    // Safety: never silently put a non-Testing production war-room group into Live from this UI without Review first.
-    if (mode === "live" && /tcc3/i.test(name) && !/testing/i.test(name)) {
-      throw new Error("Switch TCC3 · Adayar to Live only after an authorised reviewer explicitly confirms the pilot. Use Observe, then Review, first.");
+    // War rooms must be linked to a store before Live (prevents unscoped sends).
+    if (mode === "live" && /war\s*room/i.test(name) && !/testing/i.test(name) && !group.location_id) {
+      throw new Error("Link this war room to its store before switching to Live.");
     }
     check(await reportBotDb().from("report_bot_groups").update({ mode, updated_at: new Date().toISOString() }).eq("id", group.id), "Save group mode");
     if (mode === "observe") {
