@@ -1,4 +1,4 @@
-import {cReturnSummary,requireReportFreshness,type CReturnSummary} from './lm-live-report';
+import {verifiedPhysicalCount,cReturnSummary,requireReportFreshness,type CReturnSummary} from './lm-live-report';
 import "server-only";
 import { fetchLoadFlashBoard, fetchLoadFlashTracking, queueLoadFlashStations, fetchEddStation, fetchScrubNetwork } from "@/lib/ops-pulse/edd-worker";
 import { BOARD_TID, mapBoardTidExportRows, type BoardTidExportRow } from "@/lib/ops-pulse/station-board-tids";
@@ -172,18 +172,22 @@ export async function loadEodDigest(stationCodes: string[], day: string, options
       }else creturn.push(summary);
     }
     const unique=new Map<string,{edd:Set<string>;physical:Set<string>}>();
-    for(const station of stations) if(station.board.stationInventoryVersion===2) unique.set(station.stationCode,{edd:new Set(),physical:new Set()});
+    for(const station of stations) if(station.board.physicalInventoryCount!==undefined) unique.set(station.stationCode,{edd:new Set(),physical:new Set()});
     for(const row of inventory) {
       const bucket=unique.get(row.stationCode);
       if(!bucket||!row.trackingId) continue;
       if(row.bucket===BOARD_TID.EDD&&row.edd===day) bucket.edd.add(row.trackingId);
       if(row.bucket===BOARD_TID.PHYSICAL) bucket.physical.add(row.trackingId);
     }
-    for(const [stationCode,counts] of unique) stationInventory[stationCode]={eddAtStation:counts.edd.size,physicalAtStation:counts.physical.size};
+    for(const station of stations) {
+      const counts=unique.get(station.stationCode);
+      if(!counts) throw new Error('Waiting for complete physical inventory refresh: '+station.stationCode);
+      stationInventory[station.stationCode]={eddAtStation:counts.edd.size,physicalAtStation:verifiedPhysicalCount(station.board.physicalInventoryCount,counts.physical)};
+    }
     stationInventoryTracking.edd=mapBoardTidExportRows(inventory.filter(row=>unique.has(row.stationCode)&&row.bucket===BOARD_TID.EDD&&row.edd===day),"edd");
     stationInventoryTracking.physical=mapBoardTidExportRows(inventory.filter(row=>unique.has(row.stationCode)&&row.bucket===BOARD_TID.PHYSICAL),"dsr-station");
   } catch(error) {
-    if(options.requireCReturn)throw error;
+    if(options.requireCReturn || options.maxAgeMinutes===5)throw error;
     // Keep the live DSR available when the package-level inventory endpoint is
     // temporarily unavailable; its two inventory columns will show em dashes.
   }
@@ -221,7 +225,7 @@ export async function loadAgeingDigest(stationCodes:string[],day:string):Promise
   });
   const flash=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.AGEING]});
   const trackingIds=mapBoardTidExportRows(flash.filter(row=>allowed.has(row.stationCode)),"ageing");
-  return {asOf:stamps.sort().at(-1)||network.asOf,missingStations,dayBuckets:[...AGEING_DAY_BUCKETS],weekBuckets,byStation,trackingIds};
+  return {asOf:stamps.sort()[0]||network.asOf,missingStations,dayBuckets:[...AGEING_DAY_BUCKETS],weekBuckets,byStation,trackingIds};
 }
 
 export async function loadDispatchReport(key: ReportKey, company: string, location: string, code: string, day: string): Promise<DispatchReport> {

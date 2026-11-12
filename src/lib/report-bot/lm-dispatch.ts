@@ -1,3 +1,6 @@
+import {randomUUID} from 'node:crypto';
+import {queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
+import {dispatchSlotDue,dispatchSlotUpcoming} from './lm-dispatch-window';
 import {CRETURN_COLUMNS,cReturnTotal,performanceTitle,requireReportFreshness} from './lm-live-report';
 import "server-only";
 import { CodRuntime } from "./lm-cod-runtime";
@@ -195,7 +198,7 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
 /** Regional live views use the same verified board snapshot as EOD, but keep
  * one report per message and one station per row. Destinations, source scope
  * and times remain entirely route configuration. */
-async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:string,day:string,slot:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
+export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:string,day:string,slot:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
   const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
   const stamp=asIst(digest.asOf);
   const formats=route.formats?.length?route.formats:[route.format];
@@ -317,13 +320,19 @@ async function reconciliationOutputs(route:Route,header:string,columns:string[],
 
 async function claimRun(routeId:string,day:string,slot:string) {
   const db = reportBotDb();
-  const inserted = await db.from("report_bot_lm_dispatch_runs").insert({route_id:routeId,day,slot}).select("id,status").single();
-  if (!inserted.error) return inserted.data as {id:string;status:string};
+  const lease_token=randomUUID(),lease_until=new Date(Date.now()+360000).toISOString();
+  const inserted = await db.from("report_bot_lm_dispatch_runs").insert({route_id:routeId,day,slot,lease_token,lease_until}).select("id,status,lease_token").single();
+  if (!inserted.error) return inserted.data;
   if (inserted.error.code !== "23505") throw new Error(inserted.error.message);
-  const existing = await db.from("report_bot_lm_dispatch_runs").select("id,status").eq("route_id",routeId).eq("day",day).eq("slot",slot).single();
-  if (existing.error) throw new Error(existing.error.message);
-  if (["sent","skipped"].includes(existing.data.status)) return null;
-  return existing.data as {id:string;status:string};
+  // CAS claim: concurrent cron invocations cannot both generate/send the same slot.
+  const claimed=await db.from("report_bot_lm_dispatch_runs")
+    .update({status:"processing",lease_token,lease_until})
+    .eq("route_id",routeId).eq("day",day).eq("slot",slot)
+    .not("status","in","(sent,skipped)")
+    .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
+    .select("id,status,lease_token").maybeSingle();
+  if(claimed.error)throw new Error(claimed.error.message);
+  return claimed.data;
 }
 
 async function previousSnapshot(routeId: string, runId: string): Promise<DispatchSnapshot | null> {
@@ -366,10 +375,18 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
   const routes = await db.from("report_bot_lm_dispatch_routes").select(projection).eq("company_id",company).eq("enabled",true);
   if (routes.error) throw new Error(routes.error.message);
   const now = new Date(), day = istDay(now);
-  const jobs = (routes.data as unknown as Route[]).filter(route=>linked(route.group,company)).flatMap(route=>route.times.filter(slot=>{
-    const due=Date.parse(day+"T"+slot+":00+05:30");
-    return +now>=due && +now-due<(["dsr","creturn"].includes(route.report)?20:8)*60000 && Date.parse(route.updated_at)<=due;
-  }).map(slot=>({route,slot})));
+  const activeRoutes=(routes.data as unknown as Route[]).filter(route=>linked(route.group,company));
+  // Prewarm each distinct regional source once; schedules stay in configuration.
+  const warming=activeRoutes.filter(route=>["dsr","creturn"].includes(route.report)&&route.times.some(slot=>dispatchSlotUpcoming(day,slot,+now)));
+  const regions=new Map<string,Route>();
+  for(const route of warming)regions.set(JSON.stringify([route.scope_type,route.source_location_ids,route.source_region_codes,route.source_model_codes]),route);
+  await Promise.allSettled([...regions.values()].map(async route=>{
+    const sources=await routeSources(route,company);
+    await queueLoadFlashStations(sources.map(s=>s.station_code),5);
+  }));
+  const jobs = activeRoutes.flatMap(route=>route.times.filter(slot=>
+    dispatchSlotDue(day,slot,route.times,route.report,+now)&&Date.parse(route.updated_at)<=Date.parse(day+"T"+slot+":00+05:30")
+  ).map(slot=>({route,slot})));
   jobs.sort((a,b)=>Number(!!a.route.cod_workflow)-Number(!!b.route.cod_workflow));
   let claimed=0;
   const codRuntime=new CodRuntime(deadline);
@@ -419,7 +436,8 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           const region=route.scope_type==="region"
             ? (route.source_region_codes||[]).join(", ")
             : [...new Set(sources.map(row=>String(row.state||"").trim()).filter(Boolean))].join(", ") || sources.map(row=>row.station_code).join(", ");
-          const mentionStations=eodDsrMentionStations(digest.dsr);
+          const taggingConfigured=Boolean(route.mentions?.length || (route.mention_manager_policy && route.mention_manager_policy!=="none") || route.mention_designation_codes?.length || route.mention_present_designation_codes?.length || route.mention_latest_shift_designation_codes?.length);
+          const mentionStations=taggingConfigured?eodDsrMentionStations(digest.dsr):{recognition:[],focus:[]};
           const sourceByCode=new Map(sources.map(source=>[source.station_code.trim().toUpperCase(),source]));
           const recognitionSources=mentionStations.recognition.map(code=>sourceByCode.get(code)).filter((source):source is SourceStation=>Boolean(source));
           const focusSources=mentionStations.focus.map(code=>sourceByCode.get(code)).filter((source):source is SourceStation=>Boolean(source));
@@ -489,7 +507,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           status="sent";
         }
       } catch(error) { status="unavailable"; detail=error instanceof Error?error.message:"Report unavailable"; }
-      const saved=await db.from("report_bot_lm_dispatch_runs").update({status,detail:detail.slice(0,400),snapshot:status === "sent" ? sentSnapshot : null}).eq("id",run.id);
+      const saved=await db.from("report_bot_lm_dispatch_runs").update({status,detail:detail.slice(0,400),snapshot:status === "sent" ? sentSnapshot : null,lease_token:null,lease_until:null}).eq("id",run.id).eq("lease_token",run.lease_token);
       if(saved.error) throw new Error(saved.error.message);
     }
   }

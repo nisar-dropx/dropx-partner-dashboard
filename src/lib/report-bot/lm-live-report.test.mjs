@@ -21,3 +21,12 @@ test('short titles show the report, date and live data time only',()=>{
  assert.equal(performanceTitle('creturn','2026-11-11'),'C-return · 11 Nov');
  const title=performanceTitle('dsr',day,day+'T08:02:00+05:30','08:00');assert.match(title,/At-station status · 12 Nov · 8:02 am IST/);assert.doesNotMatch(title,/2026|Region|Internal/);
 });
+
+
+test('missing or incomplete physical rows cannot become a false zero', async () => {
+ const { verifiedPhysicalCount } = await import('./lm-live-report.ts');
+ assert.throws(()=>verifiedPhysicalCount(undefined,new Set()));
+ assert.throws(()=>verifiedPhysicalCount(1000,new Set()));
+ assert.equal(verifiedPhysicalCount(0,new Set()),0);
+ assert.equal(verifiedPhysicalCount(2,new Set(['old-HFR','future'])),2);
+});

@@ -1,8 +1,9 @@
+import {loadEodDigest} from '@/lib/report-bot/lm-dispatch-data';
 import {resolveBankReminderMentions} from '@/lib/report-bot/lm-dispatch-mentions';
 import {NextResponse} from 'next/server';
 import {timingSafeEqual} from 'node:crypto';
 import {reportBotDb} from '@/lib/report-bot/settings';
-import {routeSources} from '@/lib/report-bot/lm-dispatch';
+import {livePerformanceOutputs,routeSources} from '@/lib/report-bot/lm-dispatch';
 import {codWorkflowOutputs} from '@/lib/report-bot/lm-cod-workflow-output';
 import {loadCodWorkflow} from '@/lib/report-bot/lm-cod-workflow-data';
 import {CodRuntime} from '@/lib/report-bot/lm-cod-runtime';
@@ -19,9 +20,17 @@ export async function POST(request:Request){
  try{
  const input=await request.json();
  const db=reportBotDb();
- const found=await db.from('report_bot_lm_dispatch_routes').select('*').eq('id',String(input.routeId||'')).eq('report','bank').single();
+ const found=await db.from('report_bot_lm_dispatch_routes').select('*').eq('id',String(input.routeId||'')).single();
  if(found.error||!found.data)return NextResponse.json({error:'Configured bank route not found'},{status:404});
  const route=found.data,company=route.company_id,sources=await routeSources(route,company);
+ if(['dsr','creturn'].includes(route.report)&&['performance','refresh-performance'].includes(input.operation)){
+  if(input.operation==='refresh-performance')return NextResponse.json(await queueLoadFlashStations(sources.map(s=>s.station_code)));
+  const day=codDay(Date.now());
+  const digest=await loadEodDigest(sources.map(s=>s.station_code),day,{maxAgeMinutes:5,requireCReturn:route.report==='creturn'});
+  const rendered=await livePerformanceOutputs({...route,group:{group_name:''}} as Parameters<typeof livePerformanceOutputs>[0],digest,'',day,new Date(Date.now()+330*60000).toISOString().slice(11,16));
+  return NextResponse.json({digest,outputs:rendered.outputs,sent:false});
+ }
+ if(route.report!=='bank')return NextResponse.json({error:'Use the configured report preview operation'},{status:400});
  const source=sources.find(s=>s.station_code===input.station)||sources[0];
  if(!source)throw new Error('No configured station');
  const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);

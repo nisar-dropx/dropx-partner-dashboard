@@ -985,6 +985,7 @@ export type LoadFlashBoardPayload = {
   dsrFrozenAt: string | null;
   dsrHistoryPending?: number;
   stationInventoryVersion?: number;
+  physicalInventoryCount?: number;
   historyUpdatedAt?: string;
   rtsVersion?: number;
   dotVersion?: number;
@@ -1163,7 +1164,8 @@ function normalizeLoadFlashBoard(raw: unknown): LoadFlashBoardPayload {
     dsrFrozenAt: String(row.dsrFrozenAt ?? "").trim() || null,
     dsrHistoryPending: Number(row.dsrHistoryPending) || 0,
     historyUpdatedAt: typeof row.historyUpdatedAt === "string" ? row.historyUpdatedAt : undefined,
-    stationInventoryVersion: [1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
+    physicalInventoryCount: typeof row.physicalInventoryCount === 'number' && Number.isInteger(row.physicalInventoryCount) && row.physicalInventoryCount >= 0 ? row.physicalInventoryCount : undefined,
+    stationInventoryVersion: [0, 1, 2].includes(Number(row.stationInventoryVersion)) ? Number(row.stationInventoryVersion) : undefined,
     ageingByDay,
     ageingByWeek,
     ageingByStateWeek,

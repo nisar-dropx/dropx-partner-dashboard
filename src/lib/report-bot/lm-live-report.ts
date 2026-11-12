@@ -39,3 +39,10 @@ export function performanceTitle(report:'dsr'|'creturn'|'dot',day:string,asOf?:s
  const clock=asOf?new Date(asOf).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit',timeZone:'Asia/Kolkata'}):'';
  return `${name}${asOf?(report==='dsr'&&slot!=='08:00'?' live':' status'):''} · ${date}${clock?' · '+clock+' IST':''}`;
 }
+
+/** A missing census is unknown, never zero. Check the row-level export too. */
+export function verifiedPhysicalCount(expected: number | undefined, ids: ReadonlySet<string>): number {
+ if (!Number.isInteger(expected) || expected! < 0 || expected !== ids.size)
+  throw new Error('Waiting for complete physical inventory refresh');
+ return expected!;
+}
