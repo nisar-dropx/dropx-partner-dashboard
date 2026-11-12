@@ -11,6 +11,7 @@ const BUCKET_LABEL: Record<EddBucketKey, string> = {
   dueToday: "Due today",
   dueTomorrow: "Due tomorrow",
   future: "Future",
+  held: "Held",
   unknown: "Unknown"
 };
 

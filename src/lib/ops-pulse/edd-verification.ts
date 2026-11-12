@@ -20,6 +20,15 @@ export type VerifiedEddPackage = EddPackage & {
   verification?: EddVerification | null; isAccessPoint?: boolean;
 };
 export const EDD_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
+export function eddHeldState(state: unknown) {
+  return ["HELD","HOLD_FOR_CUSTOMER_REQUEST","HOLD_FOR_REDELIVERY","HOLD_FOR_ACTION","HFR","HCR"].includes(String(state || "").trim().toUpperCase());
+}
+export function canApplyEddSummaryState(source: {state?: string | null; stateUpdatedAt?: string | null}, incoming: {state?: string | null; stateUpdatedAt?: string | null}) {
+  if (!incoming.state || incoming.state === source.state) return true;
+  const before=Date.parse(source.stateUpdatedAt||""), after=Date.parse(incoming.stateUpdatedAt||"");
+  if (Number.isFinite(before) && (!Number.isFinite(after) || after<before)) return false;
+  return !eddHeldState(source.state) || (Number.isFinite(before) && Number.isFinite(after) && after>before);
+}
 export function eddPendingEvidenceFresh(pkg: VerifiedEddPackage, now = Date.now()) {
   const checked = Date.parse(eddPendingEvidenceAt(pkg, now) || "");
   return Number.isFinite(checked) && checked <= now && now - checked <= EDD_PENDING_MAX_AGE_MS;
@@ -162,7 +171,9 @@ export function eddCurrentState(pkg: VerifiedEddPackage) {
     if (eddDeliveredState(pkg.state)) return pkg.state!.trim().toUpperCase();
     return eddDeliveredState(verified?.state) ? verified!.state! : "DELIVERED";
   }
-  return ((verified?.state && pkg.verifiedAt && (!pkg.sourceAt || Date.parse(pkg.verifiedAt) >= Date.parse(pkg.sourceAt)) ? verified.state : pkg.state) || "UNKNOWN").trim().toUpperCase();
+  const useVerification=verified?.state && pkg.verifiedAt && (!pkg.sourceAt || Date.parse(pkg.verifiedAt)>=Date.parse(pkg.sourceAt))
+    && canApplyEddSummaryState(pkg,{state:verified.state,stateUpdatedAt:verified.latestEventAt||verified.lastUpdatedAt});
+  return ((useVerification ? verified!.state : pkg.state) || "UNKNOWN").trim().toUpperCase();
 }
 
 export type EddAttemptCategory = "hfr" | "hcr" | "rejected" | "returningToFc" | "unknown" | "none";

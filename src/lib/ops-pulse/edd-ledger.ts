@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { EddPackage, EddStationResult } from "./edd-worker";
-import { eddCanReuseHistory, eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
+import { canApplyEddSummaryState, eddCanReuseHistory, eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
 import { eddSourceSession, eddSourceSummaries, eddSourceHistory, EddSourceBusyError } from "./edd-source";
@@ -121,7 +121,7 @@ export async function loadVerifiedEddStation(stationCode: string): Promise<EddSt
   if (!ledger) return { status: "no_snapshot", stationCode };
   return { status: "ok", payload: { status: "ok", stationCode, fetchedAt: ledger.fetchedAt, todayYmd: stationEddToday(),
     window: { from: "", to: "" }, totalCount: ledger.packages.length,
-    buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 }, byDate: [],
+    buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 }, byDate: [],
     packages: ledger.packages, sessionSource: null, accountKey: null } };
 }
 
@@ -192,13 +192,20 @@ export async function verifyEddBatch(codes?: string[]) {
       try {
         const observations = await eddSourceSummaries(code,ids,auth);
         const observedAt=new Date().toISOString();
-        const values=observations.map(value=>({trackingId:String(value.trackingId),state:value.currentPackageState||null,
+        const candidates=observations.map(value=>({trackingId:String(value.trackingId),state:value.currentPackageState||null,
           ead: typeof value.estimatedArrivalDate==="number" ? eddIstDate(new Date(value.estimatedArrivalDate).toISOString()) : null,
           promisedDeliveryDate:typeof value.promisedDeliveryDate==="number" ? eddIstDate(new Date(value.promisedDeliveryDate).toISOString()) : null,
           shipOption:value.shipOption||null,summaryCheckedAt:observedAt,
           // Empty string deliberately invalidates any older event clock. The
           // summary RPC strips nulls, which would otherwise retain old proof.
           stateUpdatedAt:typeof value.lastUpdatedTime === "number" && value.lastUpdatedTime > 1e12 && value.lastUpdatedTime <= Date.parse(observedAt) ? new Date(value.lastUpdatedTime).toISOString() : ""}));
+        // Compare package-event times, not the time the summary batch was fetched.
+        const priorRead=await supabaseAdmin.from("edd_package_ledger")
+          .select("tracking_id,state:source->>state,stateUpdatedAt:source->>stateUpdatedAt")
+          .eq("station_code",code).in("tracking_id",ids);
+        if(priorRead.error)throw new Error(priorRead.error.message);
+        const previous=new Map((priorRead.data??[]).map(p=>[p.tracking_id,p]));
+        const values=candidates.filter(value=>canApplyEddSummaryState(previous.get(value.trackingId)||{},value));
         const {error:summaryError}=await supabaseAdmin.rpc("edd_apply_summaries",{p_station:code,p_rows:values,p_observed_at:observedAt});
         if(summaryError)throw new Error(summaryError.message);
         enriched+=values.length;

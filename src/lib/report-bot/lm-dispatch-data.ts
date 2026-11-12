@@ -322,7 +322,7 @@ export async function loadDispatchReport(key: ReportKey, company: string, locati
     if (result.status !== "ok" || result.payload.todayYmd !== day || result.payload.stationCode !== code) throw new Error("No current EDD snapshot.");
     const s = result.payload, b = s.buckets;
     return { asOf: fresh(s.fetchedAt, day), pending: s.totalCount > 0,
-      rows: [["At station", s.totalCount], ["Overdue", b.overdue], ["Due today", b.dueToday], ["Due tomorrow", b.dueTomorrow], ["Later", b.future], ["EDD unknown", b.unknown]] };
+      rows: [["At station", s.totalCount], ["Overdue", b.overdue], ["Due today", b.dueToday], ["Due tomorrow", b.dueTomorrow], ["Later", b.future], ["EDD unknown", b.unknown], ["Held", b.held || 0]] };
   }
   if (key === "oor") {
     const station = (await fetchLoadFlashBoard(day, [code])).stations.find(row => row.stationCode === code && row.businessDate === day && row.hasSnapshot);

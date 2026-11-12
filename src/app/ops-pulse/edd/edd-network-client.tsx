@@ -11,7 +11,7 @@ import type { EddBucketKey, EddNetworkRunStatus, EddNetworkStation } from "@/lib
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 import { EddNetworkChart } from "./edd-network-chart";
 
-type SortColumn = "stationCode" | "totalCount" | "overdue" | "dueToday" | "dueTomorrow" | "future" | "fetchedAt";
+type SortColumn = "stationCode" | "totalCount" | "overdue" | "dueToday" | "dueTomorrow" | "future" | "held" | "fetchedAt";
 type SortDir = "asc" | "desc";
 const PAGE_SIZE = 12;
 /** Poll the network endpoint at this cadence while a background sweep is running, to move the progress bar. */
@@ -24,6 +24,7 @@ const COLUMNS: Array<{ key: SortColumn; label: string; align?: "num" }> = [
   { key: "dueToday", label: "Due today", align: "num" },
   { key: "dueTomorrow", label: "Due tomorrow", align: "num" },
   { key: "future", label: "Future", align: "num" },
+  { key: "held", label: "Held", align: "num" },
   { key: "fetchedAt", label: "Last refreshed" }
 ];
 
@@ -42,6 +43,7 @@ function sortValue(row: EddNetworkStation, column: SortColumn): string | number 
     case "dueToday": return row.buckets.dueToday;
     case "dueTomorrow": return row.buckets.dueTomorrow;
     case "future": return row.buckets.future;
+    case "held": return row.buckets.held || 0;
     case "fetchedAt": return row.fetchedAt ?? "";
     default: return "";
   }
@@ -370,6 +372,7 @@ export function EddNetworkClient({
                       </td>
                       <td className="num">{row.buckets.dueTomorrow ? row.buckets.dueTomorrow.toLocaleString("en-IN") : "—"}</td>
                       <td className="num">{row.buckets.future ? row.buckets.future.toLocaleString("en-IN") : "—"}</td>
+                      <td className="num">{row.buckets.held ? row.buckets.held.toLocaleString("en-IN") : "—"}</td>
                       <td>{row.hasSnapshot ? formatFetchedAt(row.fetchedAt) : <span className="subtle">Never refreshed</span>}</td>
                       <td>
                         <div className="edd-row-actions">

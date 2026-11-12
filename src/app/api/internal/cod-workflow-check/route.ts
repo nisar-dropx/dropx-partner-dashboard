@@ -9,7 +9,7 @@ import {livePerformanceOutputs,routeSources} from '@/lib/report-bot/lm-dispatch'
 import {codWorkflowOutputs} from '@/lib/report-bot/lm-cod-workflow-output';
 import {loadCodWorkflow} from '@/lib/report-bot/lm-cod-workflow-data';
 import {CodRuntime} from '@/lib/report-bot/lm-cod-runtime';
-import {queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
+import {fetchEddStation,refreshEddStation,queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
 import {fetchCodStatus} from '@/lib/ops-pulse/cash-recon-worker';
 import {codDay} from '@/lib/report-bot/lm-cod-workflow';
 export const dynamic='force-dynamic';
@@ -38,6 +38,17 @@ export async function POST(request:Request){
  const source=sources.find(s=>s.station_code===input.station)||sources[0];
  if(!source)throw new Error('No configured station');
  const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);
+ if(input.operation==='edd-snapshot')return NextResponse.json({result:await fetchEddStation({stationCode:source.station_code}),sent:false});
+ if(input.operation==='refresh-edd-snapshot')return NextResponse.json({result:await refreshEddStation({stationCode:source.station_code,timeoutMs:105000}),sent:false});
+ if(input.operation==='shipment-status'){
+  const tid=String(input.trackingId||'').trim();if(!/^[A-Za-z0-9-]{6,40}$/.test(tid))return NextResponse.json({error:'Invalid tracking ID'},{status:400});
+  const base=process.env.EDD_WORKER_URL?.trim().replace(/\/$/,''),key=process.env.EDD_WORKER_ADMIN_KEY;
+  if(!base||!key)throw new Error('Tracking source is not configured');
+  const url=new URL(base+'/api/admin/executive/edd/lookup');url.searchParams.set('stationCode',source.station_code);url.searchParams.set('trackingId',tid);
+  const response=await fetch(url,{headers:{'x-admin-key':key},cache:'no-store',signal:AbortSignal.timeout(30000)});
+  if(!response.ok)throw new Error('Tracking lookup unavailable');const result=await response.json();
+  return NextResponse.json({station:source.station_code,trackingId:tid,state:result.packageStatus,updatedAt:result.lastUpdatedTime,history:result.history?.map((h:{state:string;time:string;reasonCode?:string})=>({state:h.state,time:h.time,reason:h.reasonCode})),sent:false});
+ }
  if(input.operation==='refresh-edd')return NextResponse.json(await queueLoadFlashStations([source.station_code]));
  if(input.operation==='contacts')return NextResponse.json({station:source.station_code,contacts:await resolveBankReminderMentions(company,[source],route,day),sent:false});
  if(input.operation==='source')return NextResponse.json(await fetchCodStatus(source.report_code||source.station_code,false));

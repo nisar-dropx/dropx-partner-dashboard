@@ -1,5 +1,5 @@
 import { parseDotTotals, type DotTotals } from "./dot-metrics.ts";
-export type EddBucketKey = "overdue" | "dueToday" | "dueTomorrow" | "future" | "unknown";
+export type EddBucketKey = "overdue" | "dueToday" | "dueTomorrow" | "future" | "unknown" | "held";
 
 export type EddPackage = {
   trackingId: string;
@@ -125,7 +125,7 @@ export function isEddWorkerConfigured() {
 }
 
 function emptyBuckets(): Record<EddBucketKey, number> {
-  return { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 };
+  return { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0, held: 0 };
 }
 
 function normalizeBuckets(raw: unknown): Record<EddBucketKey, number> {
@@ -139,7 +139,7 @@ function normalizeBuckets(raw: unknown): Record<EddBucketKey, number> {
 
 function normalizePackage(raw: Record<string, unknown>): EddPackage {
   const bucket = String(raw.bucket ?? "unknown");
-  const validBucket: EddBucketKey = ["overdue", "dueToday", "dueTomorrow", "future", "unknown"].includes(bucket)
+  const validBucket: EddBucketKey = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held"].includes(bucket)
     ? (bucket as EddBucketKey)
     : "unknown";
   return {

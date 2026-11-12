@@ -322,3 +322,13 @@ resolveRead(); await Promise.resolve(); fakeDocument.visibilityState="hidden"; t
 fakeDocument.visibilityState="visible"; documentEvents.get("visibilitychange")(); assert.equal(reads,2,"returning to a tab reads latest data");
 resolveRead(); await Promise.resolve(); cleanups.forEach(fn=>fn?.()); assert.equal(cleared,true); assert.equal(windowEvents.size,0); assert.equal(documentEvents.size,0);
 console.log("PASS GNTF outbound regression, pending evidence expiry, five-minute rechecks, live lookup reconciliation and auto-refresh lifecycle.");
+
+// Held inventory must not become actionable EDD through an older bulk summary.
+const heldScan={state:"HELD",stateUpdatedAt:today+"T09:00:00Z"};
+assert.equal(verification.canApplyEddSummaryState(heldScan,{state:"RECEIVED",stateUpdatedAt:today+"T08:33:00Z"}),false);
+assert.equal(verification.canApplyEddSummaryState(heldScan,{state:"RECEIVED"}),false);
+assert.equal(verification.canApplyEddSummaryState(heldScan,{state:"RECEIVED",stateUpdatedAt:today+"T09:01:00Z"}),true);
+const staleHeld=pkg("375239103687","HELD",{...heldScan,summaryCheckedAt:today+"T09:01:00Z",verifiedAt:today+"T10:00:00Z",verification:{state:"RECEIVED",historyComplete:true,latestEventAt:today+"T08:33:00Z",lastUpdatedAt:today+"T10:00:00Z"}});
+assert.equal(verification.eddCurrentState(staleHeld),"HELD");
+assert.equal(edd.summarizeStationEdd("TIRC",[staleHeld],today+"T10:00:00Z",today).todayAtStation,0);
+console.log("PASS held EDD regression: newer fetch time cannot override an older status event; genuine release remains possible.");

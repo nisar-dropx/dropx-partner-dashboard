@@ -6,7 +6,7 @@ import { workbookResponse } from "@/lib/report-workbook";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const BUCKET_KEYS: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "future", "unknown"];
+const BUCKET_KEYS: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "future", "unknown", "held"];
 
 /** Excel download of the network-wide Ageing overview — one row per station. */
 export async function GET() {
@@ -23,7 +23,7 @@ export async function GET() {
         "Total Live": station.totalCount
       };
       for (const bucket of BUCKET_KEYS) {
-        row[bucket === "overdue" ? "Overdue" : bucket === "dueToday" ? "Due today" : bucket === "dueTomorrow" ? "Due tomorrow" : bucket === "future" ? "Future" : "Unknown"] = station.buckets[bucket] ?? 0;
+        row[bucket === "overdue" ? "Overdue" : bucket === "dueToday" ? "Due today" : bucket === "dueTomorrow" ? "Due tomorrow" : bucket === "future" ? "Future" : bucket === "held" ? "Held" : "Unknown"] = station.buckets[bucket] ?? 0;
       }
       return row;
     });
