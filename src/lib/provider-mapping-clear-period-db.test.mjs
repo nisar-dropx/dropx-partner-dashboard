@@ -258,6 +258,20 @@ test("an open October unlock removes October coverage and preserves a locked Nov
       effective_from: "2026-11-01", effective_to: null, status: "active", payment_values: { DELIVERY: 18 }
     }]);
     assert.equal((await db.query("select count(*)::int as total from public.workforce_payout_publications")).rows[0].total, 2);
+
+    await db.exec(await migration("20261112190411_allow_bounded_active_mapping_month_removal.sql"));
+    await db.exec(`
+      update public.field_executive_provider_mappings set effective_to = '2026-10-31' where id = '${soleMapping}';
+      insert into public.workforce_payout_mapping_unlocks (company_id, workforce_id, period_start, period_end, status)
+      values ('${company}', '${otherWorker}', '2026-10-01', '2026-10-31', 'open');
+    `);
+    const bounded = (await db.query(`
+      select public.workforce_clear_unlocked_mapping_month(
+        '${company}', '${actor}', '${otherWorker}', '${soleMapping}', '${mappingVersion}',
+        array['${otherStation}'::uuid], 'Period reviewer', '2026-10-01'
+      ) as result
+    `)).rows[0].result;
+    assert.equal(bounded.disposition, "cancelled");
   } finally {
     await db.close();
   }

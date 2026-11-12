@@ -2009,7 +2009,9 @@ export async function clearProviderMappingPeriod(input: ClearProviderMappingPeri
     }
     const canonicalPeriod = (mapping.status === "active" && !mapping.effective_to)
       || (mapping.status === "closed" && Boolean(mapping.effective_to));
-    if (!canonicalPeriod) {
+    const legacyBoundedPeriod = unlockedMonth && mapping.status === "active"
+      && mapping.effective_to && mapping.effective_to >= mapping.effective_from;
+    if (!canonicalPeriod && !legacyBoundedPeriod) {
       return {
         ok: false,
         message: mapping.status === "cancelled"
