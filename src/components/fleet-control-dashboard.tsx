@@ -49,6 +49,7 @@ import {
   Play,
   PlugZap,
   Plus,
+  ReceiptIndianRupee,
   Search,
   Settings,
   ShieldCheck,
@@ -70,6 +71,7 @@ import { FleetAuditsWorkspace } from "@/components/fleet-audits-workspace";
 import { FleetBrand } from "@/components/fleet-brand";
 import { FleetAppInstall } from "@/components/fleet-app-install";
 import { FleetAdHocCapacity } from "@/components/fleet-adhoc-capacity";
+import { FleetChallansWorkspace } from "@/components/fleet-challans-workspace";
 import { FleetDocumentsWorkspace } from "@/components/fleet-documents-workspace";
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { FleetMultiSelect, type FleetFilterOption } from "@/components/fleet-multi-select";
@@ -88,13 +90,14 @@ import { buildFleetDailyStatusEmail } from "@/lib/fleet/daily-status-email";
 import { FleetOperatingPolicyEditor } from "@/components/fleet-operating-policy";
 import { normalizeFleetOperatingPolicy } from "@/lib/fleet/operating-policy";
 
-type Section = "assignments" | "attention" | "overview" | "vehicles" | "documents" | "tracking" | "fuel" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings" | "masters";
+type Section = "assignments" | "attention" | "overview" | "vehicles" | "documents" | "challans" | "tracking" | "fuel" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings" | "masters";
 
 const workspaceSections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
   { key: "overview", label: "Command Center", icon: LayoutDashboard },
   { key: "attention", label: "Need Attention", icon: AlertTriangle },
   { key: "vehicles", label: "Vehicles", icon: Truck },
   { key: "documents", label: "Vehicle Documents", icon: FileCheck2 },
+  { key: "challans", label: "Challans", icon: ReceiptIndianRupee },
   { key: "assignments", label: "Vehicle DA mapping", icon: Truck },
   { key: "tracking", label: "Tracking & Efficiency", icon: Gauge },
   { key: "fuel", label: "Fuel", icon: Fuel },
@@ -794,6 +797,7 @@ export function FleetControlDashboard({
           </section> : null}
 
           {section === "documents" ? <FleetDocumentsWorkspace key={`${attentionTarget?.vehicle||"all"}|${attentionTarget?.documentType||"all"}`} data={data} vehicles={vehicles} initialVehicle={attentionTarget?.vehicle} initialDocumentType={attentionTarget?.documentType} /> : null}
+          {section === "challans" ? <FleetChallansWorkspace data={{...data,vehicles}} vehicles={vehicles} /> : null}
 
           {section === "service" ? <FleetServiceWorkspace data={data} initialVehicle={attentionTarget?.vehicle} onChanged={() => router.refresh()} vehicles={vehicles} /> : null}
 
