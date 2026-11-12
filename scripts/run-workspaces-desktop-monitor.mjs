@@ -151,6 +151,15 @@ const alertMetric = String(process.env.AMAZON_ALERT_METRIC || "acceptance_time")
 const siteSummaryUrl = process.env.AMAZON_SITE_SUMMARY_URL
   || "https://eu.store-management.f3.amazon.dev/siteSummary";
 const SWITCH_SCRIPT = path.join(__dirname, "switch-site-summary-station.ps1");
+const KEEPALIVE_SCRIPT = path.join(__dirname, "keepalive-workspaces-window.ps1");
+/** Idle keep-alive interval (seconds). 0 disables. Default 180s to beat typical 5–10 min WorkSpaces lock. */
+const keepAliveSeconds = Math.max(
+  0,
+  Number(process.env.AMAZON_WS_KEEPALIVE_SECONDS ?? "180")
+);
+const keepAliveEnabled = keepAliveSeconds > 0
+  && !["0", "false", "no", "off"].includes(String(process.env.AMAZON_WS_KEEPALIVE ?? "1").trim().toLowerCase());
+let lastKeepAliveAt = 0;
 let lastScreenLockAlertAt = 0;
 const recentImageHashes = new Set();
 
@@ -492,6 +501,24 @@ function isScreenLockError(error) {
   return /too small|not found|screen lock|locked|restore\/open|unlock/i.test(message);
 }
 
+async function keepWorkSpacesAwake(force = false) {
+  if (!keepAliveEnabled) return { skipped: "disabled" };
+  if (!force && lastKeepAliveAt && Date.now() - lastKeepAliveAt < keepAliveSeconds * 1000) {
+    return { skipped: "cooldown" };
+  }
+  try {
+    const args = [];
+    if (switchBackground) args.push("-Background");
+    const out = await runPowerShell(KEEPALIVE_SCRIPT, args);
+    lastKeepAliveAt = Date.now();
+    console.log(`WorkSpaces keep-alive: ${out || "ok"}`);
+    return { ok: true, out };
+  } catch (error) {
+    console.warn(`WorkSpaces keep-alive failed: ${error instanceof Error ? error.message : error}`);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function alertScreenLock(reason) {
   if (!screenLockAlertJid) return;
   if (Date.now() - lastScreenLockAlertAt < screenLockCooldownMinutes * 60_000) {
@@ -502,7 +529,9 @@ async function alertScreenLock(reason) {
     "Amazon Quick Commerce · WorkSpaces monitor issue",
     `Time: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`,
     `Issue: ${reason}`,
-    "Action needed: unlock / restore Amazon WorkSpaces and keep Site Summary open in Firefox (TCC3 & TCD4 checks paused until capture works again)."
+    `Stations paused: ${stations.join(", ") || "n/a"}`,
+    "Unlock WorkSpaces (View → Send Ctrl+Alt+Delete), open Site Summary in Firefox.",
+    "Tip: in WorkSpaces Windows set Screen saver = None and require sign-in on wake = Never so idle lock stops returning."
   ].join("\n");
   try {
     if (!whatsappUrl || !whatsappToken) {
@@ -749,6 +778,8 @@ async function checkStation(sent, station, { cycleHashes }) {
 
 async function checkOnce(sent) {
   await flushOutbox();
+  // Reset remote idle clock before the cycle so Windows lock is less likely mid-run.
+  await keepWorkSpacesAwake(true);
   const cycleHashes = new Set();
   if (!allowStationSwitch) {
     // No switch: one quiet capture of whatever Site Summary site is already visible.
@@ -798,6 +829,7 @@ console.log(JSON.stringify({
   alert_group_fallback: fallbackGroup || null,
   station_group_jids: stationGroupMap,
   screen_lock_alert_jid: screenLockAlertJid || null,
+  keepalive_seconds: keepAliveEnabled ? keepAliveSeconds : 0,
   interval_minutes: Number.isFinite(intervalMinutes) ? intervalMinutes : 1,
   alert_metric: alertMetric,
   acceptance_threshold_seconds: acceptanceThresholdSec,
@@ -807,8 +839,8 @@ console.log(JSON.stringify({
   whatsapp_configured: whatsappConfigured(),
   gemini_configured: Boolean(geminiKey),
   note: allowStationSwitch
-    ? "Cron cycles every station one-by-one (script switch, not AI). Captures quietly; only WhatsApps stores with acceptance issues. Background switch restores your previous window after each store."
-    : "No station switch — leave Site Summary on the store to watch. Capture is quiet PrintWindow."
+    ? "Cron cycles every station one-by-one (script switch, not AI). Captures quietly; only WhatsApps stores with acceptance issues. Background switch + keep-alive restore your previous window and stop idle lock."
+    : "No station switch — leave Site Summary on the store to watch. Capture is quiet PrintWindow; keep-alive still nudges WorkSpaces so it does not lock."
 }, null, 2));
 
 await tick();
@@ -816,4 +848,9 @@ const minutes = Number.isFinite(intervalMinutes) ? intervalMinutes : 1;
 if (minutes > 0) {
   console.log(`WorkSpaces station monitor every ${minutes} minute(s). Ctrl+C to stop.`);
   setInterval(() => { tick(); }, minutes * 60_000);
+}
+if (keepAliveEnabled) {
+  const ms = Math.max(30, keepAliveSeconds) * 1000;
+  console.log(`WorkSpaces keep-alive every ${keepAliveSeconds}s (brief Background nudge).`);
+  setInterval(() => { keepWorkSpacesAwake(false); }, ms);
 }

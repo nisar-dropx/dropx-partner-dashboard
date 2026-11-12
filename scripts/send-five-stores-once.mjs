@@ -41,7 +41,7 @@ const loaded =
   (await loadEnv(path.join(worker, ".env.station-summary"), { overwrite: true })) ||
   (await loadEnv(path.join(root, "workers", "amazon-scc-playwright", ".env.station-summary"), { overwrite: true }));
 if (!loaded) console.warn("No .env.station-summary found — using process env only");
-process.env.GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+process.env.GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 const suffix = String(process.env.AMAZON_STATION_DROPDOWN_SUFFIX || "");
 const chipPrefix = String(process.env.AMAZON_STATION_CHIP_PREFIX || "AmazonNow").trim();
@@ -160,8 +160,14 @@ async function readAcceptance(station, imageBase64) {
     `Expected chip: ${expectedChip(station)}`,
     'JSON only: {"page_ok":true,"station_detected":"AmazonNow TCD4","pending_orders":1,"acceptance_time_seconds":27,"acceptance_time_display":"00:27","over_threshold":true,"blocker":"","breakdown":[{"label":"5103","value":"00:27 / 00:15","note":"shemavau"}]}'
   ].join("\n");
-  const primary = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-  const fallbacks = [...new Set([primary, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"])];
+  const primary = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const fallbacks = [...new Set([
+    primary,
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-2.5-flash"
+  ])];
   let lastError = null;
   for (const model of fallbacks) {
     try {
@@ -267,10 +273,12 @@ async function switchAndCapture(label, filter) {
     "-Mode", "Dropdown",
     "-WaitMs", String(waitMs),
     "-DropX", String(dropX),
-    "-DropY", String(dropY)
+    "-DropY", String(dropY),
+    "-Background"
   ];
   console.log(await ps(switchPs, args));
-  await sleep(400);
+  // Extra settle time — WorkSpaces sometimes flashes the SSO/redirect page after a switch.
+  await sleep(Math.max(900, Math.floor(waitMs / 2)));
   const out = path.join(state, `hq-${label}-${Date.now()}.png`);
   const saved = await ps(capturePs, ["-OutFile", out, "-Prepare"]);
   const png = saved || out;
@@ -344,7 +352,12 @@ for (const { label, dropdown, chip } of plan) {
       }
 
       if (analysis.page_ok === false) {
+        const blocker = String(analysis.blocker || "");
         await unlink(png).catch(() => null);
+        if (/redirect|loading|popup|not site summary/i.test(blocker) && i < candidates.length - 1) {
+          console.warn(`${label}: ${blocker || "page not ready"}; settle and retry`);
+          await sleep(1800);
+        }
         continue;
       }
 
