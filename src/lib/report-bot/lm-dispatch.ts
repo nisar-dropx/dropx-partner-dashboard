@@ -438,7 +438,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           }
         } else if(route.report==='high_value') {
           const mentions=await resolveRouteMentionNumbers(company,sources,route,day);
-          const high=await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||5000,mentions);
+          const high=await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||3000,mentions);
           outputs=high.outputs;sentSnapshot={rows:high.rows.map(r=>[r.stationCode+' · '+r.trackingId,r.shipmentValue!] as [string,number]),asOf:high.asOf};
           detail=`${high.rows.length} pending high-value shipments`;
         } else if (route.report==="eod") {

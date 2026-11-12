@@ -10,7 +10,7 @@ export function highValueStatus(state:string):HighValueStatus {
  if(['INDUCT','INDUCTED','AT_STATION','RECEIVED','ARRIVED','STAGED','FDD','MARKED_FOR_REPROCESS','DELAYED_AT_STATION','CUSTOMER_NOTES_UPDATED','PENDING_CUSTOMER_FEEDBACK'].includes(s))return 'At station';
  return 'Check status';
 }
-export function pendingHighValue(rows:HighValueRow[],threshold=5000){
+export function pendingHighValue(rows:HighValueRow[],threshold=3000){
  const unique=new Map<string,HighValueRow>();
  for(const r of rows)if(Number.isFinite(r.shipmentValue)&&r.shipmentValue!>threshold&&!['Delivered','Rejected'].includes(highValueStatus(r.state)))unique.set(`${r.stationCode}:${r.trackingId}`,r);
  const rank={'Held at station':0,'At station':1,'Attempted':2,'Check status':3,'Out on road':4,'Delivered':5,'Rejected':6};

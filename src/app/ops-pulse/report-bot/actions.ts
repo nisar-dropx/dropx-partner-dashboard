@@ -1029,7 +1029,7 @@ export async function saveDispatchRoutes(form: FormData) {
         eod_sections:report === "eod" ? eodSections : [],
         dsr_pace:report==='dsr'?parseDsrPace(String(form.get('dsr_pace')||'')):[],
         high_value_summary:report==='high_value'&&form.get('high_value_view')==='summary',
-        high_value_threshold:report==='high_value'?Math.max(5000,Number(form.get('high_value_threshold'))||5000):5000,
+        high_value_threshold:report==='high_value'?Math.max(3000,Number(form.get('high_value_threshold'))||3000):3000,
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
         schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",

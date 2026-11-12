@@ -3,10 +3,10 @@ import {fetchLoadFlashBoard,fetchLoadFlashTracking,queueLoadFlashStations} from 
 import {requireReportFreshness} from './lm-live-report';
 import {highValueCaption,highValueStatus,highValueStatusLabel,highValuePayment,highValueSummary,pendingHighValue} from './lm-high-value';
 import {tableReportSvg,reportPngBase64} from './lm-report-image';
-export async function highValueOutputs(codes:string[],day:string,slot:string,regional:boolean,threshold=5000,mentions:string[]=[]){
+export async function highValueOutputs(codes:string[],day:string,slot:string,regional:boolean,threshold=3000,mentions:string[]=[]){
  const network=await fetchLoadFlashBoard(day,codes);
  const stations=network.stations.filter(s=>codes.includes(s.stationCode)&&s.businessDate===day&&s.hasSnapshot);
- const stale=codes.filter(code=>{const s=stations.find(s=>s.stationCode===code);try{requireReportFreshness(s?.fetchedAt||null,day,5);return s?.board.highValueVersion!==1;}catch{return true;}});
+ const stale=codes.filter(code=>{const s=stations.find(s=>s.stationCode===code);try{requireReportFreshness(s?.fetchedAt||null,day,5);return s?.board.highValueVersion!==2;}catch{return true;}});
  if(stale.length){await queueLoadFlashStations(stale,5);throw new Error('Waiting for high-value source refresh: '+stale.join(', '));}
  const raw=await fetchLoadFlashTracking(day,codes,{buckets:['BoardHighValue']});
  const rows=pendingHighValue(raw.filter(r=>codes.includes(r.stationCode)),threshold);
