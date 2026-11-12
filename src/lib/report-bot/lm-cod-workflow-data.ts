@@ -9,7 +9,7 @@ import {pickupPolicy} from '../ops-pulse/cod-pickup';
 import {loadCodPendingReport} from '../ops-pulse/cod-pending-data';
 import {hasSlipProof} from '../ops-pulse/cod-pending';
 import {observedBankerWindow,observedNonPickupWeekday} from './lm-cod-alerts';
-import {codDay,codClock,codMoney,submittedTime,dueBankRows,prepareTrigger,prepareCarryover,prepareAction,pickupReview,evidenceFromSnapshot,type CashObservation,type CodSection,type Journey} from './lm-cod-workflow';
+import {codDay,codClock,codMoney,submittedTime,dueBankRows,prepareTrigger,prepareCarryover,prepareAction,priorDayCash,shouldAlertPreparation,pickupReview,evidenceFromSnapshot,type CashObservation,type CodSection,type Journey} from './lm-cod-workflow';
 import {CodRuntime} from './lm-cod-runtime';
 import {codCacheGet,codCachePut,loadCodJourneys} from './lm-cod-journeys';
 
@@ -54,11 +54,12 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
     const j=journeys.get(d.id);
     const oldest=Math.min(...d.packages.map(pkg=>Number(pkg.collectedAt)).filter(at=>Number.isFinite(at)&&at>0));
     const prior=Number.isFinite(oldest)&&codDay(oldest)<day;
+    if(!evening){const earlier=priorDayCash(d.packages,day);return earlier.amount>0?[[d.name||d.id,earlier.dates,codMoney(Math.min(d.pendingAmount,earlier.amount))]]:[];}
     const overdue=!!j?.closed&&j.dueAt!==null&&now>=j.dueAt;
     if(!closing&&!prior&&(!evening||!overdue))return [];
     return [[d.name||d.id,j?.lastStopAt?codClock(j.lastStopAt):'Unavailable',j?.distanceKm!=null?`${j.distanceKm} km${approximateJourney(j)?' direct':''} · ~${j.travelMinutes} min`:'Unavailable',codClock(j?.returnAt??null),codClock(j?.dueAt??null),codMoney(d.pendingAmount),prior?`${Math.floor((Date.parse(day+'T00:00:00+05:30')-Date.parse(codDay(oldest)+'T00:00:00+05:30'))/86400000)}d pending`:overdue?(approximateJourney(j)?'Est. return check':'Overdue'):j?.closed?'Closing check':'On road / unverified']];
    });
-   if(rows.length)result.sections.push({key:'recon',title:'DA reconciliation',columns:['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status'],rows,owner:'team',tone:'attention',action:!evening?'Previous-day COD reconciliation is still pending. Collect and reconcile the amounts shown now. Reminders continue until cleared.':closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
+   if(rows.length)result.sections.push({key:'recon',title:evening?'DA reconciliation':'Previous-day DA reconciliation',columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows,owner:'team',tone:'attention',action:!evening?'Previous-day COD reconciliation is still pending. Collect and reconcile the amounts shown now. Reminders continue until cleared.':closing?'Reconcile all cash already returned. Confirm the return plan for DAs still on road; do not carry collections or RTS into tomorrow.':'Confirm return for estimated checks; collect and reconcile any cash already returned. Direct-distance estimates allow extra travel time and do not confirm arrival. Reply with the reason and clearance time for exceptions.'});
   }
   // Preparing current-day cash at closure is independent from the next-day bank handover.
   if(hourly&&(evening||policy&&istClock(now)>=policy.start&&istClock(now)<=policy.end)){
@@ -75,7 +76,7 @@ export async function loadCodWorkflow(company:string,source:Source,day:string,sl
     if(previous.error)throw new Error(previous.error.message);
     carryover=prepareCarryover(previous.data?.payload as CashObservation|undefined,p.data.actualAmount,m.data.rows,day);
    }
-   if(trigger)result.sections.push({key:'prepare',title:carryover?'Prepare Deposit · carried from yesterday':'Prepare Deposit pending',columns:['Reconciled cash to prepare','Out on road','Pickup cycle'],rows:[[codMoney(p.data.actualAmount),oor??'Unverified',policy?.rule||'Not configured']],owner:'team',tone:'attention',action:prepareAction(p.data.actualAmount,trigger==='pickup',carryover)});
+   if(shouldAlertPreparation(trigger,slot,carryover))result.sections.push({key:'prepare',title:carryover?'Prepare Deposit · carried from yesterday':'Prepare Deposit pending',columns:['Reconciled cash','Pickup cycle'],rows:[[codMoney(p.data.actualAmount),policy?.rule||'Not configured']],owner:'team',tone:'attention',action:prepareAction(p.data.actualAmount,trigger==='pickup',carryover)});
   }
   // Review each actual submission once. A snapshot AFTER pickup cannot prove what was available BEFORE.
   const reviewed=new Set<string>();

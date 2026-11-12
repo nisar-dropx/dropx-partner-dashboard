@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {pickupReview,dueBankRows,prepareTrigger,parseCodHold,prepareCarryover,prepareAction} from './lm-cod-workflow.ts';
+import {pickupReview,dueBankRows,prepareTrigger,parseCodHold,prepareCarryover,prepareAction,priorDayCash,shouldAlertPreparation} from './lm-cod-workflow.ts';
 import {CodRuntime} from './lm-cod-runtime.ts';
 const at=t=>Date.parse('2026-11-11T'+t+':00+05:30');
 const row=(id,status,time,amount=100000)=>({id,code:id,status,actualAmount:amount,expectedAmount:amount,variance:0,createdAt:at(time),updatedAt:at(time),submittedAt:status==='SUBMITTED'?at(time):null,createdBy:'',submittedBy:null});
@@ -49,4 +49,13 @@ test('morning preparation is not automatically called yesterday cash',()=>{
  assert.match(prepareAction(8523.42,true,true),/Yesterday/);
  assert.doesNotMatch(prepareAction(8523.42,true,false),/Yesterday|wait for|30 minutes|one hour/);
  assert.match(prepareAction(8523.42,true,false),/Click Prepare Deposit now.*Reminders continue until completed/);
+});
+
+test('morning follow-up excludes current-day collections and unproven preparation',()=>{
+ const cash=priorDayCash([{amount:500,collectedAt:at('22:00')},{amount:900,collectedAt:Date.parse('2026-11-12T08:00:00+05:30')},{amount:100,collectedAt:null}],'2026-11-12');
+ assert.deepEqual(cash,{amount:500,dates:'2026-11-11'});
+ assert.equal(shouldAlertPreparation('pickup','09:00',false),false);
+ assert.equal(shouldAlertPreparation('pickup','09:00',true),true);
+ assert.equal(shouldAlertPreparation('pickup','18:00',false),true);
+ assert.equal(shouldAlertPreparation(null,'09:00',true),false);
 });
