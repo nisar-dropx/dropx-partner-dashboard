@@ -14,7 +14,7 @@ export function redisputeStatus(w:RedisputeState) {
 
 /** Classification uses workflow state, never the station's Cloak reference. */
 export function isLscFollowup(w: RedisputeState) {
-  return ['with_vendor', 'filed', 'won', 'lost'].includes(w.workflow_status || w.followup_status);
+  return ['approved', 'with_vendor', 'filed', 'won', 'lost'].includes(w.workflow_status || w.followup_status);
 }
 export type QueueDimension = 'station' | 'cluster' | 'region' | 'status' | 'month' | 'type' | 'due';
 export type QueueFilters = Record<QueueDimension, string[]>;

@@ -8,6 +8,7 @@ import {
 } from "@/lib/ops-pulse/loss-recovery-controls";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { stationEvidenceError } from "@/lib/ops-pulse/loss-station-evidence";
+import { lscTicketError } from "@/lib/ops-pulse/loss-lsc-ticket";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 const reply = (body: unknown, status = 200) =>
@@ -109,6 +110,10 @@ async function transition(b: Record<string, any>) {
     const validationError = stationEvidenceError(details);
     if (validationError) throw Error(validationError);
   }
+  if (b.action === "tracking") {
+    const validationError = lscTicketError({...details, followup_on: String(details.followup_on || '')});
+    if (validationError) throw Error(validationError);
+  }
   if (b.action === "return" && (details.note.length < 10 || details.note.length > 4000))
     throw Error("Add a correction note for the station (10–4000 characters).");
   for (const value of [details.evidence_url, details.tt_url])
@@ -147,22 +152,33 @@ export async function POST(request: Request) {
     const b = await request.json();
     if (!b || typeof b !== "object" || Array.isArray(b))
       return reply({ error: "Invalid request." }, 400);
-    if (b.action === "bulk_activate" || b.action === "bulk_update") {
+    if (b.action === "bulk_activate" || b.action === "bulk_update" || b.action === "bulk_tracking") {
       const auth = await getAuthorization();
       if (
-        !auth ||
+        !auth || auth.readOnly ||
         !mayActivateRedispute(auth) ||
+        !hasPermission(auth, "ops_losses", "access") ||
         !hasPermission(auth, "ops_losses", "edit")
       )
         return reply(
           {
             error:
-              "Only SLP Manager, National Head, Finance Manager or Managing Partner can activate redisputes.",
+              "Only SLP Manager, National Head, Finance Manager or Managing Partner can manage redisputes.",
           },
           403,
         );
       if (!Array.isArray(b.rows) || !b.rows.length || b.rows.length > 100)
         return reply({ error: "Provide 1–100 shipments." }, 400);
+      const ticketDetails = {
+        tt_reference: String(b.tt_reference || '').trim(),
+        tt_url: String(b.tt_url || '').trim(),
+        followup_on: String(b.followup_on || ''),
+        note: String(b.note || '').trim(),
+      };
+      if (b.action === 'bulk_tracking') {
+        const error = lscTicketError(ticketDetails);
+        if (error) return reply({error}, 400);
+      }
       const seen = new Set<string>();
       for (const row of b.rows) {
         if (
@@ -182,39 +198,46 @@ export async function POST(request: Request) {
             },
             400,
           );
-        const action = b.action === "bulk_activate" ? "activate" : row.action;
-        if (!["activate","revoke"].includes(action)) return reply({error:"Choose Enable or Disable for each shipment."},400);
+        const action = b.action === 'bulk_tracking' ? 'tracking' : b.action === "bulk_activate" ? "activate" : row.action;
+        if (!(b.action === 'bulk_tracking' ? ['tracking'] : ["activate","revoke"]).includes(action)) return reply({error:"Choose Enable or Disable for each shipment."},400);
         if (action === "revoke" && (typeof row.note !== "string" || row.note.trim().length < 10 || row.note.length > 4000)) return reply({error:"Disabling requires a reason (10–4000 characters)."},400);
         const key = `${row.month}|${row.case_key}`;
         if (seen.has(key))
           return reply(
-            { error: "Remove duplicate shipments before activation." },
+            { error: "Remove duplicate shipments before saving." },
             400,
           );
         seen.add(key);
       }
-      const results = [];
       const companies = new Set<string>();
-      for (const row of b.rows) {
+      const saveRow = async (row: Record<string, any>) => {
         try {
-          const saved = await transition({ ...row, action: b.action === "bulk_activate" ? "activate" : row.action });
+          const saved = await transition(b.action === 'bulk_tracking'
+            ? {month: row.month, case_key: row.case_key, version: row.version, ...ticketDetails, action: 'tracking'}
+            : { ...row, action: b.action === "bulk_activate" ? "activate" : row.action });
           companies.add(saved.company);
-          results.push({
+          return {
             month: row.month,
             case_key: row.case_key,
             ok: true,
             window: saved.window,
-          });
+          };
         } catch (e) {
-          results.push({
+          return {
             month: row.month,
             case_key: row.case_key,
             ok: false,
-            error: e instanceof Error ? e.message : "Unable to activate.",
-          });
+            error: e instanceof Error ? e.message : "Unable to save.",
+          };
         }
+      };
+      const results = [];
+      // Bound independent per-case validation; the RPC serializes state changes under its company lock.
+      const concurrency = b.action === 'bulk_tracking' ? 4 : 1;
+      for (let i = 0; i < b.rows.length; i += concurrency) {
+        results.push(...await Promise.all(b.rows.slice(i, i + concurrency).map(saveRow)));
       }
-      const payroll_sync = companies.size ? await refreshLossPayroll([...companies][0]) : undefined;
+      const payroll_sync = b.action !== 'bulk_tracking' && companies.size ? await refreshLossPayroll([...companies][0]) : undefined;
       return reply({ results, payroll_sync });
     }
     const saved = await transition(b);

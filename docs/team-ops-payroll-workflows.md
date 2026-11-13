@@ -958,3 +958,20 @@ Validation: `pnpm test:loss-period-close`; full recovery regression suite.
 - Work-day disputes are offered only for publications containing daily, monthly or hourly payments. Pure per-packet publications reject attendance claims in server validation too. Mixed periods accept attendance disputes only on dates with attendance-based payment lines. Half-day complaints appear only when an eligible published half-day exists; production rate date pickers show delivery evidence instead of attendance labels.
 - Single in-punch daily/MG eligibility remains supported; hourly pay still requires actual hours. No historical publication, rate, attendance record, dispute deadline or payroll amount is rewritten by this release.
 - Validation: rendered questionnaire tests, the actual associate loader with mocked database boundaries, guided intake/reviewer regressions, and read-only checks of 19 October publications spanning 8 payment combinations (168 daily count comparisons). Missing source counts remain unknown rather than being invented as zero.
+
+
+### Approved redisputes and shared LSC tickets — 13 November 2026
+
+Approval needs no LSC ticket. Approved cases immediately leave Redispute review and
+appear in LSC follow-up as “Approved · ticket to file”, including existing approved
+cases. Station evidence and independent reviewer checks are unchanged.
+
+LSC follow-up uses scoped, cascading station/status filters and exports every matching
+TID with its evidence and loss details to Excel. Managers can record one shared LSC
+ticket for up to 100 selected shipments, or update one shipment. Ticket entry uses
+the existing `tracking` transition; each row rechecks role, station access, open period
+and version, and writes its own audit event. Partial failures remain selected and
+are reported explicitly. No external LSC ticket is created by OpsPulse. Ticket-only
+updates do not run payroll resettlement; the existing redispute payroll hold remains.
+
+No migration or production data rewrite is required. Regression: `pnpm run test:lsc-followup`.

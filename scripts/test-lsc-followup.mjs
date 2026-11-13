@@ -7,7 +7,8 @@ const filters={...emptyQueueFilters(),station:['A'],status:['with_vendor','won']
 assert.equal(matchesQueueFilters(facts[0],filters),true);assert.equal(matchesQueueFilters(facts[1],filters),false);
 assert.deepEqual(queueFacetOptions(facts,filters,'cluster'),['X']);
 assert.deepEqual(queueFacetOptions(facts,{...filters,cluster:['Missing']},'cluster'),['Missing','X']);
-assert.equal(isLscFollowup({enabled:true,workflow_status:'approved',followup_status:'preparing'}),false);
+assert.equal(isLscFollowup({enabled:true,workflow_status:'approved',followup_status:'preparing'}),true);
+for (const state of ['awaiting_station','awaiting_review','returned','cancelled']) assert.equal(isLscFollowup({enabled:true,workflow_status:state,followup_status:'preparing'}),false);
 assert.equal(isLscFollowup({enabled:false,workflow_status:'won',followup_status:'won'}),true);
 const db=new PGlite();
 await db.exec(`create role anon;create role authenticated;create role service_role;
@@ -42,5 +43,19 @@ await act('activate');await act('response',{reason:'New evidence',tt_reference:'
 const won=await act('won',{tt_reference:'LSC-456'});assert.equal(won.enabled,false);assert.equal(won.recovery_month,null);
 await assert.rejects(()=>act('activate',{},reviewer,'closed'),/Period closed/);
 assert.equal((await db.query('select count(*)::int n from nl_case_response_events')).rows[0].n,version);
+// One external LSC ticket covers multiple independently approved shipments.
+for (const key of ['batch-one','batch-two']) {
+ await db.query("insert into nl_loss_month_cases values($1,'2026-09',$2,'nl','recoverable',now())",[company,key]);
+ version=0;
+ await act('activate',{},reviewer,key);
+ await act('response',{reason:'New evidence',tt_reference:'CLOAK-BATCH',evidence_url:'https://example.com/evidence'},station,key);
+ const approved=await act('approve',{},reviewer,key);
+ assert.equal(approved.tt_reference,null);
+ assert.equal(isLscFollowup(approved),true);
+ const filed=await act('tracking',{tt_reference:'LSC-SHARED',followup_on:'2027-01-01'},reviewer,key);
+ assert.equal(filed.workflow_status,'with_vendor');assert.equal(filed.enabled,true);
+ await assert.rejects(()=>act('tracking',{tt_reference:'LSC-SHARED',followup_on:'2027-01-01'},reviewer,key,version-1),/changed/);
+}
+assert.equal((await db.query("select count(*)::int n from nl_case_response_windows where tt_reference='LSC-SHARED'")).rows[0].n,2);
 assert.equal((await db.query("select has_function_privilege('authenticated','nl_redispute_transition(uuid,text,text,integer,text,jsonb,uuid,text)','execute') permitted")).rows[0].permitted,false);
 await db.close();console.log('PASS: cascading facets, selected preservation, queue separation, LSC lifecycle, review independence, payroll month, concurrency, audit, closed-period guard and grants');

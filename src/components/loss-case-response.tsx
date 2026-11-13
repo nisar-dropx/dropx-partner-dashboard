@@ -53,6 +53,7 @@ export function LossCaseResponse({
   caseKey,
   embedded = false,
   inline = false,
+  allowTicketEntry = true,
   initialView = "case",
   viewRequest = 0,
   initialAction = "",
@@ -62,6 +63,7 @@ export function LossCaseResponse({
   caseKey: string;
   embedded?: boolean;
   inline?: boolean;
+  allowTicketEntry?: boolean;
   initialView?: "case" | "history";
   viewRequest?: number;
   initialAction?: "" | "return";
@@ -163,7 +165,8 @@ export function LossCaseResponse({
   // Context matters even for managers: the station editor is evidence-only.
   const stationView = embedded || !data?.canActivate;
   const actions = responseActions({enabled: !!data?.window.enabled, state,
-    canManage: !!data?.canActivate, stationView, readOnly: !data || data.readOnly});
+    canManage: !!data?.canActivate, stationView, readOnly: !data || data.readOnly})
+    .filter(value=>allowTicketEntry||!["tracking","won","lost"].includes(value));
   const selectedAction = actions.includes(action) ? action : actions[0] || "";
   const evidenceError = stationEvidenceError({ reason, note, tt_reference: ticket,
     evidence_url: evidence, cctv_url: cctv, cctv_not_required: cctvNotRequired });
@@ -230,6 +233,7 @@ export function LossCaseResponse({
               {inline?<button type="button" onClick={()=>setTracking(true)}>Shipment tracking</button>:null}
             </div>
             <div hidden={view !== "case"} id={paneId + "-case"}>
+            {!allowTicketEntry&&state==='approved'?<p className={styles.hint}>Approved. <a href="/team-ops/losses/exceptions?view=lsc">Open LSC follow-up</a> to download or record a ticket later.</p>:null}
             {returnEvent ? <div className={evidenceStyles.returnNote} role="status">
               <strong>Returned for correction</strong>
               <p>{returnEvent.note}</p>
