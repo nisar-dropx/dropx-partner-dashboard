@@ -21,10 +21,11 @@ COPY eng.traineddata ./eng.traineddata
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV TESSDATA_PATH=/app
-# The portal uses a Let's Encrypt chain rooted at ISRG Root YE, newer than Node's
-# bundled CA list. Debian's ca-certificates package keeps the current roots, so point
-# Node at the system trust store instead of disabling TLS verification.
-ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+# The portal serves a Let's Encrypt chain rooted at ISRG Root YE (newer than Node's
+# bundled CA list, and not sent by the server). The bundled PEM holds that root
+# cross-signed by the universally-trusted ISRG Root X2, so pointing NODE_EXTRA_CA_CERTS
+# at it lets global fetch validate the chain WITHOUT disabling TLS verification.
+ENV NODE_EXTRA_CA_CERTS=/app/isrg-root-ye.pem
 
 EXPOSE 8080
 
