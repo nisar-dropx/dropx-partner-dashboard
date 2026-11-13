@@ -11,8 +11,10 @@ RUN apt-get update \
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY parivahan.mjs captcha.mjs server.mjs ./
+COPY parivahan.mjs captcha.mjs tls.mjs server.mjs ./
 COPY scripts ./scripts
+# Bundled cross-signed root so Node can validate the portal's ISRG Root YE chain.
+COPY isrg-root-ye.pem ./isrg-root-ye.pem
 # Bundled English OCR model so the container never downloads language data at runtime.
 COPY eng.traineddata ./eng.traineddata
 
