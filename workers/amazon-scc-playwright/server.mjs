@@ -1072,14 +1072,15 @@ async function setStation(page, stationCode) {
 async function setSiteSummaryStation(page, stationCode) {
   const station = String(stationCode ?? "").trim();
   if (!station) return { changed: false, message: "No station code provided." };
-  const escaped = station.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const stationPattern = new RegExp(escaped, "i");
+  const aliases = [...new Set([station, station.replace(/_SS$/i, ""), `${station.replace(/_SS$/i, "")}_SS`])];
+  const escaped = aliases.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const stationPattern = new RegExp(`(?:${escaped})`, "i");
 
   const alreadyActive = await page.evaluate((expected) => {
     const header = document.querySelector("header, [role='banner'], nav") || document.body;
     const text = (header?.innerText || "").replace(/\s+/g, " ").toLowerCase();
-    return text.includes(String(expected).toLowerCase());
-  }, station).catch(() => false);
+    return [expected, `${expected}_SS`].some((value) => text.includes(String(value).toLowerCase()));
+  }, station.replace(/_SS$/i, "")).catch(() => false);
 
   const openCandidates = [
     page.getByRole("button", { name: stationPattern }).first(),
@@ -1107,13 +1108,18 @@ async function setSiteSummaryStation(page, stationCode) {
       await option.click({ timeout: 4000 }).catch(() => null);
       await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => null);
       await page.waitForTimeout(900);
-      return { changed: true, method: "top-menu", message: `Site Summary station switched to ${station}.` };
+      const verified = await page.evaluate((expected) => {
+        const header = document.querySelector("header, [role='banner'], nav") || document.body;
+        const text = (header?.innerText || "").replace(/\s+/g, " ").toLowerCase();
+        return [expected, `${expected}_ss`].some((value) => text.includes(String(value).toLowerCase()));
+      }, station.replace(/_SS$/i, "")).catch(() => false);
+      if (verified) return { changed: true, verified: true, method: "top-menu", message: `Site Summary station switched to ${station}.` };
     }
   }
 
   const fallback = await setStation(page, station);
   if (fallback.changed) return { ...fallback, method: "generic-selector" };
-  if (alreadyActive) return { changed: false, method: "already-active", message: `Station ${station} already appears active in the header.` };
+  if (alreadyActive) return { changed: false, verified: true, method: "already-active", message: `Station ${station} already appears active in the header.` };
   return { changed: false, method: "not-found", message: `Could not switch Site Summary to ${station}.` };
 }
 

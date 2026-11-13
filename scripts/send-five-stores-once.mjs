@@ -376,6 +376,9 @@ for (const { label, dropdown, chip } of plan) {
       if (analysis.page_ok === false) {
         const blocker = String(analysis.blocker || "");
         await unlink(png).catch(() => null);
+        if (/firefox\s+process\s+manager|not\s+site\s+summary/i.test(blocker)) {
+          throw new Error(`${label}: ${blocker}. Stop the cycle and restore Site Summary before retrying.`);
+        }
         if (/redirect|loading|popup|not site summary/i.test(blocker) && i < candidates.length - 1) {
           console.warn(`${label}: ${blocker || "page not ready"}; settle and retry`);
           await sleep(1800);

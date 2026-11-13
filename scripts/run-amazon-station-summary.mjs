@@ -94,6 +94,28 @@ function alertSignature(alert) {
   return createHash("sha1").update(basis).digest("hex");
 }
 
+function acceptanceCaption(alert) {
+  const text = String(alert.page_text || "").replace(/\s+/g, " ").trim();
+  const station = String(alert.station || "").replace(/_SS$/i, "");
+  const acceptanceSignal = /acceptance\s*time|pending\s+acceptance/i.test(text)
+    || (alert.metrics || []).some((metric) => /acceptance/i.test(`${metric.label} ${metric.value}`));
+  if (!acceptanceSignal) return null;
+
+  // Only count the banner's pending orders. An assigned order is not pending
+  // for this message, even when its acceptance clock is red.
+  const pendingMatch = text.match(/(?:you\s+have\s+)?(\d+)\s+orders?\s+pending\s+acceptance/i);
+  const hasUnassigned = /no\s+idle\s+associates/i.test(text);
+  const clocks = [...text.matchAll(/(\d{1,2}:\d{2})\s*\/\s*00?:?15\b/gi)].map((match) => match[1]);
+  const seconds = (value) => value.split(":").reduce((sum, part) => sum * 60 + Number(part), 0);
+  const worst = clocks.sort((a, b) => seconds(b) - seconds(a))[0];
+  const lines = [station, "* High acceptance time over 15s SLA"];
+  if (hasUnassigned && pendingMatch) {
+    lines.push(`* ${pendingMatch[1]} order${pendingMatch[1] === "1" ? "" : "s"} pending acceptance${worst ? ` (Worst ${worst})` : ""}`);
+  }
+  lines.push("", "Move more people to picking");
+  return lines.join("\n");
+}
+
 function fallbackCaption(alert) {
   const metricLines = (alert.metrics || [])
     .slice(0, 8)
@@ -116,6 +138,8 @@ function fallbackCaption(alert) {
 }
 
 async function geminiCaption(alert) {
+  const deterministic = acceptanceCaption(alert);
+  if (deterministic) return deterministic;
   if (!geminiKey) return fallbackCaption(alert);
   const metricBlock = (alert.metrics || [])
     .map((metric) => `- header: ${metric.label || "unknown"} | value: ${metric.value || "n/a"}`)

@@ -144,7 +144,8 @@ function Type-Text([string]$text) {
 }
 
 function Clear-FilterText() {
-  # Never Ctrl+A on the page.
+  # Do not use Ctrl+A here: focus can be on the remote page rather than the
+  # dropdown input, which selects the whole WorkSpaces page.
   [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE 20}")
 }
 
@@ -211,4 +212,6 @@ if ($Background -and $prevHwnd -ne [IntPtr]::Zero -and $prevHwnd -ne $hwnd) {
 
 Start-Sleep -Milliseconds ([Math]::Max(1800, $WaitMs))
 
-Write-Output ("switched-dropdown:{0}|alt:{1}|filter:{2}|click:{3},{4}|size:{5}x{6}|bg:{7}" -f $chipAmazon, $chipSs, $usedFilter, $clickX, $clickY, $width, $height, [int]$Background.IsPresent)
+# This is an attempt only. The Node runner must verify the post-capture chip
+# before it can send anything; never treat this line as switch confirmation.
+Write-Output ("attempted-dropdown:{0}|alt:{1}|filter:{2}|click:{3},{4}|size:{5}x{6}|bg:{7}" -f $chipAmazon, $chipSs, $usedFilter, $clickX, $clickY, $width, $height, [int]$Background.IsPresent)
