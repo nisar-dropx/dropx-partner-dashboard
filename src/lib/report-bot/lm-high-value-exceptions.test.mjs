@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {highValueException} from './lm-high-value-exceptions.ts';
+import {highValueException,highValueHistoryRows} from './lm-high-value-exceptions.ts';
 const now=Date.parse('2026-11-14T23:00:00+05:30');
 const row={stationCode:'JUGF',trackingId:'T1',shipmentValue:5000,state:'HELD',driverId:'',driverName:'',edd:'2026-11-20'};
 const scan=(state,day,time='10:00')=>({state,time:`2026-11-${day}T${time}:00+05:30`,source:'JUGF',destination:'CUSTOMER_ADDRESS'});
@@ -29,4 +29,11 @@ test('verified return connection closes; a stale historical return cannot close 
  const h=[scan('INDUCTED',10),{...scan('DEPARTED',14),destination:'FULFILLMENT_CENTER'}];
  assert.equal(highValueException(row,evidence(h,'DEPARTED'),now),null);
  assert.ok(highValueException(row,evidence([...h,scan('DELIVERY_FAILED',14,'20:00')],'DELIVERY_FAILED'),now));
+});
+test('image history retains three separate attempt days despite many same-day scans',()=>{
+ const rows=highValueHistoryRows([scan('DELIVERY_FAILED',11),scan('DELIVERY_FAILED',12),scan('DELIVERY_FAILED',13),...['10:10','10:11','10:12','10:13','10:14'].map(t=>scan('RECEIVED',14,t)),scan('IN_TRANSIT',14,'11:00')]);
+ assert.deepEqual(rows.filter(h=>h.state==='DELIVERY_FAILED').map(h=>h.time.slice(8,10)),['13','12']);
+ assert.equal(rows[0].state,'IN_TRANSIT');
+ const attempted=highValueHistoryRows([scan('DELIVERY_FAILED',11),scan('DELIVERY_FAILED',12),scan('DELIVERY_FAILED',13),...['10:10','10:11','10:12','10:13','10:14'].map(t=>scan('RECEIVED',13,t))]);
+ assert.equal(attempted.filter(h=>h.state==='DELIVERY_FAILED').length,3);
 });

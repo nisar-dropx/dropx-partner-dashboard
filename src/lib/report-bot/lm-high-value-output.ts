@@ -2,7 +2,7 @@ import 'server-only';
 import {fetchLoadFlashBoard,fetchLoadFlashTracking,queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
 import {requireReportFreshness} from './lm-live-report';
 import {highValuePayment} from './lm-high-value';
-import {highValueClosed,highValueException,highValueExceptionCaption,highValueScanLabel,type HighValueEvidence} from './lm-high-value-exceptions';
+import {highValueClosed,highValueException,highValueExceptionCaption,highValueScanLabel,highValueHistoryRows,type HighValueEvidence} from './lm-high-value-exceptions';
 import {tableReportSvg,reportPngBase64} from './lm-report-image';
 import {codCacheGet,codCachePut} from './lm-cod-journeys';
 import {CodRuntime} from './lm-cod-runtime';
@@ -47,7 +47,7 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
   const caption=[highValueExceptionCaption(code,list.length,list.reduce((n,r)=>n+r.shipmentValue!,0),slot>=(context.escalationTime||'23:00')),mentions.map(n=>'@'+n).join(' ')].filter(Boolean).join('\n');
   const clock=(at:string)=>new Date(at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   const values=list.flatMap(r=>{
-   const events=r.history.filter(h=>!['MANIFESTED','CUSTOMER_NOTES_UPDATED'].includes(h.state)).slice(-5).reverse();
+   const events=highValueHistoryRows(r.history);
    return [[r.trackingId,'₹'+r.shipmentValue!.toLocaleString('en-IN'),highValuePayment(r.paymentMethod),highValueScanLabel(r.state),r.ageDays===null?'Unknown':`${r.ageDays}d`,`${r.activityDays} days`],
     ...(r.product?[[r.trackingId,'Product',r.product.length>30?r.product.slice(0,29)+'…':r.product,'','','']]:[]),
     ...(r.firstAt?[[r.trackingId,'First seen',clock(r.firstAt),'','','']]:[]),

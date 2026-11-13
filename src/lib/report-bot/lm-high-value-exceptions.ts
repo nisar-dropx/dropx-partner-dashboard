@@ -21,8 +21,24 @@ export function highValueException(row:HighValueRow,evidence:HighValueEvidence,n
  return {...row,state:evidence.state,product:evidence.product,ageDays,activityDays,firstAt:Number.isFinite(first)?new Date(first).toISOString():null,history:local,checkedAt:evidence.checkedAt};
 }
 export function highValueScanLabel(state:string){
- const labels:Record<string,string>={INDUCTED:'Inducted',RECEIVED:'Received',IN_TRANSIT:'Dispatched',IN_TRANSIT_TO_CUSTOMER:'Out on road',ON_ROAD_WITH_DELIVERY_ASSOCIATE:'Out on road',DELIVERY_FAILED:'Attempt failed',DELIVERY_ATTEMPTED:'Attempted',REJECTED:'Rejected',DELIVERY_REJECTED:'Rejected',HOLD_FOR_REDELIVERY:'Held · HFR',HOLD_FOR_CUSTOMER_REQUEST:'Held · HCR',READY_FOR_FC_RETURN:'Return pending',HELD:'Held'};
+ const labels:Record<string,string>={INDUCTED:'Inducted',RECEIVED:'Received',IN_TRANSIT:'In transit',IN_TRANSIT_TO_CUSTOMER:'Out on road',ON_ROAD_WITH_DELIVERY_ASSOCIATE:'Out on road',DELIVERY_FAILED:'Attempt failed',DELIVERY_ATTEMPTED:'Attempted',REJECTED:'Rejected',DELIVERY_REJECTED:'Rejected',HOLD_FOR_REDELIVERY:'Held · HFR',HOLD_FOR_CUSTOMER_REQUEST:'Held · HCR',READY_FOR_FC_RETURN:'Return pending',HELD:'Held'};
  return labels[state]||state.replaceAll('_',' ').toLowerCase();
+}
+/** One outcome per activity day keeps repeated attempts visible instead of filling the image with same-day scans. */
+export function highValueHistoryRows(history:ShipmentScan[]){
+ const outcomes=new Set(['DELIVERY_FAILED','DELIVERY_ATTEMPTED','REJECTED','DELIVERY_REJECTED']);
+ const byDay=new Map<string,ShipmentScan>();
+ for(const h of history){
+  if(!Number.isFinite(stamp(h.time)))continue;
+  const active=outcomes.has(h.state)||['IN_TRANSIT_TO_CUSTOMER','ON_ROAD_WITH_DELIVERY_ASSOCIATE'].includes(h.state)||(h.state==='IN_TRANSIT'&&h.destination==='CUSTOMER_ADDRESS');
+  if(!active)continue;
+  const key=day(stamp(h.time)),prior=byDay.get(key);
+  if(!prior||(outcomes.has(h.state)&&!outcomes.has(prior.state))||(outcomes.has(h.state)===outcomes.has(prior.state)&&stamp(h.time)>stamp(prior.time)))byDay.set(key,h);
+ }
+ const latest=history.filter(h=>!['MANIFESTED','CUSTOMER_NOTES_UPDATED'].includes(h.state)).at(-1);
+ const rows=[...byDay.values()].sort((a,b)=>stamp(b.time)-stamp(a.time)).slice(0,3);
+ if(latest&&!rows.some(h=>h.state===latest.state&&h.time===latest.time))rows.push(latest);
+ return rows.sort((a,b)=>stamp(b.time)-stamp(a.time));
 }
 export function highValueExceptionCaption(station:string,count:number,value:number,escalation:boolean){
  return `*${station} · ${escalation?'Escalation':'High-value check'} · ${count} shipment${count===1?'':'s'} · ₹${value.toLocaleString('en-IN',{maximumFractionDigits:2})}*\n${escalation?'Still unresolved. Verify physical stock and record delivery or confirmed return handover now.':'Verify physical stock and arrange delivery or confirmed return handover today.'} Out-on-road or another attempt does not close this alert.`;
