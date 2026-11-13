@@ -76,8 +76,12 @@ async function loadOwnedVehicles(companyId, vehicleNos, limit) {
   return capped;
 }
 
-function issuingAuthorityFromSource(challanSource) {
-  // 1 = AI/enforcement camera (MVD/Traffic), 5 = state traffic unit. Keep generic.
+// The data authority for every Parivahan e-Challan record is the National
+// Informatics Centre (NIC), which runs the MoRTH Parivahan platform. The DB
+// stores a coded enum ('parivahan'); the UI shows the NIC/Parivahan label.
+// challanSource only hints at the enforcing unit, kept in rawPayload.
+const AUTHORITY_CODE = "parivahan";
+function enforcingUnit(challanSource) {
   if (challanSource === 1) return "MVD / Traffic enforcement";
   if (challanSource === 5) return "State Traffic Police";
   return "MVD / Parivahan";
@@ -159,13 +163,19 @@ async function runPull({ companyId, vehicleNos, limit, dryRun }) {
           offenseDate: c.challanDate ? c.challanDate.slice(0, 10) : null,
           offenseAt: c.challanDate || null,
           offenseDescription: c.offenceSummary,
-          issuingAuthority: issuingAuthorityFromSource(c.challanSource),
+          issuingAuthority: AUTHORITY_CODE,
+          source: "portal_sync",
           stateCode: c.stateCode,
           evidenceUrl,
           evidenceBase64,
           evidenceExt,
           portalStatus: c.paymentStatus,
-          rawPayload: { ...c, source: "parivahan", pulledAt: new Date().toISOString() },
+          rawPayload: {
+            ...c,
+            source: "parivahan",
+            enforcingUnit: enforcingUnit(c.challanSource),
+            pulledAt: new Date().toISOString(),
+          },
         });
       }
 

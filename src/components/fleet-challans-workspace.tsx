@@ -1,7 +1,19 @@
 "use client";
 
-import { AlertTriangle, Check, ExternalLink, FileWarning, Plus, ReceiptIndianRupee, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  ExternalLink,
+  FileWarning,
+  Image as ImageIcon,
+  Plus,
+  ReceiptIndianRupee,
+  Search,
+  ShieldCheck,
+  X
+} from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { FleetExportButtons } from "@/components/fleet-export-buttons";
 import { FleetMobileSection } from "@/components/fleet-mobile-section";
 import { FleetMultiSelect } from "@/components/fleet-multi-select";
@@ -60,6 +72,25 @@ const statusLabel: Record<ChallanStatus, string> = {
   paid_external: "Paid outside DropX"
 };
 
+// Issuing authority is stored as a coded enum; show a readable label.
+// The Parivahan e-Challan system of record is run by the National Informatics Centre.
+const authorityLabel: Record<string, string> = {
+  parivahan: "National Informatics Centre · Parivahan e-Challan",
+  mvd: "Motor Vehicles Dept (MVD)",
+  traffic_police: "State Traffic Police",
+  virtual_court: "Virtual Court",
+  other: "Other authority",
+  unknown: "Not recorded"
+};
+const authorityText = (code: string) => authorityLabel[code] || code.replaceAll("_", " ");
+
+const sourceLabel: Record<string, string> = {
+  portal_sync: "Parivahan portal sync",
+  ingest: "Authorized ingest",
+  manual: "Manual entry"
+};
+const sourceText = (code: string) => sourceLabel[code] || code.replaceAll("_", " ");
+
 const money = (value: number) => `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const day = (value: string | null | undefined) => {
   if (!value) return "—";
@@ -71,6 +102,85 @@ const day = (value: string | null | undefined) => {
 function recoveryHref(challan: FleetChallan) {
   if (!challan.recoveryMonth || !challan.recoveryCaseKey) return "/ops-pulse/team-ops/losses/recovery-updates";
   return `/ops-pulse/team-ops/losses/recovery-updates?month=${encodeURIComponent(challan.recoveryMonth)}&case=${encodeURIComponent(challan.recoveryCaseKey)}`;
+}
+
+// A pending action awaiting confirmation before it fires.
+type PendingAction =
+  | { kind: "status"; status: ChallanStatus }
+  | { kind: "recovery" };
+
+type ConfirmSpec = {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  tone: "primary" | "danger" | "neutral";
+  requireNote?: boolean;
+};
+
+function confirmSpecFor(action: PendingAction, challan: FleetChallan, hasRecoveryCase: boolean): ConfirmSpec {
+  if (action.kind === "recovery") {
+    return {
+      title: hasRecoveryCase ? "Refresh recovery case?" : "Approve & open recovery?",
+      body: (
+        <>
+          This files <strong>{money(challan.amount)}</strong> for <strong>{challan.vehicleNo}</strong> into the
+          Team&nbsp;Ops NL/SLP recovery ledger for{" "}
+          <strong>{challan.offenseDate ? day(challan.offenseDate) : "this month"}</strong>. You then assign the
+          responsible associate/UTR and split installments there. Payroll shows this as a <em>planned</em> deduction
+          until the salary month is processed.
+        </>
+      ),
+      confirmLabel: hasRecoveryCase ? "Refresh case" : "Approve & open recovery",
+      tone: "primary"
+    };
+  }
+  const map: Record<ChallanStatus, ConfirmSpec> = {
+    disputed: {
+      title: "Mark as disputed?",
+      body: <>Flag this challan as disputed. It stays outstanding and will not open recovery until re-reviewed.</>,
+      confirmLabel: "Mark disputed",
+      tone: "neutral",
+      requireNote: true
+    },
+    paid_external: {
+      title: "Mark paid outside DropX?",
+      body: (
+        <>
+          Record that <strong>{money(challan.amount)}</strong> was already paid outside DropX. This closes the challan
+          and <strong>no recovery</strong> will be raised against any associate.
+        </>
+      ),
+      confirmLabel: "Confirm paid outside",
+      tone: "neutral"
+    },
+    disposed: {
+      title: "Dispose / close this challan?",
+      body: <>Close this challan as disposed (e.g. settled at court or written off). It leaves the outstanding list.</>,
+      confirmLabel: "Dispose / close",
+      tone: "neutral"
+    },
+    cancelled: {
+      title: "Cancel this challan?",
+      body: (
+        <>
+          Cancel this challan (duplicate, wrong vehicle, or data error). It is removed from the outstanding list and no
+          recovery is raised. This does not delete the record or its evidence.
+        </>
+      ),
+      confirmLabel: "Cancel challan",
+      tone: "danger"
+    },
+    pending_review: {
+      title: "Return to pending review?",
+      body: <>Move this challan back to pending review.</>,
+      confirmLabel: "Return to review",
+      tone: "neutral"
+    },
+    approved_for_recovery: { title: "", body: null, confirmLabel: "", tone: "primary" },
+    recovering: { title: "", body: null, confirmLabel: "", tone: "primary" },
+    recovered: { title: "", body: null, confirmLabel: "", tone: "primary" }
+  };
+  return map[action.status];
 }
 
 export function FleetChallansWorkspace({
@@ -96,13 +206,14 @@ export function FleetChallansWorkspace({
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [note, setNote] = useState("");
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [form, setForm] = useState({
     vehicleNo: "",
     challanNumber: "",
     amount: "",
     offenseDate: data.today,
     offenseDescription: "",
-    issuingAuthority: "mvd",
+    issuingAuthority: "parivahan",
     evidenceUrl: ""
   });
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
@@ -132,6 +243,7 @@ export function FleetChallansWorkspace({
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setPending(null);
       return;
     }
     const controller = new AbortController();
@@ -184,7 +296,7 @@ export function FleetChallansWorkspace({
       if (!response.ok) throw new Error(payload.error || "Unable to save challan.");
       setCreating(false);
       setEvidenceFile(null);
-      setForm({ vehicleNo: "", challanNumber: "", amount: "", offenseDate: data.today, offenseDescription: "", issuingAuthority: "mvd", evidenceUrl: "" });
+      setForm({ vehicleNo: "", challanNumber: "", amount: "", offenseDate: data.today, offenseDescription: "", issuingAuthority: "parivahan", evidenceUrl: "" });
       setNotice(`Challan ${payload.challan.challanNumber} recorded for ${payload.challan.vehicleNo}.`);
       await loadList();
       setSelectedId(payload.challan.id);
@@ -195,7 +307,7 @@ export function FleetChallansWorkspace({
     }
   }
 
-  async function setStatus(status: ChallanStatus) {
+  async function runStatus(status: ChallanStatus) {
     if (!selectedId) return;
     setBusy(true);
     setError("");
@@ -218,7 +330,7 @@ export function FleetChallansWorkspace({
     }
   }
 
-  async function openRecovery() {
+  async function runRecovery() {
     if (!selectedId) return;
     setBusy(true);
     setError("");
@@ -240,6 +352,14 @@ export function FleetChallansWorkspace({
     }
   }
 
+  async function confirmPending() {
+    if (!pending) return;
+    const action = pending;
+    setPending(null);
+    if (action.kind === "recovery") await runRecovery();
+    else await runStatus(action.status);
+  }
+
   const report = {
     title: "Fleet challans",
     subtitle: `${data.today} · outstanding and reviewed traffic fines`,
@@ -253,10 +373,15 @@ export function FleetChallansWorkspace({
       row.amount,
       statusLabel[row.status],
       row.offenseDescription,
-      row.issuingAuthority,
+      authorityText(row.issuingAuthority),
       row.driveViewUrl || row.evidenceUrl || ""
     ])
   };
+
+  const detailChallan = detail?.challan;
+  const hasRecoveryCase = Boolean(detailChallan?.recoveryCaseKey);
+  const confirmSpec = pending && detailChallan ? confirmSpecFor(pending, detailChallan, hasRecoveryCase) : null;
+  const evidenceLink = detailChallan ? detailChallan.driveViewUrl || detailChallan.evidenceUrl : "";
 
   return (
     <section className="fc-section">
@@ -276,9 +401,9 @@ export function FleetChallansWorkspace({
         </div>
       </div>
 
-      <div className="fc-segment-cards fc-registry-stats">
+      <div className="fc-segment-cards fc-registry-stats fc-challan-stats">
         <article><small>Outstanding</small><strong>{outstanding.length}</strong></article>
-        <article><small>Outstanding amount</small><strong>{money(outstanding.reduce((sum, row) => sum + row.amount, 0))}</strong></article>
+        <article className="accent"><small>Outstanding amount</small><strong>{money(outstanding.reduce((sum, row) => sum + row.amount, 0))}</strong></article>
         <article><small>Pending review</small><strong>{challans.filter((row) => row.status === "pending_review").length}</strong></article>
         <article><small>In recovery</small><strong>{challans.filter((row) => ["approved_for_recovery", "recovering"].includes(row.status)).length}</strong></article>
       </div>
@@ -298,7 +423,7 @@ export function FleetChallansWorkspace({
           <button aria-label="Dismiss" type="button" onClick={() => setNotice("")}><X size={16} /></button>
         </div>
       ) : null}
-      {error ? <div className="fc-flash error" role="alert"><span><AlertTriangle size={17} />{error}</span></div> : null}
+      {error ? <div className="fc-flash error" role="alert"><span><AlertTriangle size={17} />{error}</span><button aria-label="Dismiss" type="button" onClick={() => setError("")}><X size={16} /></button></div> : null}
 
       <FleetMobileSection title="Filters" summary={`${filtered.length} challans`} className="fc-mobile-filters">
         <div className="fc-exception-controls">
@@ -326,7 +451,7 @@ export function FleetChallansWorkspace({
       <div className="fc-table-panel">
         <div className="fc-table-toolbar"><span>{loading ? "Loading…" : `${filtered.length} challans`}</span></div>
         <div className="fc-table-scroll">
-          <table className="fc-table">
+          <table className="fc-table fc-challan-table">
             <thead>
               <tr>
                 <th>Vehicle</th>
@@ -335,27 +460,27 @@ export function FleetChallansWorkspace({
                 <th>Offense</th>
                 <th>Amount</th>
                 <th>Status</th>
-                <th />
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {filtered.map((row) => (
-                <tr key={row.id}>
+                <tr key={row.id} className={selectedId === row.id ? "is-open" : undefined}>
                   <td>
                     <strong>{row.vehicleNo}</strong>
                     <FleetVehicleMeta vehicleNo={row.vehicleNo} stationCode={row.stationCode} />
                   </td>
                   <td>{row.stationCode}</td>
                   <td>
-                    <strong>{row.challanNumber}</strong>
-                    <small>{row.issuingAuthority.replaceAll("_", " ")}</small>
+                    <strong className="fc-challan-no">{row.challanNumber}</strong>
+                    <small>{authorityText(row.issuingAuthority)}</small>
                   </td>
                   <td>
                     <strong>{day(row.offenseDate)}</strong>
-                    <small>{row.offenseDescription || "Traffic challan"}</small>
+                    <small className="fc-clip">{row.offenseDescription || "Traffic challan"}</small>
                   </td>
                   <td><strong>{money(row.amount)}</strong></td>
-                  <td><span className={`fc-status-pill ${row.status}`}>{statusLabel[row.status]}</span></td>
+                  <td><span className={`fc-status-pill st-${row.status}`}>{statusLabel[row.status]}</span></td>
                   <td>
                     <button className="fc-button secondary" type="button" onClick={() => setSelectedId(row.id)}>
                       Review
@@ -369,7 +494,7 @@ export function FleetChallansWorkspace({
             <div className="fc-empty">
               <ReceiptIndianRupee size={28} />
               <strong>No challans match these filters</strong>
-              <p>Record a challan manually, or wait for an authorized provider/ingest feed.</p>
+              <p>Record a challan manually, or wait for the daily Parivahan sync.</p>
             </div>
           ) : null}
         </div>
@@ -405,10 +530,10 @@ export function FleetChallansWorkspace({
               <label>
                 Issuing authority
                 <select value={form.issuingAuthority} onChange={(event) => setForm((current) => ({ ...current, issuingAuthority: event.target.value }))}>
+                  <option value="parivahan">NIC · Parivahan e-Challan</option>
                   <option value="mvd">MVD</option>
                   <option value="traffic_police">Traffic police</option>
                   <option value="virtual_court">Virtual court</option>
-                  <option value="parivahan">Parivahan</option>
                   <option value="other">Other</option>
                   <option value="unknown">Unknown</option>
                 </select>
@@ -427,75 +552,129 @@ export function FleetChallansWorkspace({
 
       {selectedId ? (
         <div className="fc-modal-backdrop">
-          <section className="fc-modal wide" role="dialog" aria-modal="true" aria-labelledby="challan-detail-title">
+          <section className="fc-modal wide fc-challan-modal" role="dialog" aria-modal="true" aria-labelledby="challan-detail-title">
             <button className="fc-modal-close" type="button" disabled={busy} onClick={() => setSelectedId(null)} aria-label="Close"><X size={20} /></button>
-            {detailLoading || !detail ? (
-              <p role="status">Loading challan…</p>
+            {detailLoading || !detail || !detailChallan ? (
+              <p role="status" className="fc-challan-loading">Loading challan…</p>
             ) : (
               <>
-                <div className="fc-modal-title">
+                <header className="fc-challan-head">
                   <span className="fc-vehicle-big"><ReceiptIndianRupee size={22} /></span>
-                  <div>
-                    <small>{detail.challan.stationCode} · {detail.challan.stateCode || "IN"}</small>
-                    <h2 id="challan-detail-title">{detail.challan.challanNumber}</h2>
-                    <FleetVehicleMeta vehicleNo={detail.challan.vehicleNo} stationCode={detail.challan.stationCode} />
-                    <p>{statusLabel[detail.challan.status]} · {money(detail.challan.amount)}</p>
+                  <div className="fc-challan-head-main">
+                    <span className="fc-challan-head-tags">
+                      <span className={`fc-status-pill st-${detailChallan.status}`}>{statusLabel[detailChallan.status]}</span>
+                      <span className="fc-challan-state">{detailChallan.stationCode} · {detailChallan.stateCode || "IN"}</span>
+                    </span>
+                    <h2 id="challan-detail-title" className="fc-challan-no">{detailChallan.challanNumber}</h2>
+                    <FleetVehicleMeta vehicleNo={detailChallan.vehicleNo} stationCode={detailChallan.stationCode} />
                   </div>
+                  <div className="fc-challan-amount">
+                    <small>Amount</small>
+                    <strong>{money(detailChallan.amount)}</strong>
+                  </div>
+                </header>
+
+                <div className="fc-challan-grid">
+                  <div><span className="fc-challan-k">Offense date</span><span className="fc-challan-v">{day(detailChallan.offenseDate)}</span></div>
+                  <div><span className="fc-challan-k"><Building2 size={12} /> Authority</span><span className="fc-challan-v">{authorityText(detailChallan.issuingAuthority)}</span></div>
+                  <div><span className="fc-challan-k">Source</span><span className="fc-challan-v">{sourceText(detailChallan.source)}</span></div>
                 </div>
-                <div className="fc-route-summary">
-                  <div><small>Offense date</small><strong>{day(detail.challan.offenseDate)}</strong></div>
-                  <div><small>Authority</small><strong>{detail.challan.issuingAuthority.replaceAll("_", " ")}</strong></div>
-                  <div><small>Source</small><strong>{detail.challan.source}</strong></div>
+
+                <div className="fc-challan-offense">
+                  <span className="fc-challan-k">Violation</span>
+                  <p>{detailChallan.offenseDescription || "No violation detail recorded."}</p>
                 </div>
-                <p>{detail.challan.offenseDescription || "No violation detail recorded."}</p>
-                {(detail.challan.driveViewUrl || detail.challan.evidenceUrl) ? (
-                  <p>
-                    <a href={detail.challan.driveViewUrl || detail.challan.evidenceUrl} target="_blank" rel="noreferrer">
-                      Open evidence <ExternalLink size={14} />
-                    </a>
-                  </p>
-                ) : (
-                  <p className="fc-exception-timing">No evidence file linked yet.</p>
-                )}
-                {canEdit ? (
-                  <form className="fc-exception-review-form" onSubmit={(event) => event.preventDefault()}>
-                    <label>
-                      Review note / responsible associate
-                      <textarea maxLength={2000} rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Who should recover this, and any dispute notes." />
-                    </label>
-                    <div className="fc-form-actions" style={{ flexWrap: "wrap" }}>
-                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => void setStatus("disputed")}>Mark disputed</button>
-                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => void setStatus("paid_external")}>Paid outside DropX</button>
-                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => void setStatus("disposed")}>Disposed / closed</button>
-                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => void setStatus("cancelled")}>Cancel</button>
-                      <button className="fc-button primary" type="button" disabled={busy || detail.challan.amount <= 0} onClick={() => void openRecovery()}>
-                        {detail.challan.recoveryCaseKey ? "Refresh recovery case" : "Approve & open recovery"}
-                      </button>
-                      {detail.challan.recoveryCaseKey ? (
-                        <a className="fc-button secondary" href={detail.recoveryHref || recoveryHref(detail.challan)} target="_blank" rel="noreferrer">
-                          Open Team Ops recovery <ExternalLink size={14} />
-                        </a>
-                      ) : null}
-                    </div>
-                  </form>
-                ) : (
-                  <p>Contact a Fleet editor to review or open recovery for this challan.</p>
-                )}
-                <h3>Activity</h3>
-                <div className="fc-activity-list">
-                  {detail.events.map((event) => (
-                    <div key={event.id}>
-                      <span>{day(event.createdAt)}</span>
+
+                <div className={`fc-challan-evidence${evidenceLink ? "" : " empty"}`}>
+                  <span className="fc-challan-evidence-ico"><ImageIcon size={16} /></span>
+                  {evidenceLink ? (
+                    <>
                       <div>
-                        <strong>{event.action}{event.toStatus ? ` → ${event.toStatus}` : ""}</strong>
-                        <small>{event.actorName}{event.note ? ` · ${event.note}` : ""}</small>
+                        <strong>Evidence on file</strong>
+                        <small>AI-camera image / notice stored in Google Drive</small>
                       </div>
+                      <a className="fc-button secondary" href={evidenceLink} target="_blank" rel="noreferrer">
+                        Open evidence <ExternalLink size={13} />
+                      </a>
+                    </>
+                  ) : (
+                    <div><strong>No evidence linked</strong><small>No image or notice is attached to this challan yet.</small></div>
+                  )}
+                </div>
+
+                {hasRecoveryCase ? (
+                  <div className="fc-challan-recovery-banner">
+                    <ShieldCheck size={16} />
+                    <div>
+                      <strong>In the NL/SLP recovery ledger</strong>
+                      <small>Assign the responsible associate/UTR and split installments in Team Ops.</small>
                     </div>
-                  ))}
-                  {!detail.events.length ? <p>No events yet.</p> : null}
+                    <a className="fc-button secondary" href={detail.recoveryHref || recoveryHref(detailChallan)} target="_blank" rel="noreferrer">
+                      Open recovery <ExternalLink size={13} />
+                    </a>
+                  </div>
+                ) : null}
+
+                {canEdit ? (
+                  <div className="fc-challan-review">
+                    <label className="fc-challan-note">
+                      Review note / responsible associate
+                      <textarea maxLength={2000} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Who should recover this, and any dispute notes." />
+                    </label>
+                    <div className="fc-challan-actions">
+                      <button className="fc-button primary" type="button" disabled={busy || detailChallan.amount <= 0} onClick={() => setPending({ kind: "recovery" })}>
+                        {hasRecoveryCase ? "Refresh recovery case" : "Approve & open recovery"}
+                      </button>
+                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => setPending({ kind: "status", status: "disputed" })}>Mark disputed</button>
+                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => setPending({ kind: "status", status: "paid_external" })}>Paid outside DropX</button>
+                      <button className="fc-button secondary" type="button" disabled={busy} onClick={() => setPending({ kind: "status", status: "disposed" })}>Disposed / closed</button>
+                      <button className="fc-button danger" type="button" disabled={busy} onClick={() => setPending({ kind: "status", status: "cancelled" })}>Cancel challan</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="fc-challan-readonly">Contact a Fleet editor to review or open recovery for this challan.</p>
+                )}
+
+                <div className="fc-challan-activity">
+                  <h3>Activity</h3>
+                  <div className="fc-activity-list">
+                    {detail.events.map((event) => (
+                      <div key={event.id}>
+                        <span>{day(event.createdAt)}</span>
+                        <div>
+                          <strong>{event.action.replaceAll("_", " ")}{event.toStatus ? ` → ${statusLabel[event.toStatus as ChallanStatus] || event.toStatus}` : ""}</strong>
+                          <small>{event.actorName}{event.note ? ` · ${event.note}` : ""}</small>
+                        </div>
+                      </div>
+                    ))}
+                    {!detail.events.length ? <p className="fc-challan-readonly">No events yet.</p> : null}
+                  </div>
                 </div>
               </>
             )}
+          </section>
+        </div>
+      ) : null}
+
+      {confirmSpec && detailChallan ? (
+        <div className="fc-modal-backdrop fc-confirm-backdrop">
+          <section className="fc-modal fc-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="challan-confirm-title">
+            <div className="fc-confirm-head">
+              <span className={`fc-confirm-ico ${confirmSpec.tone}`}>
+                {confirmSpec.tone === "danger" ? <AlertTriangle size={20} /> : confirmSpec.tone === "primary" ? <ShieldCheck size={20} /> : <Check size={20} />}
+              </span>
+              <h2 id="challan-confirm-title">{confirmSpec.title}</h2>
+            </div>
+            <p className="fc-confirm-body">{confirmSpec.body}</p>
+            {confirmSpec.requireNote && !note.trim() ? (
+              <p className="fc-confirm-hint">Tip: add a review note first so the reason is logged.</p>
+            ) : null}
+            <div className="fc-confirm-actions">
+              <button className="fc-button secondary" type="button" disabled={busy} onClick={() => setPending(null)}>Go back</button>
+              <button className={`fc-button ${confirmSpec.tone === "danger" ? "danger" : "primary"}`} type="button" disabled={busy} onClick={() => void confirmPending()}>
+                {busy ? "Working…" : confirmSpec.confirmLabel}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}

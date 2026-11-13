@@ -611,3 +611,92 @@ button, input, select, textarea { font: inherit; }
 /* Keep all three vehicle views reachable on narrow screens. */
 .fc-registry-workspace > .fc-view-switch { max-width: 100%; overflow-x: auto; }
 .fc-registry-workspace > .fc-view-switch button { white-space: nowrap; flex-shrink: 0; }
+
+/* ======================  Fleet Challans  ====================== */
+/* Status pills (shared by table + drawer). Semantic colours from the fleet tokens. */
+.fc-status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; border: 1px solid transparent; }
+.fc-status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9; }
+.fc-status-pill.st-pending_review { color: #b06a00; background: #fff5e4; border-color: #f4d9a3; }
+.fc-status-pill.st-disputed { color: #8a5a00; background: #fdf1d6; border-color: #eccf8f; }
+.fc-status-pill.st-approved_for_recovery { color: #1f5fc0; background: #e9f1ff; border-color: #bcd4f7; }
+.fc-status-pill.st-recovering { color: #5a46c6; background: #efecff; border-color: #cfc6f4; }
+.fc-status-pill.st-recovered { color: #1f7a52; background: #e6f6ee; border-color: #b4e2cb; }
+.fc-status-pill.st-disposed { color: #52606e; background: #eef1f5; border-color: #d4dbe3; }
+.fc-status-pill.st-cancelled { color: #9aa3ad; background: #f3f5f7; border-color: #e0e4ea; }
+.fc-status-pill.st-paid_external { color: #1f7a52; background: #e9f7f0; border-color: #bfe6d3; }
+
+/* Stat tiles: give the outstanding-amount tile a touch of accent. */
+.fc-challan-stats article.accent { border-color: #f2c4b4; background: linear-gradient(180deg,#fff,#fff6f2); }
+.fc-challan-stats article.accent strong { color: var(--fc-accent-dark); }
+
+/* Table niceties */
+.fc-challan-table td small { display: block; margin-top: 2px; color: var(--fc-muted); font-size: 9px; }
+.fc-challan-table tr.is-open { background: #fdf6f3; }
+.fc-challan-no { font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.fc-clip { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 340px; }
+
+/* ---- Review drawer ---- */
+.fc-challan-modal { width: min(680px, 100%); }
+.fc-challan-loading { padding: 40px 0; text-align: center; color: var(--fc-muted); }
+.fc-challan-head { display: flex; align-items: flex-start; gap: 13px; padding-right: 44px; }
+.fc-challan-head-main { flex: 1; min-width: 0; }
+.fc-challan-head-tags { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.fc-challan-state { color: var(--fc-muted); font-size: 9px; font-weight: 700; }
+.fc-challan-head h2.fc-challan-no { margin: 0 0 4px; color: var(--fc-navy); font-size: 19px; word-break: break-all; }
+.fc-challan-amount { text-align: right; flex-shrink: 0; }
+.fc-challan-amount small { display: block; color: var(--fc-muted); font-size: 8px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.fc-challan-amount strong { color: var(--fc-navy); font-size: 22px; }
+
+.fc-challan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 0; }
+.fc-challan-grid > div { padding: 10px 12px; border: 1px solid var(--fc-line); border-radius: 11px; background: #fafbfc; }
+.fc-challan-k { display: flex; align-items: center; gap: 4px; color: var(--fc-muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.fc-challan-v { display: block; margin-top: 4px; color: var(--fc-navy); font-size: 11px; font-weight: 650; }
+
+.fc-challan-offense { margin-top: 12px; }
+.fc-challan-offense p { margin: 5px 0 0; color: var(--fc-ink); font-size: 11px; line-height: 1.5; }
+
+.fc-challan-evidence { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid #cfe0db; border-radius: 12px; background: #f1f8f5; }
+.fc-challan-evidence.empty { border-color: var(--fc-line); background: #fafbfc; }
+.fc-challan-evidence > div { flex: 1; min-width: 0; }
+.fc-challan-evidence strong { display: block; color: var(--fc-navy); font-size: 11px; }
+.fc-challan-evidence small { display: block; margin-top: 2px; color: var(--fc-muted); font-size: 9px; }
+.fc-challan-evidence-ico { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: #23786b; background: #e0f1ea; flex-shrink: 0; }
+.fc-challan-evidence.empty .fc-challan-evidence-ico { color: #8795a2; background: #eef1f5; }
+.fc-challan-evidence .fc-button { flex-shrink: 0; }
+
+.fc-challan-recovery-banner { display: flex; align-items: center; gap: 11px; margin-top: 12px; padding: 12px 14px; border: 1px solid #bcd4f7; border-radius: 12px; color: #1f5fc0; background: #eef4ff; }
+.fc-challan-recovery-banner > div { flex: 1; min-width: 0; }
+.fc-challan-recovery-banner strong { display: block; color: #1a4fa0; font-size: 11px; }
+.fc-challan-recovery-banner small { display: block; margin-top: 2px; color: #4a6aa0; font-size: 9px; }
+
+.fc-challan-review { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--fc-line); }
+.fc-challan-note { display: block; color: var(--fc-navy); font-size: 10px; font-weight: 700; }
+.fc-challan-note textarea { width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid var(--fc-line); border-radius: 10px; outline: 0; resize: vertical; font: inherit; font-size: 10px; }
+.fc-challan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.fc-challan-actions .fc-button { flex: 0 0 auto; }
+.fc-challan-actions .fc-button.primary { order: -1; }
+
+.fc-challan-readonly { color: var(--fc-muted); font-size: 10px; }
+.fc-challan-activity { margin-top: 18px; }
+.fc-challan-activity h3 { margin: 0 0 8px; color: var(--fc-navy); font-size: 12px; }
+
+/* ---- Confirmation dialog ---- */
+.fc-confirm-backdrop { z-index: 90; background: rgba(4,19,29,.42); }
+.fc-confirm-modal { width: min(420px, 100%); padding: 22px; }
+.fc-confirm-head { display: flex; align-items: center; gap: 11px; }
+.fc-confirm-ico { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; flex-shrink: 0; }
+.fc-confirm-ico.primary { color: #1f5fc0; background: #e9f1ff; }
+.fc-confirm-ico.danger { color: #b4233e; background: #fff1f4; }
+.fc-confirm-ico.neutral { color: #23786b; background: #e8f5f1; }
+.fc-confirm-head h2 { margin: 0; color: var(--fc-navy); font-size: 16px; }
+.fc-confirm-body { margin: 13px 0 0; color: var(--fc-ink); font-size: 11px; line-height: 1.55; }
+.fc-confirm-hint { margin: 9px 0 0; color: #b06a00; font-size: 10px; }
+.fc-confirm-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+
+@media (max-width: 640px) {
+  .fc-challan-grid { grid-template-columns: 1fr; }
+  .fc-challan-head { flex-wrap: wrap; }
+  .fc-challan-amount { text-align: left; }
+  .fc-challan-actions .fc-button { flex: 1 1 100%; }
+  .fc-clip { max-width: 100%; }
+}

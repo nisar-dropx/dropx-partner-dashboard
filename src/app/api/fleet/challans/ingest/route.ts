@@ -32,6 +32,7 @@ type IngestRow = {
   offenseDescription?: string;
   issuingAuthority?: string;
   stateCode?: string;
+  source?: string;
   evidenceUrl?: string;
   evidenceBase64?: string;
   evidenceExt?: string;
@@ -98,9 +99,11 @@ export async function POST(request: Request) {
             offenseDate: row.offenseDate || null,
             offenseAt: row.offenseAt || null,
             offenseDescription: row.offenseDescription || "Traffic challan",
-            issuingAuthority: row.issuingAuthority || "unknown",
+            // Authority is a coded enum (mvd/parivahan/…); NIC/Parivahan is the
+            // system of record, shown with a friendly label in the UI.
+            issuingAuthority: row.issuingAuthority || "parivahan",
             stateCode: row.stateCode || "",
-            source: "ingest",
+            source: String(row.source || "").trim() || "ingest",
             evidenceUrl: evidenceUrl || null,
             driveFileId: driveFileId || null,
             driveViewUrl: driveViewUrl || null,
