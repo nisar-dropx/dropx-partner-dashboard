@@ -33,7 +33,7 @@ test("relock targets only selected unlocked Workforce among all open corrections
   ], unlocks).map((entry) => entry.id), ["unlock-6", "unlock-20"]);
   assert.match(payoutTable, /selectedWorkforcePayoutMappingUnlocks\(selectedRows, mappingUnlocks\)/);
   assert.match(payoutTable, /Relock &amp; republish selected/);
-  assert.match(payoutTable, /disabled=\{actionBusy \|\| !relockTargets.length\}/);
+  assert.match(payoutTable, /className="payout-selection-actions"[\s\S]*?canManageLocks && relockTargets.length \? <button[\s\S]*?Relock &amp; republish selected/);
   assert.match(payoutTable, /relockTargets.map\(\(entry\) => entry.id\)/);
   assert.doesNotMatch(payoutTable, /const relockTargets = mappingUnlocks/);
 });

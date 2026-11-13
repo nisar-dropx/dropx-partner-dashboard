@@ -555,12 +555,15 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const relockableWorkforceIds = useMemo(() => new Set(mappingUnlocks.map((entry) => entry.workforceId)), [mappingUnlocks]);
   const selectable = useMemo(() => filtered.filter((row) => (canPublish && canSendPayoutForReview(row, audience))
     || (canDeductAdvances && canDeductAdvanceFromPayout(row))
     || (canManuallyEdit && canManuallyEditPayout(row))
-    || (canManageLocks && row.publicationLockState === "locked" && row.paymentSummary?.status !== "Payment Processing")
+    || (canManageLocks && row.paymentSummary?.status !== "Payment Processing"
+      && (row.publicationLockState === "locked"
+        || (row.publicationLockState === "unlocked" && relockableWorkforceIds.has(row.reviewSubjectId ?? ""))))
     || (canProcessPayments && (bankActionableIds.has(row.id) || canCancelProcessingPayment(row)))
-    || (canProcessPayments && canChangePayoutHold(row) && Boolean(payoutHoldSelectionTarget(row, audience, hasAllLocationAccess)))), [audience, bankActionableIds, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, filtered, hasAllLocationAccess]);
+    || (canProcessPayments && canChangePayoutHold(row) && Boolean(payoutHoldSelectionTarget(row, audience, hasAllLocationAccess)))), [audience, bankActionableIds, canDeductAdvances, canManageLocks, canManuallyEdit, canProcessPayments, canPublish, filtered, hasAllLocationAccess, relockableWorkforceIds]);
   const selectableIds = useMemo(() => new Set(selectable.map((row) => row.id)), [selectable]);
   const selectedRows = useMemo(() => selectable.filter((row) => selected.has(row.id)), [selectable, selected]);
   const reviewSelectedRows = useMemo(() => selectedRows.filter((row) => canSendPayoutForReview(row, audience)), [audience, selectedRows]);
@@ -1111,9 +1114,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         </div>
       </div>
       {canEdit ? <div className="payout-global-actions">
-        {canManageLocks && (mappingUnlockWorkforceIds.length || mappingUnlocks.length) ? <PayoutActionMenu label="Mapping actions">
+        {canManageLocks && mappingUnlockWorkforceIds.length > 0 ? <PayoutActionMenu label="Mapping actions">
           {mappingUnlockWorkforceIds.length ? <button className="button secondary" disabled={actionBusy} onClick={(event) => openMappingLockDialog("unlock", event.currentTarget)} type="button">Unlock mapping ({mappingUnlockWorkforceIds.length} {mappingUnlockWorkforceIds.length === 1 ? "ID" : "IDs"})</button> : null}
-          {mappingUnlocks.length ? <button className="button secondary" disabled={actionBusy || !relockTargets.length} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish selected ({relockTargets.length})</button> : null}
         </PayoutActionMenu> : null}
         {canProcessPayments ? <PayoutActionMenu label="Bank & payment">
           {audience === "workforce" && (hasAllLocationAccess || holdSelections.holdItems.length > 0 || holdSelections.releaseItems.length > 0) ? <WorkforcePayoutBulkHold
@@ -1190,11 +1192,12 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         {skippedReviewSelectionCount ? <span>{reviewSelectedRows.length} of {selectedRows.length} selected eligible for publishing</span> : null}
       </div>
       <div className="payout-selection-actions">
+          {canManageLocks && relockTargets.length ? <button className="button" disabled={actionBusy} onClick={(event) => openMappingLockDialog("relock", event.currentTarget)} type="button">Relock &amp; republish selected ({relockTargets.length})</button> : null}
         {(manualSelectedRows.length || advanceSelectedRows.length) ? <PayoutActionMenu label="Edit selected">
           {canManuallyEdit && manualSelectedRows.length ? <WorkforcePayoutManualEditor audience={audience} buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status, ...manualAttendancePeriod(row, periodStart, periodEnd) }))} toDate={periodEnd} /> : null}
           {canDeductAdvances ? <button className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Select one location row per Workforce member to deduct pending advances." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         </PayoutActionMenu> : null}
-        {canEdit ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Publish Payment is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit && !(canManageLocks && relockTargets.length && !reviewSelectedRows.length) ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Publish Payment is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" disabled={actionBusy} onClick={() => setSelected(new Set())} type="button">Clear selection</button>
       </div>
     </div> : showSelection ? <div className="payout-selection-hint">
