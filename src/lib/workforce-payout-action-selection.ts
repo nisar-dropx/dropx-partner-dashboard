@@ -197,10 +197,11 @@ export function workforcePayoutMappingLockSelectionIds(
   return workforceIds;
 }
 
-export function selectedWorkforcePayoutMappingUnlocks<T extends { workforceId: string }>(
+export function selectedWorkforcePayoutMappingUnlocks<T extends { workforceId: string; impactedWorkforceIds?: readonly string[] }>(
   rows: readonly WorkforcePayoutMappingLockSelectionRow[],
   unlocks: readonly T[]
 ) {
   const selectedIds = new Set(workforcePayoutMappingLockSelectionIds(rows, "unlocked"));
-  return unlocks.filter((entry) => selectedIds.has(entry.workforceId));
+  return unlocks.filter((entry) => selectedIds.has(entry.workforceId)
+    || entry.impactedWorkforceIds?.some((id) => selectedIds.has(id)));
 }

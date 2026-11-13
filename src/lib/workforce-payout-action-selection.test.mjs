@@ -21,6 +21,10 @@ const postgrestInFilterBatching = readFileSync(new URL("./postgrest-in-filter-ba
 test("relock targets only selected unlocked Workforce among all open corrections", () => {
   const unlocks = Array.from({ length: 44 }, (_, i) => ({ id: `unlock-${i}`, workforceId: `worker-${i}` }));
   assert.deepEqual(selectedWorkforcePayoutMappingUnlocks([], unlocks), []);
+  const remap = { ...unlocks[0], impactedWorkforceIds: ["recipient"] };
+  assert.deepEqual(selectedWorkforcePayoutMappingUnlocks([
+    { reviewSubjectId: "recipient", publicationLockState: "unlocked" }
+  ], [remap, unlocks[1]]), [remap]);
   const selected = [
     { reviewSubjectId: "worker-6", publicationLockState: "unlocked" },
     { reviewSubjectId: "worker-6", publicationLockState: "unlocked" },

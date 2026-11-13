@@ -152,6 +152,7 @@ export type WorkforcePayoutRow = {
 };
 
 export type WorkforcePayoutMappingUnlock = {
+  impactedWorkforceIds?: readonly string[];
   id: string;
   workforceId: string;
   dropxId: string;
@@ -555,7 +556,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const relockableWorkforceIds = useMemo(() => new Set(mappingUnlocks.map((entry) => entry.workforceId)), [mappingUnlocks]);
+  const relockableWorkforceIds = useMemo(() => new Set(mappingUnlocks.flatMap((entry) => [entry.workforceId, ...(entry.impactedWorkforceIds ?? [])])), [mappingUnlocks]);
   const selectable = useMemo(() => filtered.filter((row) => (canPublish && canSendPayoutForReview(row, audience))
     || (canDeductAdvances && canDeductAdvanceFromPayout(row))
     || (canManuallyEdit && canManuallyEditPayout(row))
@@ -1489,7 +1490,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         <div className="panel-body">
           <p id="mapping-lock-dialog-description">{mappingDialog.action === "unlock"
             ? `Unlock ${mappingUnlockWorkforceIds.length} selected DropX ID${mappingUnlockWorkforceIds.length === 1 ? "" : "s"} only for ${periodStart.slice(0, 7)}. You can then correct the provider ID mapping. The current DropX One payout stays visible as revising until relock.`
-            : `Recalculate and freeze only the ${relockTargets.length} selected open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. Other open corrections remain unlocked. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
+            : `Recalculate affected payouts and close the ${relockTargets.length} selected open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. Other open corrections remain unlocked. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
           <div className="payout-inline-message">
             <strong>{mappingDialog.action === "unlock" ? "Selected IDs" : "Open corrections"}</strong>
             <p>{(mappingDialog.action === "unlock"

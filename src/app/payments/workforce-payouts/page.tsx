@@ -101,45 +101,46 @@ async function loadOpenMappingUnlocks(companyId: string, fromDate: string, toDat
   };
 
   const sourceIds = [...new Set(openRows.map((row) => String(row.workforce_id)))];
+  const admin = supabaseAdmin;
   const [people, impacted] = await Promise.all([
     supabaseAdmin
       .from("workforce")
       .select("id,dropx_id,full_name")
       .eq("company_id", companyId)
       .in("id", sourceIds),
-    supabaseAdmin.rpc("workforce_payout_mapping_unlock_impacted_ids", {
+    mapWithConcurrency(openRows, 4, (row) => admin.rpc("workforce_payout_mapping_unlock_impacted_ids", {
       p_company_id: companyId,
       p_period_start: fromDate,
       p_period_end: toDate,
-      p_unlock_ids: openRows.map((row) => row.id)
-    })
+      p_unlock_ids: [row.id]
+    }))
   ]);
   if (people.error) return {
     unlocks: [] as WorkforcePayoutMappingUnlock[],
     impactedWorkforceIds: new Set<string>(),
     error: people.error.message
   };
-  if (impacted.error) return {
+  const impactedError = impacted.find((entry) => entry.error)?.error;
+  if (impactedError) return {
     unlocks: [] as WorkforcePayoutMappingUnlock[],
     impactedWorkforceIds: new Set<string>(),
-    error: impacted.error.message
+    error: impactedError.message
   };
   const personById = new Map((people.data ?? []).map((person) => [String(person.id), person]));
   return {
-    unlocks: openRows.map((row) => {
+    unlocks: openRows.map((row, index) => {
       const person = personById.get(String(row.workforce_id));
       return {
         id: String(row.id),
         workforceId: String(row.workforce_id),
+        impactedWorkforceIds: Array.isArray(impacted[index]?.data) ? impacted[index].data.map(String) : [],
         dropxId: String(person?.dropx_id ?? ""),
         name: String(person?.full_name ?? "Workforce member"),
         reason: String(row.reason ?? ""),
         unlockedAt: String(row.unlocked_at ?? "")
       };
     }),
-    impactedWorkforceIds: new Set(Array.isArray(impacted.data)
-      ? impacted.data.map((id) => String(id))
-      : sourceIds),
+    impactedWorkforceIds: new Set([...sourceIds, ...impacted.flatMap(({ data }) => Array.isArray(data) ? data.map(String) : [])]),
     error: null as string | null
   };
 }
