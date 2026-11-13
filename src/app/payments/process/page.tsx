@@ -42,6 +42,7 @@ type PaymentRequestRow = {
   processed_at: string | null;
   status: string;
   approval_status: string | null;
+  approval_routing_reason: string | null;
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
   current_approver_role_ids: string[] | null;
@@ -195,7 +196,7 @@ async function loadPaymentProcess(
   // were invisible because ~1,800 processed rows filled the first page by created_at.
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
-    .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_paid_amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
+    .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_paid_amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, approval_routing_reason, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, work_date, source_type, source_id, requested_for_name, category, details, payment_heads ( name, code )")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
@@ -435,6 +436,7 @@ export default async function PaymentProcessPage({
             payment_history: [],
             status: request.status,
             approval_status: request.approval_status,
+            initial_approval_bypassed: request.approval_routing_reason === "Initial approval bypassed",
             created_at: request.created_at,
             payment_head_name: request.payment_heads?.name ?? null
           }))}
@@ -465,6 +467,7 @@ export default async function PaymentProcessPage({
             payment_history: request.payment_history ?? [],
             status: request.status,
             approval_status: request.approval_status,
+            initial_approval_bypassed: request.approval_routing_reason === "Initial approval bypassed",
             created_at: request.created_at,
             payment_head_name: request.payment_heads?.name ?? null,
             advance_context: advanceContexts.get(request.id) ?? null

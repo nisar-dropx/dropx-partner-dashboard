@@ -41,6 +41,7 @@ export type PaymentProcessRequest = {
   payment_history: Array<{ id: string; action: string; actor: string; role: string; comments: string | null; created_at: string }>;
   status: string | null;
   approval_status: string | null;
+  initial_approval_bypassed?: boolean;
   created_at: string;
   payment_head_name: string | null;
   advance_context?: {
@@ -630,7 +631,7 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
                       type="checkbox"
                     />
                   </td>
-                  <td><strong>{request.request_no}</strong></td>
+                  <td><strong>{request.request_no}</strong>{request.initial_approval_bypassed ? <div><span className="status-pill" title="Final approval completed without an earlier initial approval. Informational only.">Initial approval bypassed</span></div> : null}</td>
                   <td>{request.location_code}</td>
                   <td>{request.payment_head_name ?? "-"}</td>
                   <td>{paymentMethodLabel(request)}</td>

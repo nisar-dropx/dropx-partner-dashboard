@@ -1,11 +1,13 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
+import { isPendingPaymentApproval, matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
 import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
 import { loadPaymentReportingHierarchy } from "@/lib/payment-reporting-hierarchy";
 
 export type PaymentApprovalScopeRequest = {
   id: string;
+  status?: string | null;
+  approval_status?: string | null;
   location_id: string | null;
   location_model_id?: string | null;
   requested_by: string | null;
@@ -23,6 +25,14 @@ export function canAccessPaymentLocation(
   );
 }
 
+/** A master-managed capability; it never changes assignments or reminder recipients. */
+export function hasPaymentFinalApprovalAuthority(authorization: AuthorizationContext) {
+  return !authorization.readOnly && !authorization.isPreview && Boolean(
+    authorization.permissions?.payment_approvals?.canEdit &&
+    authorization.permissions?.payment_final_approval_bypass?.canEdit
+  );
+}
+
 /**
  * Business models (stations.location_model_id, e.g. Amazon EDSP vs Amazon
  * Now) covered by this authorization's own station scope - a defense-in-depth
@@ -35,6 +45,7 @@ async function authorizationModelIds(companyId: string, authorization: Authoriza
   if (authorization.hasAllLocationAccess || !supabaseAdmin) return null;
   if (!authorization.locationScopeIds.length) return new Set();
   const result = await supabaseAdmin.from("stations").select("location_model_id").eq("company_id", companyId).in("id", authorization.locationScopeIds);
+  if (result.error) throw new Error("Could not verify payment location scope. Please retry.");
   return new Set((result.data ?? []).map((row) => row.location_model_id).filter((id): id is string => Boolean(id)));
 }
 
@@ -49,14 +60,21 @@ async function approvalEligibility(
     return new Set(requests.map((request) => request.id));
   }
   const eligibleIds = new Set<string>();
+  const bypassIds = new Set<string>();
+  const canFinalize = includeReportingManagers && hasPaymentFinalApprovalAuthority(authorization);
   const modelIds = await authorizationModelIds(companyId, authorization);
-  const hierarchy = includeReportingManagers ? await loadPaymentReportingHierarchy(companyId) : null;
+  const hierarchy = includeReportingManagers && !canFinalize ? await loadPaymentReportingHierarchy(companyId) : null;
 
   for (const request of requests) {
     if (!canAccessPaymentLocation(authorization, request.location_id)) {
       continue;
     }
 
+    if (request.location_model_id && modelIds && !modelIds.has(request.location_model_id)) continue;
+    if (canFinalize && request.status != null && isPendingPaymentApproval(request.status, request.approval_status ?? null)) {
+      bypassIds.add(request.id);
+      continue;
+    }
     const assigned = matchesCurrentPaymentAssignee(authorization.userId, authorization.effectiveRoleIds, request);
     const reportingManager = Boolean(
       includeReportingManagers &&
@@ -68,7 +86,8 @@ async function approvalEligibility(
     eligibleIds.add(request.id);
   }
 
-  return initialApprovalReadyIds(companyId, [...eligibleIds], supabaseAdmin);
+  const ready = await initialApprovalReadyIds(companyId, [...eligibleIds], supabaseAdmin);
+  return new Set([...ready, ...bypassIds]);
 }
 
 /** Personal queue and reminder eligibility: only the named assignee or an

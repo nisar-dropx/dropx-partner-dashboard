@@ -5,13 +5,13 @@ import { redirect } from "next/navigation";
 import { waitUntil } from "@vercel/functions";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
-import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
+import { canActOnPaymentRequest, hasPaymentFinalApprovalAuthority } from "@/lib/payment-approval-scope";
 import { sendPaymentLocationNotification, sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps, paymentApprovalCoverage } from "@/lib/payment-approval-steps";
 import { paymentRequestUpdateAttempts } from "@/lib/payment-request-status-policy";
-import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
+import { effectiveApprovalStepOrder, isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 
 /**
  * Notification emails are sent after the decision is saved, without making the
@@ -395,13 +395,14 @@ export async function approvePaymentRequest(formData: FormData) {
   const comments = clean(formData.get("comments"));
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids, stations ( location_model_id )")
+    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, total_steps, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids, stations ( location_model_id )")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (error || !request) throw new Error("Payment request not found.");
   const requestStation = Array.isArray(request.stations) ? request.stations[0] : request.stations;
   if (!(await canActOnPaymentRequest(companyId, authorization, { ...request, location_model_id: requestStation?.location_model_id ?? null }))) throw new Error("This request is not pending with you.");
+  if (!isPendingPaymentApproval(request.status, request.approval_status)) throw new Error("This request is no longer pending approval. Refresh to see its current status.");
   const approvalCycle = Number(request.approval_cycle) || 1;
   const previousUserAction = await priorUserAction(companyId, request.id, authorization.userId, approvalCycle);
   if (previousUserAction && previousUserAction !== "approved") {
@@ -415,13 +416,31 @@ export async function approvePaymentRequest(formData: FormData) {
     .eq("company_id", companyId)
     .maybeSingle();
   const roleCode = String(role?.code ?? authorization.roleCode ?? "USER").trim().toUpperCase();
-  const ownerCanFinalize = authorization.isMasterOwner || roleCode === "OWNER";
+  const ownerCanFinalize = authorization.isMasterOwner || roleCode === "OWNER" || hasPaymentFinalApprovalAuthority(authorization);
 
   const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id, request.id) : [];
   const storedStepOrder = Number(request.current_step_order) || 1;
   const approvalStepOrder = steps.length
     ? effectiveApprovalStepOrder(steps, storedStepOrder, request.current_approver_role_id)
     : storedStepOrder;
+
+  // The existing Approve action completes final approval for explicitly authorized
+  // roles. Record bypass information without introducing another processing gate.
+  let initialApprovalBypassed = false;
+  if (ownerCanFinalize && (Number(request.total_steps) || steps.length || 2) > 1) {
+    const history = await supabaseAdmin.from("payment_request_approvals")
+      .select("action,comments,approver_user_id,created_at")
+      .eq("company_id", companyId).eq("payment_request_id", request.id)
+      .in("action", ["approved", "returned", "resubmitted", "rejected"])
+      .order("created_at", { ascending: true });
+    if (history.error) throw new Error("Could not verify approval history. Please retry.");
+    const lastReset = (history.data ?? []).filter(row => row.action !== "approved").at(-1)?.created_at;
+    const activeApprovals = (history.data ?? []).filter(row => row.action === "approved" && (!lastReset || row.created_at > lastReset));
+    initialApprovalBypassed = !activeApprovals.length || activeApprovals.every(row =>
+      row.approver_user_id === authorization.userId && String(row.comments ?? "").includes("Initial approval bypassed; final approval completed")
+    );
+  }
+  const finalApprovalReason = initialApprovalBypassed ? "Initial approval bypassed" : "Final approval completed";
 
   // Resolve before recording approval: a People outage must leave this action retryable.
   let preparedAdvance: Awaited<ReturnType<typeof advanceApproval>> | null = null;
@@ -461,7 +480,7 @@ export async function approvePaymentRequest(formData: FormData) {
       approver_role_id: authorization.roleId ?? request.current_approver_role_id,
       approval_cycle: approvalCycle,
       action: "approved",
-      comments
+      comments: initialApprovalBypassed ? [comments, "Initial approval bypassed; final approval completed"].filter(Boolean).join(" · ") : comments
     }, companyId);
   }
 
@@ -476,7 +495,8 @@ export async function approvePaymentRequest(formData: FormData) {
       await updatePaymentRequest(request.id, companyId, {
         status: "approved",
         approval_status: "FINAL_APPROVED",
-        approval_routing_reason: coverageReason ?? "Final approval completed",
+        approval_routing_reason: finalApprovalReason,
+        current_step_order: steps.at(-1)?.step_order ?? approvalStepOrder,
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
@@ -560,6 +580,7 @@ export async function approvePaymentRequest(formData: FormData) {
           status: "approved",
           approval_status: "FINAL_APPROVED",
           current_step_order: 2,
+          approval_routing_reason: ownerCanFinalize ? finalApprovalReason : "Final approval completed",
           current_approver_user_id: null,
           current_approver_role_id: null,
           current_approver_role_ids: [],

@@ -179,7 +179,7 @@ test('approval routing failure does not write an approval or advance the request
     'next/cache':{revalidatePath(){}},'next/navigation':{redirect(){}},'@vercel/functions':{waitUntil(){}},
     '@/lib/authorization':{requirePagePermission:async()=>({userId:'cluster',roleId:'cm'})},
     '@/lib/company-scope':{requireCompanyId:()=> 'co',withCompany:(row,company_id)=>({...row,company_id})},
-    '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true},
+    '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true,hasPaymentFinalApprovalAuthority:()=>false},
     '@/lib/payment-email-notifications':{},'@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/position-access':{},
     '@/lib/payment-request-status-policy':{paymentRequestUpdateAttempts},
     '@/lib/payment-stage-policy':stage,
@@ -263,5 +263,51 @@ for (const privilege of [{roleCode:'OWNER',isMasterOwner:false},{roleCode:'FINAN
     assert.deepEqual(gateCalls,[['assigned','leave-cover','role-pool','missing-initial-approval']]);
     // Owner takeover authority remains available through Entire team and server actions.
     assert.deepEqual([...await getPaymentApprovalActionEligibility('co',auth,requests)],requests.map(r=>r.id));
+  });
+}
+
+
+test('master final approval permission enables scoped team takeover without changing personal inbox', async()=>{
+  const db=database({stations:[{company_id:'co',id:'NLRE',location_model_id:'EDSP'}]});
+  const scope=compile('./payment-approval-scope.ts',{
+    '@/lib/supabase-admin':{supabaseAdmin:db}, '@/lib/payment-stage-policy':stage,
+    '@/lib/payment-initial-approval-gate':{initialApprovalReadyIds:async(_c,ids)=>new Set(ids.filter(id=>id==='ready-final'))},
+    '@/lib/payment-reporting-hierarchy':{loadPaymentReportingHierarchy:async()=>({isStrictlyAbove:()=>false})}
+  });
+  const auth={userId:'head',roleCode:'CONFIGURABLE',effectiveRoleIds:['head-role'],hasAllLocationAccess:false,locationScopeIds:['NLRE'],permissions:{payment_approvals:{canEdit:true},payment_final_approval_bypass:{canEdit:true}}};
+  const request=(id,patch={})=>({id,location_id:'NLRE',location_model_id:'EDSP',status:'pending',approval_status:'PENDING',requested_by:'station',current_approver_user_id:'cluster',...patch});
+  const requests=[request('initial'),request('ready-final',{current_approver_user_id:'head'}),request('missing-initial',{current_approver_user_id:'head'}),request('outside',{location_id:'OTHER'}),request('wrong-model',{location_model_id:'NOW'}),request('settled',{status:'approved',approval_status:'FINAL_APPROVED'}),request('returned',{status:'returned',approval_status:'RETURNED'})];
+  assert.deepEqual([...await scope.getPaymentApprovalEligibility('co',auth,requests)],['ready-final']);
+  assert.deepEqual([...await scope.getPaymentApprovalActionEligibility('co',auth,requests)],['initial','ready-final','missing-initial']);
+  for(const patch of [{permissions:{payment_approvals:{canEdit:true}}},{permissions:{payment_approvals:{canEdit:true},payment_final_approval_bypass:{canView:true}}},{readOnly:true},{isPreview:true}]) {
+    assert.deepEqual([...await scope.getPaymentApprovalActionEligibility('co',{...auth,...patch},requests)],['ready-final']);
+  }
+  assert.deepEqual([...await scope.getPaymentApprovalActionEligibility('different-company',auth,[request('initial')])],[]);
+});
+
+for(const scenario of ['no-initial','initial-done','returned-resubmitted','terminal']) {
+  test(`existing Approve finalizes configured authority with accurate Finance information: ${scenario}`,async()=>{
+    const history=scenario==='initial-done'?[{action:'approved',created_at:'2026-11-12',approver_user_id:'cluster',approval_cycle:1}]:scenario==='returned-resubmitted'?[{action:'approved',created_at:'2026-11-10',approver_user_id:'cluster',approval_cycle:1},{action:'returned',created_at:'2026-11-11'},{action:'resubmitted',created_at:'2026-11-12'}]:[];
+    const tables={payment_requests:[{id:'request',company_id:'co',location_id:'NLRE',payment_head_id:'van',current_step_order:scenario==='initial-done'?2:1,total_steps:2,current_approver_user_id:'cluster',approval_cycle:1,status:scenario==='terminal'?'approved':'pending',approval_status:scenario==='terminal'?'FINAL_APPROVED':'PENDING'}],user_roles:[{id:'head',company_id:'co',code:'CONFIGURABLE'}],payment_request_approvals:history.map(row=>({...row,company_id:'co',payment_request_id:'request'}))};
+    const db=database(tables);const from=db.from.bind(db); const inserted=[];
+    db.from=table=>{const q=from(table);q.insert=row=>{inserted.push(row);return q;};return q;};
+    const background=[];
+    const {approvePaymentRequest}=compile('../app/payments/approvals/actions.ts',{
+      'next/cache':{revalidatePath(){}},'next/navigation':{redirect(){}},'@vercel/functions':{waitUntil:p=>background.push(p)},
+      '@/lib/authorization':{requirePagePermission:async()=>({userId:'head-user',roleId:'head'})},
+      '@/lib/company-scope':{requireCompanyId:()=> 'co',withCompany:(row,company_id)=>({...row,company_id})},
+      '@/lib/payment-approval-scope':{canActOnPaymentRequest:async()=>true,hasPaymentFinalApprovalAuthority:()=>true},
+      '@/lib/payment-email-notifications':{sendPaymentNotification:async()=>({sent:true}),sendPaymentLocationNotification:async()=>({sent:true})},
+      '@/lib/supabase-admin':{supabaseAdmin:db},'@/lib/position-access':{},
+      '@/lib/payment-request-status-policy':{paymentRequestUpdateAttempts},'@/lib/payment-stage-policy':stage,
+      '@/lib/payment-approval-steps':{loadApprovalSteps:async()=>steps,advanceApproval:async()=>{throw Error('Must not reroute');},paymentApprovalCoverage:async()=>{throw Error('Must not reroute');}}
+    });
+    const form=new FormData();form.set('request_id','request');form.set('comments','Reviewed');
+    if(scenario==='terminal') {await assert.rejects(()=>approvePaymentRequest(form),/no longer pending/);assert.equal(db.updates.length,0);assert.equal(inserted.length,0);return;}
+    await approvePaymentRequest(form);await Promise.all(background);
+    const result=tables.payment_requests[0];assert.equal(result.status,'approved');assert.equal(result.approval_status,'FINAL_APPROVED');assert.equal(result.current_approver_user_id,null);assert.deepEqual(result.current_approver_role_ids,[]);assert.equal(result.updated_by,'head-user');
+    assert.equal(result.approval_routing_reason,scenario==='initial-done'?'Final approval completed':'Initial approval bypassed');
+    assert.equal(inserted[0].approver_user_id,'head-user');assert.equal(inserted[0].action,'approved');
+    assert.equal(inserted[0].comments.includes('Initial approval bypassed'),scenario!=='initial-done');
   });
 }
