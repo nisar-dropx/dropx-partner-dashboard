@@ -1,0 +1,16 @@
+{
+  "name": "dropx-challan-parivahan-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone worker that pulls outstanding challans for DropX fleet vehicles from the public Parivahan e-Challan portal using free local captcha OCR, and posts them to the dashboard ingest webhook.",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check parivahan.mjs && node --check captcha.mjs",
+    "pull:local": "node scripts/pull-once.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "tesseract.js": "^7.0.0"
+  }
+}

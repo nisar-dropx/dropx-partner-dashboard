@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: dropx-challan-parivahan-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: CHALLAN_WORKER_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FLEET_CHALLAN_INGEST_URL
+        sync: false
+      - key: FLEET_CHALLAN_INGEST_SECRET
+        sync: false
+      - key: FLEET_DEFAULT_COMPANY_ID
+        sync: false
+      - key: CHALLAN_PER_VEHICLE_DELAY_MS
+        value: "4000"
+      - key: CHALLAN_MAX_VEHICLES_PER_RUN
+        value: "60"

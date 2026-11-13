@@ -108,3 +108,33 @@ export async function mirrorChallanEvidenceToDrive(input: {
   if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("Evidence must be between 1 byte and 20 MB.");
   return uploadFleetChallanDriveFile({ name: input.fileName, mime, bytes });
 }
+
+const EXT_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  pdf: "application/pdf"
+};
+
+/** Upload inline base64 challan evidence (e.g. AI-camera image) into Drive. */
+export async function uploadInlineChallanEvidenceToDrive(input: {
+  base64: string;
+  fileExt: string;
+  fileName: string;
+}): Promise<DriveUploadResult | null> {
+  if (!fleetChallanDriveConfigured()) return null;
+  const ext = clean(input.fileExt).toLowerCase() || "png";
+  const mime = EXT_MIME[ext] || "image/png";
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(Buffer.from(clean(input.base64), "base64"));
+  } catch {
+    throw new Error("Inline evidence is not valid base64.");
+  }
+  if (!bytes.length || bytes.length > 20 * 1024 * 1024) {
+    throw new Error("Evidence must be between 1 byte and 20 MB.");
+  }
+  const name = input.fileName.replace(/\.[a-z0-9]+$/i, "") + "." + ext;
+  return uploadFleetChallanDriveFile({ name, mime, bytes });
+}

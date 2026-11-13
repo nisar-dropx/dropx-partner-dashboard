@@ -17,6 +17,38 @@ export async function GET(request: Request) {
   const enabled = String(process.env.FLEET_CHALLAN_PORTAL_SYNC_ENABLED || "").trim().toLowerCase() === "true";
   const providerUrl = String(process.env.FLEET_CHALLAN_PROVIDER_URL || "").trim();
   const providerKey = String(process.env.FLEET_CHALLAN_PROVIDER_KEY || "").trim();
+  // Standalone Parivahan worker (free local OCR). The cron only KICKS it and returns
+  // immediately — the heavy pull runs on the worker and posts back via the ingest webhook,
+  // so Vercel is never blocked and the DB is never held open by this route.
+  const workerUrl = String(process.env.FLEET_CHALLAN_WORKER_URL || "").trim();
+  const workerSecret = String(process.env.FLEET_CHALLAN_WORKER_SECRET || "").trim();
+
+  if (enabled && workerUrl && workerSecret) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const kick = await fetch(workerUrl.replace(/\/$/, "") + "/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${workerSecret}` },
+        body: JSON.stringify({}),
+        signal: controller.signal
+      }).catch((err) => ({ ok: false, status: 0, _err: String(err) }) as any);
+      clearTimeout(timer);
+      return NextResponse.json({
+        ok: true,
+        mode: "worker",
+        kicked: Boolean((kick as any)?.ok ?? false) || (kick as any)?.name === "AbortError",
+        note:
+          "Challan worker triggered. It pulls Parivahan challans with free local OCR and posts results to the ingest webhook; this route does not wait for completion."
+      });
+    } catch (err) {
+      return NextResponse.json({
+        ok: false,
+        mode: "worker",
+        error: err instanceof Error ? err.message : "Failed to trigger challan worker."
+      });
+    }
+  }
 
   const companies = await supabaseAdmin.from("companies").select("id,name").eq("is_active", true);
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });

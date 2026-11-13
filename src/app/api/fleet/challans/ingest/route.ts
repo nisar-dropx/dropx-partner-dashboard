@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { fleetChallanDriveConfigured, mirrorChallanEvidenceToDrive } from "@/lib/fleet/challan-drive";
+import {
+  fleetChallanDriveConfigured,
+  mirrorChallanEvidenceToDrive,
+  uploadInlineChallanEvidenceToDrive
+} from "@/lib/fleet/challan-drive";
 import { mapFleetChallan } from "@/lib/fleet/challans";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +33,8 @@ type IngestRow = {
   issuingAuthority?: string;
   stateCode?: string;
   evidenceUrl?: string;
+  evidenceBase64?: string;
+  evidenceExt?: string;
   portalStatus?: string;
   rawPayload?: Record<string, unknown>;
 };
@@ -62,11 +68,18 @@ export async function POST(request: Request) {
         let driveViewUrl = "";
         let driveMimeType = "";
         let evidenceUrl = String(row.evidenceUrl || "").trim();
-        if (evidenceUrl && fleetChallanDriveConfigured()) {
-          const mirrored = await mirrorChallanEvidenceToDrive({
-            sourceUrl: evidenceUrl,
-            fileName: `${vehicleNo}_${challanNumber}.pdf`
-          });
+        const evidenceBase64 = String(row.evidenceBase64 || "").trim();
+        if (fleetChallanDriveConfigured() && (evidenceUrl || evidenceBase64)) {
+          const mirrored = evidenceBase64
+            ? await uploadInlineChallanEvidenceToDrive({
+                base64: evidenceBase64,
+                fileExt: String(row.evidenceExt || "png"),
+                fileName: `${vehicleNo}_${challanNumber}`
+              })
+            : await mirrorChallanEvidenceToDrive({
+                sourceUrl: evidenceUrl,
+                fileName: `${vehicleNo}_${challanNumber}.pdf`
+              });
           if (mirrored) {
             driveFileId = mirrored.id;
             driveViewUrl = mirrored.webViewLink;
