@@ -108,7 +108,7 @@ async function loadOpenMappingUnlocks(companyId: string, fromDate: string, toDat
       .select("id,dropx_id,full_name")
       .eq("company_id", companyId)
       .in("id", sourceIds),
-    mapWithConcurrency(openRows, 4, (row) => admin.rpc("workforce_payout_mapping_unlock_impacted_ids", {
+    mapWithConcurrency(openRows, 4, async (row) => admin.rpc("workforce_payout_mapping_unlock_impacted_ids", {
       p_company_id: companyId,
       p_period_start: fromDate,
       p_period_end: toDate,
