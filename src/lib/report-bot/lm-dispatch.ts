@@ -1,3 +1,4 @@
+import {deliverDispatchOutputs} from './lm-dispatch-delivery';
 import {quietScrub} from './lm-scrub-quiet';
 import {highValueOutputs} from "./lm-high-value-output";
 import {dsrPaceTarget,liveDsrStyle,type DsrPacePoint} from "./lm-dsr-pace";
@@ -407,13 +408,12 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
         if (!current || !linked(current.group,company) || current.group.wa_group_id!==route.group.wa_group_id) throw new Error("Group or schedule changed");
         const sources=await routeSources(route,company);
         let outputs:SendOutput[]=[];
+        const sourceFailures:string[]=[];
         if(route.cod_workflow) {
-          const failures:string[]=[];
           for(const source of sources){
             try{outputs.push(...await codWorkflowOutputs(company,source,day,slot,route,codRuntime));}
-            catch(error){failures.push(`${source.station_code}: ${error instanceof Error?error.message:'Source unavailable'}`);}
+            catch(error){sourceFailures.push(`${source.station_code}: ${error instanceof Error?error.message:'Source unavailable'}`);}
           }
-          if(!outputs.length&&failures.length)throw new Error(failures.join('; '));
           detail=`Station-scoped COD workflow · ${sources.length} stations · ${outputs.length} outputs`;
         } else if (route.report==="edd" && route.source_rule!=="current_report") {
           const snapshot=await loadTodayEddSnapshot(sources.map(row=>row.station_code),day);
@@ -521,10 +521,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             sentSnapshot={rows,asOf:reports[0].asOf};
           }
         }
-        if (outputs.length) {
-          for (const output of outputs) await sendOutput(settings,run.id,route.group.wa_group_id,output);
-          status="sent";
-        }
+        if(await deliverDispatchOutputs(outputs,sourceFailures,output=>sendOutput(settings,run.id,route.group.wa_group_id,output)))status="sent";
       } catch(error) { status="unavailable"; detail=error instanceof Error?error.message:"Report unavailable"; }
       const saved=await db.from("report_bot_lm_dispatch_runs").update({status,detail:detail.slice(0,400),snapshot:status === "sent" ? sentSnapshot : null,lease_token:null,lease_until:null}).eq("id",run.id).eq("lease_token",run.lease_token);
       if(saved.error) throw new Error(saved.error.message);
