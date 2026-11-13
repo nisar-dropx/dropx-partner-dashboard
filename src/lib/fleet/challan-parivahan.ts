@@ -361,7 +361,9 @@ export class ParivahanChallanClient {
     const desc = String(details.statusDesc || "");
     // CTZ001 = success with challans. "No challan" style codes return ok with empty list.
     const challans = Array.isArray(details.result) ? details.result.map(mapParivahanChallan) : [];
-    const noChallan = /no\s+challan|not\s+found|no\s+record/i.test(desc) || code === "CTZ003";
+    const noChallan =
+      /no\s+(?:pending\s+)?(?:challan|record)|not\s+found/i.test(desc) ||
+      ["CTZ003", "CTZ096"].includes(code);
     if (code !== "CTZ001" && !noChallan) {
       throw new ParivahanError(code || "DETAILS", desc || "Challan details fetch failed.");
     }
