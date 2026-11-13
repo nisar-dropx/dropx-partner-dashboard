@@ -11,7 +11,11 @@ export async function codCacheGet<T>(company:string,location:string,day:string,k
  if(r.error)throw new Error(r.error.message);return r.data&&Date.parse(r.data.expires_at)>Date.now()?r.data.payload as T:null;
 }
 export async function codCachePut(company:string,location:string,day:string,key:string,payload:unknown,minutes=1440){
- const r=await reportBotDb().from('report_bot_cod_route_cache').upsert({company_id:company,location_id:location,business_date:day,cache_key:key,payload,expires_at:new Date(Date.now()+minutes*60000).toISOString()});
+ // A cleared observation is absent, never a SQL NULL in the non-null payload column.
+ const table=reportBotDb().from('report_bot_cod_route_cache');
+ const r=payload===null
+  ?await table.delete().eq('company_id',company).eq('location_id',location).eq('business_date',day).eq('cache_key',key)
+  :await table.upsert({company_id:company,location_id:location,business_date:day,cache_key:key,payload,expires_at:new Date(Date.now()+minutes*60000).toISOString()});
  if(r.error)throw new Error(r.error.message);
 }
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');

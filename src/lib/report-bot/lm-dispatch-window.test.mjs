@@ -14,3 +14,12 @@ test('prewarm is bounded to the three minutes before the configured slot',()=>{
  assert.equal(dispatchSlotUpcoming(day,'10:00',at('09:56')),false);
  assert.equal(dispatchSlotUpcoming(day,'10:00',at('10:00')),false);
 });
+
+test('cash and scrub failures can recover within the current slot but never replay an older slot',()=>{
+ for(const report of ['bank','scrub']){
+  assert.equal(dispatchSlotDue(day,'20:00',['20:00','22:00'],report,at('21:59')),true);
+  assert.equal(dispatchSlotDue(day,'20:00',['20:00','22:00'],report,at('22:00')),false);
+  assert.equal(dispatchSlotDue(day,'22:00',['22:00'],report,at('23:59')),true);
+  assert.equal(dispatchSlotDue(day,'22:00',['22:00'],report,Date.parse('2026-11-13T00:00:00+05:30')),false);
+ }
+});
