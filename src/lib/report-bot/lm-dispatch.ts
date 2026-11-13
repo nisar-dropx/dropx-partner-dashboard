@@ -417,8 +417,12 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           detail=`Station-scoped COD workflow · ${sources.length} stations · ${outputs.length} outputs`;
         } else if (route.report==="edd" && route.source_rule!=="current_report") {
           const snapshot=await loadTodayEddSnapshot(sources.map(row=>row.station_code),day);
-          sourceFailures.push(...snapshot.unverifiedStations.map(code=>`${code}: EDD source not verified`));
-          if (!snapshot.pending && snapshot.unverifiedStations.length) throw new Error(`Today EDD source is not verified for: ${snapshot.unverifiedStations.join(", ")}`);
+          // A combined EDD text must cover every configured source before it is
+          // acknowledged; otherwise a retry could reuse an already-sent chunk key.
+          if (snapshot.unverifiedStations.length) {
+            await queueLoadFlashStations(snapshot.unverifiedStations,5);
+            throw new Error(`Today EDD source is not verified for: ${snapshot.unverifiedStations.join(", ")}`);
+          }
           if (!snapshot.pending) { status="skipped"; detail="Verified Today EDD is clear"; }
           else {
             const scope=route.scope_type==="region" ? (route.source_region_codes||[]).join(", ") : sources.map(row=>row.station_code).join(", ");
