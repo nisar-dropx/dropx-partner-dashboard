@@ -26,7 +26,7 @@ export function reconciliationSection(drivers:Array<{id:string;name:string;pendi
  if(!eligible.length)return null;
  const amount=Math.round(eligible.reduce((sum,d)=>sum+d.amount,0)*100)/100;
  const summary=`${eligible.length} ${eligible.length===1?'DA':'DAs'} · ${codMoney(amount)} pending`;
- return {key:'recon',issue:{ids:eligible.map(d=>d.id),amount},title:`${evening?'DA reconciliation':'Previous-day reconciliation'} · ${summary}`,columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows:eligible.map(d=>d.row),owner:'team',tone:'attention',action:`${!evening?'Previous-day COD: ':''}${summary}. ${evening?'Confirm DA returns and reconcile collected cash now.':'Collect and reconcile now.'}`};
+ return {key:'recon',issue:{ids:eligible.map(d=>d.id),amount},title:`${evening?'DA reconciliation':'Previous-day reconciliation'} · ${summary}`,columns:evening?['DA','Last stop','Distance · est. travel','Est. return','Recon. due','Cash','Status']:['DA','COD date','Pending cash'],rows:eligible.map(d=>d.row),owner:'team',tone:'attention',action:`${!evening?'Previous-day COD: ':''}${summary}. ${evening?'Collect the listed DA cash and complete Driver Reconciliation now.':'Collect and reconcile now.'}`};
 }
 
 /** Submission time is only a pickup proxy. Late edits cannot prove physical handover. */

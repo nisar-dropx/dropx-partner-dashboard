@@ -1,3 +1,5 @@
+import {lastDeliveryStop} from './lm-cod-last-stop';
+export {lastDeliveryStop} from './lm-cod-last-stop';
 import 'server-only';
 import {directReturnEstimate} from './lm-cod-return-fallback';
 import {createHash} from 'node:crypto';
@@ -20,18 +22,6 @@ export async function codCachePut(company:string,location:string,day:string,key:
 }
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const validPoint=(p:unknown):p is [number,number]=>Array.isArray(p)&&p.length===2&&p.every(n=>typeof n==='number'&&Number.isFinite(n))&&Math.abs(p[0])<=90&&Math.abs(p[1])<=180;
-/** Only explicitly completed/attempted delivery events, never COD transaction time. */
-export function lastDeliveryStop(payload:any,driver:string,day:string){
- const d=payload?.itineraryDetails||payload;if(d?.transporterId!==driver)return null;
- const tasks=(d.stops||[]).flatMap((s:any)=>s.tasks||[]).concat((d.inactiveTasks||[]).filter((t:any)=>(t.domainMap?.deviceOperator||t.domainMap?.OPERATOR)===driver));
- const stops=tasks.flatMap((t:any)=>{
-  if(!['DELIVERED','DELIVERY_ATTEMPTED'].includes(t.taskState)||!['COMPLETE','ATTEMPTED'].includes(t.executionStatus)||t.transporterId&&t.transporterId!==driver)return [];
-  const raw=Number(t.actualExecutionTime),at=raw>1e15?raw/1000:raw<1e12?raw*1000:raw;
-  const point=[t.executionGeocode?.latitude,t.executionGeocode?.longitude];
-  return Number.isFinite(at)&&at>0&&at<=Date.now()+60000&&codDay(at)===day&&validPoint(point)?[{at,point}]:[];
- }).sort((a:{at:number},b:{at:number})=>b.at-a.at);
- return stops[0]||null;
-}
 export async function loadCodJourneys(company:string,location:string,day:string,driverIds:string[],runtime:CodRuntime,endpoint:string|null,allowance=15){
  const result=new Map<string,Journey>();if(!driverIds.length)return result;
  const db=reportBotDb();
@@ -68,7 +58,7 @@ export async function loadCodJourneys(company:string,location:string,day:string,
    // Require every route to have an explicit remaining count, not a missing field treated as zero.
    const closed=stubs.every((s:any)=>{const p=s.packageSummary||s.ndPackageSummary;return p&&(p.REMAINING!=null||p.remaining!=null)&&packageCounts(p).remaining===0;});
    if(!closed){result.set(driverId,{driverId,lastStopAt:null,distanceKm:null,travelMinutes:null,returnAt:null,dueAt:null,closed:false,basis:'On road'});continue;}
-   const key='journey:v2:'+hash([transporter,stubs,point,allowance]);
+   const key='journey:v3:'+hash([transporter,stubs,point,allowance]);
    const cached=await codCacheGet<Journey>(company,location,day,key);if(cached){result.set(driverId,{...cached,driverId});continue;}
    // Limit enrichment to two route documents per DA; unknown routes are not labelled late.
    if(stubs.length>2)continue;

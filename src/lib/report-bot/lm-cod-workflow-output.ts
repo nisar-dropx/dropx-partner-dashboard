@@ -48,7 +48,7 @@ export async function codWorkflowOutputs(company:string,source:{id:string;statio
  const managers=groups.cluster.length?groups.cluster:groups.aom;
  const fyi=[groups.ct.length?`CT ${tags(groups.ct)}`:'',managers.length?`${groups.cluster.length?'Cluster Manager':'AOM'} ${tags(managers)}`:''].filter(Boolean).join(' · ');
  const title=`${source.station_code} · COD · ${day} · ${slot} IST`;
- const actions=sections.map(s=>s.action);
+ const actions=[...new Set(sections.map(s=>s.action))];
  if(bankRows.length){
   const updated=bankRows.some(([key])=>key==='Submitted today');
   actions.push(bankReminderText('',[...bankRows,['Action',bankRemittanceFollowup(updated)]],{...groups,ct:[],cluster:[],aom:[]},true));
@@ -56,7 +56,7 @@ export async function codWorkflowOutputs(company:string,source:{id:string;statio
  }
  const outputs:Array<{key:string;body:Record<string,unknown>;codAck:CodAck}>=[];
  if(sections.length){
-  const caption=[`*${title}*`,owner,escalated.size?'*Escalation · clearance required.*':'',...actions,quietUpdates.length?'Updates stop once cleared.':'',fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
+  const caption=[`*${title}*`,owner,escalated.size?'*Escalation · clearance required.*':'',...actions,quietUpdates.length?'Clear the pending items to stop further alerts.':'',fyi?`FYI: ${fyi}`:''].filter(Boolean).join('\n');
   if(caption.length>3900)throw new Error('COD caption exceeds compact limit; review section size');
   outputs.push({key:`cod_${source.id}`,body:{image_base64:await codSectionsPng(title,sections),mime:'image/png',caption,mentions:[...new Set([...bankMentionNumbers(groups),...(sections.some(s=>s.owner==='team')?ssa:[])])].map(n=>n+'@s.whatsapp.net')},codAck:{company,location:source.id,day,quiet:quietUpdates,keys:[...(held.has('pickup')?[]:report.acks),...(held.has('short')?[]:report.shortAcks)]}});
  }

@@ -1,6 +1,6 @@
 import {loadProgressScrub} from '@/lib/report-bot/lm-scrub-data';
 import {highValueOutputs} from '@/lib/report-bot/lm-high-value-output';
-import {loadEodDigest} from '@/lib/report-bot/lm-dispatch-data';
+import {loadTodayEddSnapshot,loadEodDigest} from '@/lib/report-bot/lm-dispatch-data';
 import {resolveBankReminderMentions} from '@/lib/report-bot/lm-dispatch-mentions';
 import {NextResponse} from 'next/server';
 import {timingSafeEqual} from 'node:crypto';
@@ -32,7 +32,8 @@ export async function POST(request:Request){
   const rendered=await livePerformanceOutputs({...route,group:{group_name:''}} as Parameters<typeof livePerformanceOutputs>[0],digest,'',day,new Date(Date.now()+330*60000).toISOString().slice(11,16));
   return NextResponse.json({digest,outputs:rendered.outputs,sent:false});
  }
- if(route.report==='high_value'){const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);return NextResponse.json({...await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||3000),sent:false});}
+ if(route.report==='edd'){return NextResponse.json({snapshot:await loadTodayEddSnapshot(sources.map(s=>s.station_code),codDay(Date.now())),sent:false});}
+ if(route.report==='high_value'){const day=codDay(Date.now()),slot=new Date(Date.now()+330*60000).toISOString().slice(11,16);return NextResponse.json({...await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||5000,[],{company,locations:new Map(sources.map(s=>[s.station_code,s.id])),runtime:new CodRuntime(Date.now()+90000),minimumDays:route.high_value_min_days,escalationTime:route.high_value_escalation_time}),sent:false});}
  if(route.report==='scrub'){const day=codDay(Date.now());return NextResponse.json({reports:await Promise.all(sources.map(s=>loadProgressScrub(company,s.id,s.report_code||s.station_code,day))),sent:false});}
  if(route.report!=='bank')return NextResponse.json({error:'Use the configured report preview operation'},{status:400});
  const source=sources.find(s=>s.station_code===input.station)||sources[0];

@@ -155,3 +155,18 @@ export async function resolveBankReminderMentions(companyId:string,sources:Menti
     managerEmails,
   };
 }
+
+/** Only the explicitly configured central escalation roles may cross station scope. */
+export async function resolveHighValueEscalationNumbers(company:string,sources:MentionSource[],day:string,roles:string[]){
+ if(!supabaseAdmin||!sources.length)return [];
+ const codes=roles.filter(code=>['HLM','SLPM'].includes(code));
+ if(!codes.length)return [];
+ const designations=await supabaseAdmin.from('designations').select('id').eq('company_id',company).eq('is_active',true).in('code',codes);
+ if(designations.error)throw new Error(designations.error.message);
+ if(!designations.data.length)return [];
+ const assignments=await readAllRows(supabaseAdmin.from('hr_work_assignments').select('id,hr_engagements!inner(person_id,status)').eq('company_id',company).eq('is_primary',true).lte('effective_from',day).or(`effective_to.is.null,effective_to.gte.${day}`).in('designation_id',designations.data.map(d=>d.id)).eq('hr_engagements.status','active').order('id'));
+ if(assignments.error)throw new Error(assignments.error.message);
+ const ids=(assignments.data||[]).flatMap(a=>{const e=Array.isArray(a.hr_engagements)?a.hr_engagements[0]:a.hr_engagements;return e?.person_id?[e.person_id]:[];});
+ const people=await loadCodTeamDirectory(company,sources.map(s=>s.id),ids,day);
+ return [...new Set(people.filter(p=>codes.includes(p.roleCode)).map(p=>normalizeWhatsAppNumber(p.phone)).filter((n):n is string=>!!n))];
+}

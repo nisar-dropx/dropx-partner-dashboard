@@ -980,6 +980,7 @@ export async function saveDispatchRoutes(form: FormData) {
     const scheduleStart = field(form,"schedule_start"), scheduleEnd = field(form,"schedule_end");
     const intervalMinutes = Number(field(form,"interval_minutes"));
     const times = report==='high_value' ? parseSlots(String(form.get("explicit_times")||""),report) : scheduleSlots(scheduleStart,scheduleEnd,intervalMinutes);
+    if(report==='high_value'&&(times.length!==2||scopeType!=='station'||form.get('high_value_view')==='summary')) throw new Error('High-value exceptions need two station war-room checkpoints.');
     const mentions = [...new Set(field(form,"mentions").split(/[\s,]+/).filter(Boolean).map(n=>n.replace(/^\+/,"")))];
     const question = field(form,"question");
     if (mentions.length > 10 || mentions.some(n=>!/^\d{8,15}$/.test(n))) throw new Error("Enter up to 10 international numbers with country codes.");
@@ -1028,10 +1029,13 @@ export async function saveDispatchRoutes(form: FormData) {
         source_model_codes:scopeType === "region" ? sourceModelCodes : [],
         eod_sections:report === "eod" ? eodSections : [],
         dsr_pace:report==='dsr'?parseDsrPace(String(form.get('dsr_pace')||'')):[],
+        high_value_min_days:Math.min(90,Math.max(1,Math.floor(Number(form.get('high_value_min_days'))||3))),
+        high_value_escalation_time:/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(String(form.get('high_value_escalation_time')||''))?String(form.get('high_value_escalation_time')):'23:00',
+        high_value_escalation_roles:['HLM','SLPM'],
         high_value_summary:report==='high_value'&&form.get('high_value_view')==='summary',
-        high_value_threshold:report==='high_value'?Math.max(3000,Number(form.get('high_value_threshold'))||3000):3000,
+        high_value_threshold:report==='high_value'?Math.max(3000,Number(form.get('high_value_threshold'))||5000):5000,
         report,times,format:formats[0] === "excel" ? "text" : formats[0],formats,
-        schedule_start:scheduleStart,schedule_end:scheduleEnd,interval_minutes:intervalMinutes,
+        schedule_start:report==='high_value'?null:scheduleStart,schedule_end:report==='high_value'?null:scheduleEnd,interval_minutes:report==='high_value'?null:intervalMinutes,
         source_rule:report === "edd" ? "today_edd_at_station_never_attempted" : "current_report",
         mentions,question,mention_manager_policy:managerPolicy,mention_designation_codes:requestedAlwaysDesignationCodes,mention_present_designation_codes:requestedDesignationCodes,mention_latest_shift_designation_codes:requestedLatestShiftCodes,
         pending_only:report === "eod" ? false : form.has("pending_only"),enabled:form.has("enabled"),updated_at:new Date().toISOString()

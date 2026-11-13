@@ -16,7 +16,7 @@ import { dsrHeatColor, dsrPctTextColor, pickupPctColor, pickupPctTextColor } fro
 import { compareDispatchRows, dispatchReports, type EodSection, type ReportKey } from "./lm-dispatch-config";
 import { istDay, loadAgeingDigest, loadDispatchReport, loadEodDigest, loadTodayEddSnapshot, type AgeingDigest, type EodDigest, type TodayEddSnapshot } from "./lm-dispatch-data";
 import { filterDispatchSourceRows } from "./lm-source-scope";
-import { resolveBankReminderMentions, resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
+import { resolveHighValueEscalationNumbers, resolveBankReminderMentions, resolveRouteMentionNumbers, resolveTeamLeaderMentionNumbers, type MentionManagerPolicy } from "./lm-dispatch-mentions";
 import { bankMentionNumbers, bankReminderText } from "./lm-bank-message";
 import { eodDsrMentionStations } from "./lm-eod-caption";
 import { EOD_DOT_PERCENTAGE_COLUMNS, EOD_DOT_VISIBLE_COLUMNS, eodDotTotalRow } from "./lm-eod-dot";
@@ -26,7 +26,7 @@ import { dispatchCaption } from "./lm-dispatch-wording";
 
 type Group = { wa_group_id: string; group_name:string|null; location_id: string|null; company_id: string; workspace: string; is_enabled: boolean; bot_in_group: boolean; mode: string };
 type Route = {
-  id: string; dsr_pace?:DsrPacePoint[]; high_value_summary?:boolean; high_value_threshold?:number; group_id:string; cod_workflow?:boolean; cod_shortfalls_since?:string; cod_shortfall_lead_minutes?:number; cod_route_service_url?:string|null; cod_reconciliation_allowance_minutes?:number; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
+  id: string; high_value_min_days?:number; high_value_escalation_time?:string; high_value_escalation_roles?:string[]; dsr_pace?:DsrPacePoint[]; high_value_summary?:boolean; high_value_threshold?:number; group_id:string; cod_workflow?:boolean; cod_shortfalls_since?:string; cod_shortfall_lead_minutes?:number; cod_route_service_url?:string|null; cod_reconciliation_allowance_minutes?:number; report: ReportKey; times: string[]; format: string; formats?: string[]; pending_only: boolean;
   mentions: string[]; question: string; updated_at: string; location_id: string|null; group: Group;
   scope_type?: "station"|"region"; source_location_ids?: string[]; source_region_codes?: string[]; source_rule?: string;
   source_model_codes?: string[];
@@ -380,7 +380,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
   const now = new Date(), day = istDay(now);
   const activeRoutes=(routes.data as unknown as Route[]).filter(route=>linked(route.group,company));
   // Prewarm each distinct regional source once; schedules stay in configuration.
-  const warming=activeRoutes.filter(route=>["dsr","creturn","high_value"].includes(route.report)&&route.times.some(slot=>dispatchSlotUpcoming(day,slot,+now)));
+  const warming=activeRoutes.filter(route=>["dsr","creturn","high_value","edd"].includes(route.report)&&route.times.some(slot=>dispatchSlotUpcoming(day,slot,+now)));
   const regions=new Map<string,Route>();
   for(const route of warming)regions.set(JSON.stringify([route.scope_type,route.source_location_ids,route.source_region_codes,route.source_model_codes]),route);
   await Promise.allSettled([...regions.values()].map(async route=>{
@@ -417,6 +417,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           detail=`Station-scoped COD workflow · ${sources.length} stations · ${outputs.length} outputs`;
         } else if (route.report==="edd" && route.source_rule!=="current_report") {
           const snapshot=await loadTodayEddSnapshot(sources.map(row=>row.station_code),day);
+          sourceFailures.push(...snapshot.unverifiedStations.map(code=>`${code}: EDD source not verified`));
           if (!snapshot.pending && snapshot.unverifiedStations.length) throw new Error(`Today EDD source is not verified for: ${snapshot.unverifiedStations.join(", ")}`);
           if (!snapshot.pending) { status="skipped"; detail="Verified Today EDD is clear"; }
           else {
@@ -425,10 +426,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
             const pendingSources=sources.filter(source=>snapshot.stations.some(station=>station.stationCode===source.station_code&&station.count>0));
             const mentionNumbers=await resolveRouteMentionNumbers(company,pendingSources,route,day);
             const rows = snapshotRowsFromEdd(snapshot);
-            const prior = await previousSnapshot(route.id, run.id);
-            const delta = compareDispatchRows(rows, prior?.rows ?? null);
-            const deltaText = !prior ? "Baseline report" : delta === "unchanged" ? "No change since last report" : delta === "increased" ? "Increased since last report" : "Improved since last report";
-            const caption=await dispatchCaption(settings, route.report, dispatchReports[route.report], deltaText, asIst(snapshot.asOf), `${rows.reduce((sum, [, value]) => sum + (typeof value === "number" ? value : 0), 0)} pending`, route.question, mentionNumbers);
+            const caption=[mentionNumbers.map(number=>'@'+number).join(' '),'Dispatch the listed EDD shipments now. Cleared shipments will not be included in the next check.'].filter(Boolean).join('\n');
             outputs=await eddOutputs(route,snapshot,sources,header,caption,day,mentionNumbers);
             sentSnapshot={rows,asOf:snapshot.asOf};
             detail=`${snapshot.stations.reduce((sum,row)=>sum+row.count,0)} TIDs · ${sources.length} source station(s)`;
@@ -445,10 +443,18 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           }
           detail=`Scrub · ${sources.length} stations checked · ${outputs.length} updates`;
         } else if(route.report==='high_value') {
-          const mentions=await resolveRouteMentionNumbers(company,sources,route,day);
-          const high=await highValueOutputs(sources.map(s=>s.station_code),day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||3000,mentions);
-          outputs=high.outputs;sentSnapshot={rows:high.rows.map(r=>[r.stationCode+' · '+r.trackingId,r.shipmentValue!] as [string,number]),asOf:high.asOf};
-          detail=`${high.rows.length} pending high-value shipments`;
+          const highRows:Array<[string,number]>=[];
+          for(const source of sources){
+            try{
+              const initial=await resolveRouteMentionNumbers(company,[source],route,day);
+              const escalation=slot>=(route.high_value_escalation_time||'23:00')?await resolveHighValueEscalationNumbers(company,[source],day,route.high_value_escalation_roles||['HLM','SLPM']):[];
+              const mentions=[...new Set([...initial,...escalation])];
+              const high=await highValueOutputs([source.station_code],day,slot,Boolean(route.high_value_summary)||route.scope_type==='region',route.high_value_threshold||5000,mentions,{company,locations:new Map([[source.station_code,source.id]]),runtime:codRuntime,minimumDays:route.high_value_min_days,escalationTime:route.high_value_escalation_time});
+              outputs.push(...high.outputs);highRows.push(...high.rows.map(r=>[r.stationCode+' · '+r.trackingId,r.shipmentValue!] as [string,number]));
+            }catch(error){sourceFailures.push(`${source.station_code}: ${error instanceof Error?error.message:'High-value evidence unavailable'}`);}
+          }
+          sentSnapshot={rows:highRows,asOf:new Date().toISOString()};
+          detail=`${highRows.length} high-value exceptions`;
         } else if (route.report==="eod") {
           const digest=await loadEodDigest(sources.map(row=>row.station_code),day,{requireCReturn:route.eod_sections?.includes("creturn")??true});
           const region=route.scope_type==="region"

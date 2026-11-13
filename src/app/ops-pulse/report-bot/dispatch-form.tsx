@@ -6,7 +6,7 @@ import { saveDispatchRoutes } from "./actions";
 import s from "./report-bot.module.css";
 
 export type Schedule = {
-  dsr_pace?:DsrPacePoint[]; high_value_summary?:boolean; high_value_threshold?:number;
+  high_value_min_days?:number; high_value_escalation_time?:string; dsr_pace?:DsrPacePoint[]; high_value_summary?:boolean; high_value_threshold?:number;
   id:string; group_id:string; report:ReportKey; format:string; formats?:string[]; times:string[];
   schedule_start?:string|null; schedule_end?:string|null; interval_minutes?:number|null;
   scope_type?:"station"|"region"; source_location_ids?:string[]; source_region_codes?:string[]; source_model_codes?:string[];
@@ -57,7 +57,7 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
   }
   function chooseReport(value:ReportKey) {
     setReport(value);
-    if(value==='high_value'){setFormats(['photo']);setStart('07:30');setEnd('20:00');setInterval(180);}
+    if(value==='high_value'){setScopeType('station');setFormats(['photo']);setStart('10:30');setEnd('23:00');setInterval(180);}
     if (value === "eod") {
       setScopeType("region"); setSelectedLocations([]); setFormats(["photo"]);
       setStart("23:30"); setEnd("23:30"); setInterval(60);
@@ -73,7 +73,7 @@ export function DispatchForm({groups,locations,designations,schedules,canEdit}:{
         <div className={s.field}><span>Output</span><div className={s.formActions}>{[["text","TID message"],["photo","Compact table image"],["excel","Excel details"]].map(([value,label])=><label key={value}><input type="checkbox" name="format" value={value} disabled={["eod","high_value"].includes(report) && value !== "photo"} checked={formats.includes(value)} onChange={()=>toggle(value,formats,setFormats)}/> {label}</label>)}</div>{report === "eod" ? <small>EOD sends only the compact table images selected below.</small> : null}</div>
         {report === "eod" ? <div className={s.field}><span>EOD sections</span><div className={s.formActions}>{Object.entries(eodSections).map(([value,label])=><label key={value}><input type="checkbox" name="eod_section" value={value} checked={selectedEodSections.includes(value as EodSection)} onChange={()=>toggle(value,selectedEodSections,next=>setSelectedEodSections(next as EodSection[]))}/> {label}</label>)}</div><small>Choose exactly which report images this destination receives.</small></div> : null}
         {report==='dsr'&&<label className={s.field}>Live DSR pace guide<input className={s.input} name="dsr_pace" defaultValue={(edit?.dsr_pace?.length?edit.dsr_pace:DEFAULT_DSR_PACE).map(p=>`${p.time}=${p.target}`).join(', ')}/><small>IST time=target %. Colours compare progress with this guide, not the end-of-day target.</small></label>}
-        {report==='high_value'&&<><label className={s.field}>High-value view<select className={s.select} name="high_value_view" defaultValue={edit?.high_value_summary?'summary':'detail'}><option value="detail">Station · tracking IDs</option><option value="summary">Regional · station summary</option></select></label><label className={s.field}>Shipment value above ₹<input className={s.input} type="number" name="high_value_threshold" min="3000" step="1" defaultValue={edit?.high_value_threshold||3000}/></label><label className={s.field}>Checkpoint times · IST<input className={s.input} name="explicit_times" defaultValue={edit?.times?.join(', ')||'07:30, 10:30, 16:00, 20:00'}/><small>These checkpoint times override the repeat window.</small></label></>}
+        {report==='high_value'&&<><label className={s.field}>Unresolved / activity days<input className={s.input} type="number" name="high_value_min_days" min="1" max="90" defaultValue={edit?.high_value_min_days||3}/></label><label className={s.field}>Escalation time · IST<input className={s.input} type="time" name="high_value_escalation_time" defaultValue={edit?.high_value_escalation_time||'23:00'}/></label><label className={s.field}>High-value view<select className={s.select} name="high_value_view" defaultValue="detail"><option value="detail">Station · tracking IDs</option></select></label><label className={s.field}>Shipment value at least ₹<input className={s.input} type="number" name="high_value_threshold" min="3000" step="1" defaultValue={edit?.high_value_threshold||5000}/></label><label className={s.field}>Checkpoint times · IST<input className={s.input} name="explicit_times" defaultValue={edit?.times?.join(', ')||'10:30, 23:00'}/><small>War-room exceptions only. Repeated dispatch/attempt scans do not close the case.</small></label></>}
         <label className={s.field}>Start time · IST<input className={s.input} type="time" name="schedule_start" value={start} onChange={e=>setStart(e.target.value)} required/></label>
         <label className={s.field}>End time · IST<input className={s.input} type="time" name="schedule_end" value={end} onChange={e=>setEnd(e.target.value)} required/></label>
         <label className={s.field}>Repeat every<input className={s.input} type="number" name="interval_minutes" min={5} max={720} step={5} value={interval} onChange={e=>setInterval(Number(e.target.value))} required/><small>Minutes. The configured window includes both start and end.</small></label>
