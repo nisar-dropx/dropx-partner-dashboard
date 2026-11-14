@@ -21838,10 +21838,32 @@ td strong,
   gap: 4px 12px;
 }
 .payout-payment-status-loading progress {
+  appearance: none;
   display: block;
   width: 100%;
-  height: 8px;
-  accent-color: var(--brand, #e64623);
+  height: 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #dbe3ee;
+  color: #005bd3;
+  accent-color: #005bd3;
+}
+.payout-payment-status-loading progress::-webkit-progress-bar {
+  background: #dbe3ee;
+}
+.payout-payment-status-loading progress::-webkit-progress-value {
+  background: #005bd3;
+  border-radius: 999px;
+}
+.payout-payment-status-loading progress::-moz-progress-bar {
+  background: #005bd3;
+  border-radius: 999px;
+}
+@media (forced-colors: active) {
+  .payout-payment-status-loading progress {
+    appearance: auto;
+  }
 }
 .payout-inline-message.success { color: #067647; background: #ecfdf3; border-color: #abefc6; }
 .payout-inline-message.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
