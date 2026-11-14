@@ -6,7 +6,7 @@ const stamp=(v:string|null|undefined)=>v?Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test
 export const highValueClosed=(state:string)=>['DELIVERED','CASH_AT_STATION','CASH_IN_ASSOCIATE','RETURNED_TO_FC','RETURN_RECEIVED_AT_FC','RETURNED_TO_SELLER'].includes(state.toUpperCase());
 const customerDestination=(value:string|null|undefined)=>/^CUSTOMER_ADDRESS(?:_\d+)?$/.test(value||'');
 const deliveryActivity=(h:ShipmentScan)=>(['IN_TRANSIT_TO_CUSTOMER','ON_ROAD_WITH_DELIVERY_ASSOCIATE','DELIVERY_FAILED','DELIVERY_ATTEMPTED','UNDELIVERABLE','REJECTED','DELIVERY_REJECTED'].includes(h.state)||['IN_TRANSIT','DEPARTED'].includes(h.state)&&customerDestination(h.destination))&&(!h.destination||customerDestination(h.destination));
-const outsideArea=(reason:string|null|undefined)=>/^(OUT_OF_DELIVERY_AREA|OUTSIDE_DELIVERY_AREA|OUT_OF_SERVICE_AREA|OUTSIDE_SERVICE_AREA|OUT_OF_COVERAGE_AREA|UNSERVICEABLE_AREA)$/.test(reason||'');
+const outsideArea=(reason:string|null|undefined)=>/^(OUT_OF_DELIVERY_AREA|OUTSIDE_DELIVERY_AREA|OUT_OF_SERVICE_AREA|OUTSIDE_SERVICE_AREA|OUT_OF_COVERAGE_AREA|UNSERVICEABLE_AREA|WRONG_NODE|WRONG_PLANNED_STATION_FC_RETURN|WRONG_STATION_SAME_CITY_FC_RETURN)$/.test(reason||'');
 export function highValueMoney(value:number){return '₹'+value.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
 export function highValueException(row:HighValueRow,evidence:HighValueEvidence,now:number,minimumDays=3,threshold=5000){
  if(row.trackingId!==evidence.trackingId||row.stationCode!==evidence.stationCode||!Number.isFinite(row.shipmentValue)||row.shipmentValue!<threshold||highValueClosed(evidence.state))return null;
@@ -18,7 +18,7 @@ export function highValueException(row:HighValueRow,evidence:HighValueEvidence,n
  // Restart evidence after a completed delivery or a handover away from this station.
  const boundary=history.filter(h=>highValueClosed(h.state)||(h.source===row.stationCode&&['DEPARTED','IN_TRANSIT'].includes(h.state)&&h.destination&&!customerDestination(h.destination)&&h.destination!==row.stationCode)).at(-1);
  const local=history.filter(h=>(!boundary||stamp(h.time)>stamp(boundary.time))&&(!h.source||h.source===row.stationCode||h.destination===row.stationCode));
- const latestReason=evidence.reasonCode||local.filter(h=>h.reasonCode&&h.reasonCode!=='NONE').at(-1)?.reasonCode;
+ const latestReason=(evidence.reasonCode&&evidence.reasonCode!=='NONE'?evidence.reasonCode:null)||local.filter(h=>h.reasonCode&&h.reasonCode!=='NONE').at(-1)?.reasonCode;
  // A known service-area exception is handled through the normal undeliverable workflow.
  if(outsideArea(latestReason)&&!['IN_TRANSIT','DEPARTED','IN_TRANSIT_TO_CUSTOMER','ON_ROAD_WITH_DELIVERY_ASSOCIATE'].includes(evidence.state))return null;
  const inducts=local.filter(h=>['INDUCT','INDUCTED','AT_STATION'].includes(h.state)&&!h.reasonCode?.includes('CANNOT_BE_INDUCTED')).map(h=>stamp(h.time));

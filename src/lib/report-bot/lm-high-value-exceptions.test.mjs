@@ -58,6 +58,8 @@ test('stalled requires 72 hours; normal new dispatch clears idle but not repeate
 test('clear out-of-delivery-area reason is excluded but out-of-delivery-time is not',()=>{
  const h=[scan('INDUCTED',5),{...scan('DELIVERY_FAILED',8),reasonCode:'OUT_OF_DELIVERY_AREA'}];
  assert.equal(highValueException(row,evidence(h),now),null);
+ for(const reasonCode of ['WRONG_NODE','WRONG_PLANNED_STATION_FC_RETURN'])assert.equal(highValueException(row,{...evidence(h),reasonCode},now),null);
+ assert.equal(highValueException(row,{...evidence(h),reasonCode:'NONE'},now),null);
  assert.equal(highValueException(row,evidence(h.map(x=>({...x,reasonCode:'OUT_OF_DELIVERY_TIME'}))),now).kind,'stalled');
 });
 test('completed delivery resets old activity evidence and a current return handover is excluded',()=>{
