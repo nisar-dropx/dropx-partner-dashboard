@@ -36,36 +36,56 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Associates + open months are fetched lazily when the assign dialog opens (per station),
+  // so the page load stays fast even with thousands of associates.
+  const [people, setPeople] = useState<ChallanRecoveryPerson[]>([]);
+  const [payrollMonths, setPayrollMonths] = useState<string[]>([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
 
   const openCase = useMemo(() => view.cases.find((c) => c.id === openId) || null, [view.cases, openId]);
 
   const outstanding = view.cases.filter((c) => !["recovered", "closed", "cancelled"].includes(c.status));
   const totalOutstanding = outstanding.reduce((s, c) => s + c.amount, 0);
 
-  function startAssign(c: ChallanRecoveryCase) {
+  async function startAssign(c: ChallanRecoveryCase) {
     setOpenId(c.id);
     setError("");
     setNotice("");
-    if (c.allocations.length) {
-      setSplitMode(c.splitMode);
-      setRows(
-        c.allocations.map((a) => ({
-          ref: a.personRef,
-          name: a.personName,
-          amount: String(a.amount),
-          salaryMonth: a.salaryMonth,
-          installmentCount: String(a.installmentCount)
-        }))
-      );
-    } else {
-      setSplitMode("custom");
-      setRows([{ ref: "", name: "", amount: String(c.amount), salaryMonth: view.payrollMonths[0] || "", installmentCount: "1" }]);
-    }
+    setSplitMode(c.allocations.length ? c.splitMode : "custom");
+    setRows(
+      c.allocations.length
+        ? c.allocations.map((a) => ({
+            ref: a.personRef,
+            name: a.personName,
+            amount: String(a.amount),
+            salaryMonth: a.salaryMonth,
+            installmentCount: String(a.installmentCount)
+          }))
+        : [{ ref: "", name: "", amount: String(c.amount), salaryMonth: "", installmentCount: "1" }]
+    );
     setRemarks("");
+    // Load the station's associates + open months on demand.
+    setOptionsLoading(true);
+    setPeople([]);
+    setPayrollMonths([]);
+    try {
+      const res = await fetch(`/api/ops-pulse/losses/challan-recovery?station=${encodeURIComponent(c.stationCode)}`, { cache: "no-store" });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || "Associates could not be loaded.");
+      setPeople(payload.people || []);
+      setPayrollMonths(payload.payrollMonths || []);
+      if (!c.allocations.length && payload.payrollMonths?.[0]) {
+        setRows((r) => r.map((row) => (row.salaryMonth ? row : { ...row, salaryMonth: payload.payrollMonths[0] })));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Associates could not be loaded.");
+    } finally {
+      setOptionsLoading(false);
+    }
   }
 
   function addRow() {
-    setRows((r) => [...r, { ref: "", name: "", amount: "", salaryMonth: view.payrollMonths[0] || "", installmentCount: "1" }]);
+    setRows((r) => [...r, { ref: "", name: "", amount: "", salaryMonth: payrollMonths[0] || "", installmentCount: "1" }]);
   }
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
@@ -93,7 +113,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
       const allocations = rows
         .filter((r) => r.ref && Number(r.amount) > 0 && r.salaryMonth)
         .map((r) => {
-          const person = view.people.find((p) => p.ref === r.ref);
+          const person = people.find((p) => p.ref === r.ref);
           const count = Math.max(1, Number(r.installmentCount) || 1);
           const per = Math.round((Number(r.amount) / count) * 100) / 100;
           // Expand installments into one allocation row per instalment.
@@ -142,7 +162,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
         <div className={crw.stats}>
           <article><small>Outstanding cases</small><strong>{outstanding.length}</strong></article>
           <article><small>Outstanding amount</small><strong>{money(totalOutstanding)}</strong></article>
-          <article><small>Assignable associates</small><strong>{view.people.length}</strong></article>
+          <article><small>Assigned</small><strong>{view.cases.filter((c) => c.allocations.length > 0).length}</strong></article>
         </div>
 
         {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
@@ -190,7 +210,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                     {c.allocated > 0 ? <em>{money(c.allocated)} assigned</em> : null}
                   </div>
                   {view.canEdit && !["recovered", "closed", "cancelled"].includes(c.status) ? (
-                    <button className={`${styles.button} ${styles.primary}`} type="button" onClick={() => startAssign(c)}>
+                    <button className={`${styles.button} ${styles.primary}`} type="button" onClick={() => void startAssign(c)}>
                       {c.allocations.length ? "Edit assignment" : "Assign recovery"}
                     </button>
                   ) : (
@@ -223,18 +243,22 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
               <button type="button" className={splitMode === "custom" ? `${crw.seg} ${crw.segOn}` : crw.seg} onClick={() => setSplitMode("custom")}>Custom</button>
             </div>
 
+            {optionsLoading ? <p className={crw.total}>Loading associates for {openCase.stationCode}…</p> : null}
+            {!optionsLoading && !people.length ? <p className={crw.total}>No assignable associates found for {openCase.stationCode}.</p> : null}
+
             <div className={crw.rows}>
               {rows.map((row, i) => (
                 <div key={i} className={crw.row}>
                   <select
                     value={row.ref}
+                    disabled={optionsLoading}
                     onChange={(e) => {
-                      const person = view.people.find((p) => p.ref === e.target.value);
+                      const person = people.find((p) => p.ref === e.target.value);
                       setRow(i, { ref: e.target.value, name: person?.fullName || "" });
                     }}
                   >
                     <option value="">Select associate…</option>
-                    {view.people.map((p) => (
+                    {people.map((p) => (
                       <option key={p.ref} value={p.ref}>{p.fullName}{p.employeeCode ? ` (${p.employeeCode})` : ""}</option>
                     ))}
                   </select>
@@ -245,7 +269,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                   />
                   <select value={row.salaryMonth} onChange={(e) => setRow(i, { salaryMonth: e.target.value })}>
                     <option value="">Salary month…</option>
-                    {view.payrollMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                    {payrollMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
                   </select>
                   <input
                     type="number" min="1" max="24" step="1" title="Instalments"

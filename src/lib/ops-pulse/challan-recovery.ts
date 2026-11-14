@@ -49,9 +49,12 @@ export type ChallanRecoveryPerson = {
 export type ChallanRecoveryView = {
   ready: boolean;
   cases: ChallanRecoveryCase[];
+  canEdit: boolean;
+};
+
+export type ChallanAssignOptions = {
   people: ChallanRecoveryPerson[];
   payrollMonths: string[];
-  canEdit: boolean;
 };
 
 const num = (v: unknown) => Number(v) || 0;
@@ -62,7 +65,6 @@ export async function loadChallanRecovery(auth: AuthorizationContext): Promise<C
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
   const { company, stations } = await nlStationScope(auth);
   const codes = stations.map((s) => s.source_code);
-  const stationIds = stations.map((s) => s.id);
 
   const casesResult = codes.length
     ? await readAllRows(
@@ -98,44 +100,9 @@ export async function loadChallanRecovery(auth: AuthorizationContext): Promise<C
     allocByCase.set(a.case_id, list);
   }
 
-  // Assignable associates across the scoped stations (dedup by ref).
-  const peopleByRef = new Map<string, ChallanRecoveryPerson>();
-  for (const sid of stationIds) {
-    const r = await supabaseAdmin.rpc("loss_recovery_people_with_locations", { p_company: company, p_station: sid });
-    if (r.error) continue;
-    for (const p of (r.data ?? []) as any[]) {
-      if (!p.is_active) continue;
-      if (!peopleByRef.has(p.ref)) {
-        peopleByRef.set(p.ref, {
-          ref: text(p.ref),
-          employeeCode: text(p.employee_code),
-          fullName: text(p.full_name),
-          designation: text(p.designation),
-          stationCodes: Array.isArray(p.station_codes) ? p.station_codes.map(text) : []
-        });
-      }
-    }
-  }
-  const people = [...peopleByRef.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
-
-  // Open payroll months the associates can be deducted in.
-  let payrollMonths: string[] = [];
-  if (people.length) {
-    const win = await supabaseAdmin.rpc("loss_recovery_payroll_windows", {
-      p_company: company,
-      p_refs: people.map((p) => p.ref)
-    });
-    if (!win.error) {
-      payrollMonths = [
-        ...new Set(
-          ((win.data ?? []) as any[])
-            .filter((w) => w.payroll_open && (w.payable == null || Number(w.payable) > 0))
-            .map((w) => text(w.salary_month))
-        )
-      ].sort().reverse();
-    }
-  }
-
+  // Associates + payroll months are NOT loaded here — that is a per-station, heavier
+  // lookup only needed inside the assign dialog. Loaded lazily via loadChallanAssignOptions
+  // so the page itself renders instantly (just the cases).
   const mappedCases: ChallanRecoveryCase[] = cases.map((c) => {
     const allocs = (allocByCase.get(c.id) ?? []).map(
       (a): ChallanRecoveryAllocation => ({
@@ -175,8 +142,56 @@ export async function loadChallanRecovery(auth: AuthorizationContext): Promise<C
   return {
     ready: true,
     cases: mappedCases,
-    people,
-    payrollMonths,
     canEdit: !auth.readOnly && hasPermission(auth, "ops_losses", "edit")
   };
+}
+
+/**
+ * Associates + open payroll months for ONE station — loaded only when the assign dialog
+ * opens, so the main page never pays for the 1000s-of-associates directory + payroll-window
+ * computation. Mirrors how the NL recovery screen loads people one station at a time.
+ */
+export async function loadChallanAssignOptions(
+  auth: AuthorizationContext,
+  stationCode: string
+): Promise<ChallanAssignOptions> {
+  if (!supabaseAdmin) throw new Error("Database service is unavailable.");
+  const { company, stations } = await nlStationScope(auth);
+  const code = String(stationCode || "").trim().toUpperCase();
+  const station = stations.find((s) => s.source_code === code);
+  if (!station) return { people: [], payrollMonths: [] };
+
+  const r = await supabaseAdmin.rpc("loss_recovery_people_with_locations", {
+    p_company: company,
+    p_station: station.id
+  });
+  if (r.error) throw new Error("Associates could not be loaded for this station.");
+  const people: ChallanRecoveryPerson[] = ((r.data ?? []) as any[])
+    .filter((p) => p.is_active)
+    .map((p) => ({
+      ref: text(p.ref),
+      employeeCode: text(p.employee_code),
+      fullName: text(p.full_name),
+      designation: text(p.designation),
+      stationCodes: Array.isArray(p.station_codes) ? p.station_codes.map(text) : []
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+  let payrollMonths: string[] = [];
+  if (people.length) {
+    const win = await supabaseAdmin.rpc("loss_recovery_payroll_windows", {
+      p_company: company,
+      p_refs: people.map((p) => p.ref)
+    });
+    if (!win.error) {
+      payrollMonths = [
+        ...new Set(
+          ((win.data ?? []) as any[])
+            .filter((w) => w.payroll_open && (w.payable == null || Number(w.payable) > 0))
+            .map((w) => text(w.salary_month))
+        )
+      ].sort().reverse();
+    }
+  }
+  return { people, payrollMonths };
 }

@@ -1,7 +1,7 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { loadChallanRecovery } from "@/lib/ops-pulse/challan-recovery";
+import { loadChallanRecovery, loadChallanAssignOptions } from "@/lib/ops-pulse/challan-recovery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,11 +9,17 @@ export const maxDuration = 60;
 const reply = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await getAuthorization();
     if (!auth) return reply({ error: "Login required." }, 401);
     if (!hasPermission(auth, "ops_losses", "access")) return reply({ error: "Loss access denied." }, 403);
+    // ?station=CODE → lazy assign options (associates + open months) for one station only.
+    const station = new URL(request.url).searchParams.get("station");
+    if (station) {
+      const options = await loadChallanAssignOptions(auth, station);
+      return reply(options);
+    }
     const view = await loadChallanRecovery(auth);
     return reply(view);
   } catch (error) {
