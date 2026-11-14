@@ -100,8 +100,8 @@ const day = (value: string | null | undefined) => {
 };
 
 function recoveryHref(challan: FleetChallan) {
-  if (!challan.recoveryMonth || !challan.recoveryCaseKey) return "/ops-pulse/team-ops/losses/recovery-updates";
-  return `/ops-pulse/team-ops/losses/recovery-updates?month=${encodeURIComponent(challan.recoveryMonth)}&case=${encodeURIComponent(challan.recoveryCaseKey)}`;
+  if (!challan.recoveryMonth || !challan.recoveryCaseKey) return "/ops-pulse/team-ops/losses/challan-recovery";
+  return `/ops-pulse/team-ops/losses/challan-recovery?month=${encodeURIComponent(challan.recoveryMonth)}&case=${encodeURIComponent(challan.recoveryCaseKey)}`;
 }
 
 // A pending action awaiting confirmation before it fires.

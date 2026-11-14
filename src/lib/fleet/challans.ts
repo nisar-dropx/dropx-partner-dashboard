@@ -149,10 +149,11 @@ export function challanStatusLabel(status: string) {
   }
 }
 
+// Challan recovery lives on its OWN screen, separate from the NL/SLP recovery ledger.
 export function teamOpsRecoveryHref(month: string | null, caseKey: string | null) {
-  if (!month || !caseKey) return "/ops-pulse/team-ops/losses/recovery-updates";
+  if (!month || !caseKey) return "/ops-pulse/team-ops/losses/challan-recovery";
   const params = new URLSearchParams({ month, case: caseKey });
-  return `/ops-pulse/team-ops/losses/recovery-updates?${params.toString()}`;
+  return `/ops-pulse/team-ops/losses/challan-recovery?${params.toString()}`;
 }
 
 export async function resolveFleetStationCodes(
