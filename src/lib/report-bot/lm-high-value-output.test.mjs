@@ -22,7 +22,7 @@ function fixture(){
   './lm-cod-journeys':{codCacheGet:async(c,l,d,k)=>cache.get([c,l,d,k].join(':')),codCachePut:async(c,l,d,k,v)=>cache.set([c,l,d,k].join(':'),v)},
   './lm-report-image':{tableReportSvg:async(title,columns,rows)=>JSON.stringify({title,columns,rows}),reportPngBase64:async svg=>Buffer.from(svg).toString('base64')}
  };
- const fetch=async()=>{calls++;return {ok:true,json:async()=>({status:'ok',trackingId:row().trackingId,stationCode:'JUGF',packageStatus:state,lastUpdatedTime:updated,customerName:'PRIVATE',history:[{state:'INDUCTED',time:new Date(Date.now()-4*86400000).toISOString(),source:'JUGF'}]})};};
+ const fetch=async()=>{calls++;return {ok:true,json:async()=>({status:'ok',trackingId:row().trackingId,stationCode:'JUGF',packageStatus:state,lastUpdatedTime:updated,customerName:'PRIVATE',history:[{state:'INDUCTED',time:new Date(Date.now()-5*86400000).toISOString(),source:'JUGF'}]})};};
  const js=ts.transpileModule(fs.readFileSync(new URL('./lm-high-value-output.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('require','module','exports','fetch','process',js)(name=>{assert.ok(name in dependencies,name);return dependencies[name];},module,module.exports,fetch,{env:{EDD_WORKER_URL:'https://source.invalid',EDD_WORKER_ADMIN_KEY:'test'}});
  const context={company:'C',locations:new Map([['JUGF','L']]),runtime:new CodRuntime(Date.now()+90000)};
@@ -32,7 +32,10 @@ test('fresh exception produces a data image, precise caption and tags; repeated 
  const f=fixture(); const result=await f.run();assert.equal(result.rows.length,1);assert.equal(result.outputs.length,1);
  assert.match(result.outputs[0].body.caption,/escalation.*1 shipment.*5,000.00/);
  assert.match(result.outputs[0].body.caption,/375149438442 · ₹5,000.00/);
- assert.match(result.outputs[0].body.caption,/No dispatch \/ attempt/);
+ assert.match(result.outputs[0].body.caption,/Held without dispatch \/ attempt/);
+ assert.match(result.outputs[0].body.caption,/Tracking IDs:/);
+ assert.doesNotMatch(result.outputs[0].body.caption,/\b\d+ (?:scan |idle )?days?\b/);
+ assert.doesNotMatch(Buffer.from(result.outputs[0].body.image_base64,'base64').toString(),/\b\d+ (?:scan |idle )?days?\b/);
  assert.deepEqual(result.outputs[0].body.mentions,['919999999999@s.whatsapp.net']);
  assert.match(Buffer.from(result.outputs[0].body.image_base64,'base64').toString(),/375149438442/);
  await f.run();assert.equal(f.counts().calls,1);assert.doesNotMatch(JSON.stringify([...f.cache.values()]),/PRIVATE|customerName/);

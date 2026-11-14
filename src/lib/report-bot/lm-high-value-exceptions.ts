@@ -8,7 +8,7 @@ const customerDestination=(value:string|null|undefined)=>/^CUSTOMER_ADDRESS(?:_\
 const deliveryActivity=(h:ShipmentScan)=>(['IN_TRANSIT_TO_CUSTOMER','ON_ROAD_WITH_DELIVERY_ASSOCIATE','DELIVERY_FAILED','DELIVERY_ATTEMPTED','UNDELIVERABLE','REJECTED','DELIVERY_REJECTED'].includes(h.state)||['IN_TRANSIT','DEPARTED'].includes(h.state)&&customerDestination(h.destination))&&(!h.destination||customerDestination(h.destination));
 const outsideArea=(reason:string|null|undefined)=>/^(OUT_OF_DELIVERY_AREA|OUTSIDE_DELIVERY_AREA|OUT_OF_SERVICE_AREA|OUTSIDE_SERVICE_AREA|OUT_OF_COVERAGE_AREA|UNSERVICEABLE_AREA|WRONG_NODE|WRONG_PLANNED_STATION_FC_RETURN|WRONG_STATION_SAME_CITY_FC_RETURN)$/.test(reason||'');
 export function highValueMoney(value:number){return '₹'+value.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
-export function highValueException(row:HighValueRow,evidence:HighValueEvidence,now:number,minimumDays=3,threshold=5000){
+export function highValueException(row:HighValueRow,evidence:HighValueEvidence,now:number,minimumDays=5,threshold=5000){
  if(row.trackingId!==evidence.trackingId||row.stationCode!==evidence.stationCode||!Number.isFinite(row.shipmentValue)||row.shipmentValue!<threshold||highValueClosed(evidence.state))return null;
  const history=[...new Map(evidence.history.filter(h=>Number.isFinite(stamp(h.time))&&stamp(h.time)<=now).map(h=>[h.state+':'+h.time,h])).values()].sort((a,b)=>stamp(a.time)-stamp(b.time));
  // A return must actually have left this station toward FC; READY_FOR_FC_RETURN,

@@ -1029,7 +1029,7 @@ export async function saveDispatchRoutes(form: FormData) {
         source_model_codes:scopeType === "region" ? sourceModelCodes : [],
         eod_sections:report === "eod" ? eodSections : [],
         dsr_pace:report==='dsr'?parseDsrPace(String(form.get('dsr_pace')||'')):[],
-        high_value_min_days:Math.min(90,Math.max(1,Math.floor(Number(form.get('high_value_min_days'))||3))),
+        high_value_min_days:Math.min(90,Math.max(1,Math.floor(Number(form.get('high_value_min_days'))||5))),
         high_value_escalation_time:/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(String(form.get('high_value_escalation_time')||''))?String(form.get('high_value_escalation_time')):'23:00',
         high_value_escalation_roles:['HLM','SLPM'],
         high_value_summary:report==='high_value'&&form.get('high_value_view')==='summary',

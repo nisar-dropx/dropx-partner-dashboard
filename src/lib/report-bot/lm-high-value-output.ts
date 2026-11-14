@@ -35,7 +35,7 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
    });
    await codCachePut(context.company,location,day,key,evidence,row.lastUpdatedAt?1440:5);
   }
-  const exception=highValueException(row,evidence,Date.now(),context.minimumDays||3,threshold);
+  const exception=highValueException(row,evidence,Date.now(),context.minimumDays||5,threshold);
   if(exception)rows.push(exception);
  }
  const asOf=stations.map(s=>s.fetchedAt!).sort()[0];
@@ -50,13 +50,14 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
    const page=list.slice(offset,offset+4),values=page.flatMap(r=>{
     const events=highValueHistoryRows(r.history);
     return [[r.trackingId,highValueMoney(r.shipmentValue!),highValuePayment(r.paymentMethod),highValueScanLabel(r.state)],
-     ['Flag',r.kind==='repeated_scans'?`${r.activityDays} scan days`:`${r.idleDays} idle days`,r.kind==='repeated_scans'?'Repeated dispatch / attempt':'No dispatch / attempt','Unresolved'],
+     ['Review','',r.kind==='repeated_scans'?'Repeated dispatch / attempt':'Held without dispatch / attempt','Unresolved'],
      ...(r.product?[['Product',r.product.length>38?r.product.slice(0,37)+'…':r.product,'','']]:[]),
      ...(r.firstAt?[['Inducted',clock(r.firstAt),'','']]:[]),
      ...events.map(h=>['Scan',h.time?clock(h.time):'—',highValueScanLabel(h.state),h.reasonCode?.replaceAll('_',' ').slice(0,28)||''])];
    });
    const caption=[highValueExceptionCaption(code,page.length,page.reduce((n,r)=>n+r.shipmentValue!,0),slot>=(context.escalationTime||'23:00')),
-    ...page.map(r=>`${r.trackingId} · ${highValueMoney(r.shipmentValue!)} · ${r.reason}`),
+    'Tracking IDs:',
+    ...page.map(r=>`${r.trackingId} · ${highValueMoney(r.shipmentValue!)} · ${r.kind==='repeated_scans'?'Repeated dispatch / attempt; unresolved':'Held without dispatch / attempt'}`),
     mentions.map(n=>'@'+n).join(' ')].filter(Boolean).join('\n');
    outputs.push({key:`high_value_${code}_${offset/4+1}`,liveAsOf:asOf,body:{image_base64:await reportPngBase64(await tableReportSvg(title,['Tracking ID','Shipment value ₹','Payment / scan','Current status / reason'],values,[],()=>null,0,true)),mime:'image/png',caption,mentions:mentions.map(n=>n+'@s.whatsapp.net')}});
   }

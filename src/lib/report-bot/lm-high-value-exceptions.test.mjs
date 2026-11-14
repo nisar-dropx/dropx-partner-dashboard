@@ -1,5 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {highValueException,highValueHistoryRows} from './lm-high-value-exceptions.ts';
+import {highValueException as evaluateException,highValueHistoryRows} from './lm-high-value-exceptions.ts';
+// Existing configurable three-day rules remain supported; production defaults are tested below.
+const highValueException=(row,evidence,now)=>evaluateException(row,evidence,now,3);
 const now=Date.parse('2026-11-14T23:00:00+05:30');
 const row={stationCode:'JUGF',trackingId:'T1',shipmentValue:5000,state:'HELD',driverId:'',driverName:'',edd:'2026-11-20'};
 const scan=(state,day,time='10:00')=>({state,time:`2026-11-${String(day).padStart(2,'0')}T${time}:00+05:30`,source:'JUGF',destination:'CUSTOMER_ADDRESS'});
@@ -66,4 +68,12 @@ test('completed delivery resets old activity evidence and a current return hando
  const h=[scan('DELIVERY_FAILED',8),scan('DELIVERY_FAILED',9),scan('DELIVERY_FAILED',10),scan('DELIVERED',11),scan('INDUCTED',14)];
  assert.equal(highValueException(row,evidence(h),now),null);
  assert.equal(highValueException(row,evidence([...h,{...scan('IN_TRANSIT',14),destination:'MIDDLE_MILE_NODE'}],'IN_TRANSIT'),now),null);
+});
+
+
+test('default five-day rule ignores shorter idle and repeated activity, includes the boundary',()=>{
+ assert.equal(evaluateException(row,evidence([scan('INDUCTED',9,'23:01')]),now),null);
+ assert.equal(evaluateException(row,evidence([scan('INDUCTED',9,'23:00')]),now).idleDays,5);
+ assert.equal(evaluateException(row,evidence([11,12,13,14].map(d=>scan('DELIVERY_FAILED',d)),'IN_TRANSIT'),now),null);
+ assert.equal(evaluateException(row,evidence([10,11,12,13,14].map(d=>scan('DELIVERY_FAILED',d)),'IN_TRANSIT'),now).activityDays,5);
 });
