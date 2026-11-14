@@ -32,8 +32,8 @@ async function fetchCompanyTeamOrg(companyId: string): Promise<TeamOrgPerson[]> 
       .select("id,person_id,worker_type,worker_code,employee_id,contractor_id")
       .eq("company_id", companyId).eq("status", "active").order("id")),
     readAllRows(admin.from("hr_people").select("id,display_name").eq("company_id", companyId).eq("status", "active").order("id")),
-    readAllRows(admin.from("employees").select("id").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("id")),
-    readAllRows(admin.from("contractors").select("id").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("id")),
+    readAllRows(admin.from("employees").select("id,profile_photo_path").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("id")),
+    readAllRows(admin.from("contractors").select("id,profile_photo_path").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("id")),
     readAllRows(admin.from("hr_reporting_relationships")
       .select("subject_assignment_id,manager_assignment_id")
       .eq("company_id", companyId).eq("relationship_type", "solid_line").eq("is_primary", true)
@@ -76,6 +76,26 @@ async function fetchCompanyTeamOrg(companyId: string): Promise<TeamOrgPerson[]> 
   const personName = new Map<string, string>(peopleRows.map((row) => [row.id, row.display_name]));
   const activeEmployees = new Set<string>(employeeRows.map((row) => row.id));
   const activeContractors = new Set<string>(contractorRows.map((row) => row.id));
+
+  // Batch-sign profile photos once (1h URLs) and map them by employee/contractor id.
+  const workersByPath = new Map<string, string[]>();
+  for (const row of [...employeeRows, ...contractorRows]) {
+    const path = String(row.profile_photo_path ?? "").trim();
+    if (!path) continue;
+    const list = workersByPath.get(path);
+    if (list) list.push(row.id); else workersByPath.set(path, [row.id]);
+  }
+  const photoUrlByWorker = new Map<string, string>();
+  const photoPaths = [...workersByPath.keys()];
+  for (let index = 0; index < photoPaths.length; index += 100) {
+    const batch = photoPaths.slice(index, index + 100);
+    const signed = await admin.storage.from("employee-profile-documents").createSignedUrls(batch, 60 * 60);
+    if (signed.error) continue; // photos are best-effort; never fail the org chart
+    for (const item of signed.data ?? []) {
+      if (!item.path || !item.signedUrl) continue;
+      for (const worker of workersByPath.get(item.path) ?? []) photoUrlByWorker.set(worker, item.signedUrl);
+    }
+  }
   const stationCode = new Map<string, string>(stationRows.map((row) => [row.id, row.station_code || row.station_name]));
   const departmentName = new Map<string, string>(departmentRows.map((row) => [row.id, row.name]));
   const designation = new Map<string, { code: string | null; name: string | null }>(designationRows.map((row) => [row.id, row]));
@@ -99,7 +119,10 @@ async function fetchCompanyTeamOrg(companyId: string): Promise<TeamOrgPerson[]> 
       locationId: assignment.location_id ?? null,
       location: assignment.location_id ? stationCode.get(assignment.location_id) ?? null : null,
       department: assignment.department_id ? departmentName.get(assignment.department_id) ?? null : null,
-      isTopLevel: Boolean(assignment.is_top_level)
+      isTopLevel: Boolean(assignment.is_top_level),
+      photoUrl: photoUrlByWorker.get(
+        engagement.worker_type === "employee" ? engagement.employee_id : engagement.contractor_id
+      ) ?? null
     }];
   });
 }

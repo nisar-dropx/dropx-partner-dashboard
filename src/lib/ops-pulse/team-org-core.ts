@@ -13,6 +13,7 @@ export type TeamOrgPerson = {
   location: string | null;
   department: string | null;
   isTopLevel: boolean;
+  photoUrl?: string | null;
 };
 
 export type TeamOrgRelation = "self" | "upline" | "team" | "location" | "org";
@@ -32,6 +33,7 @@ export type TeamOrgNode = {
   relation: TeamOrgRelation;
   family: TeamOrgFamily;
   clusterManager: string | null;
+  photoUrl?: string | null;
 };
 
 export type TeamOrgCoveragePerson = { name: string; title: string };
@@ -155,7 +157,8 @@ export function buildTeamOrgView(people: TeamOrgPerson[], viewer: TeamOrgViewer)
       isTopLevel: person.isTopLevel,
       relation: relationOf(person.id),
       family: familyOf(person.id),
-      clusterManager: clusterManagerId ? byId.get(clusterManagerId)!.name : null
+      clusterManager: clusterManagerId ? byId.get(clusterManagerId)!.name : null,
+      photoUrl: person.photoUrl ?? null
     });
     if (!core.has(person.id) || !person.location) continue;
     let entry = coverageByLocation.get(person.location);

@@ -24456,6 +24456,8 @@ td strong,
 .team-org-actions .button:disabled{opacity:.45;cursor:default}
 .team-org-actions .button.secondary.active{border-color:#e2a37d;color:#a6401c;background:#fff5ef}
 .team-org-avatar{display:inline-grid;width:32px;height:32px;flex:0 0 auto;place-items:center;border:1px solid #f0c9a7;border-radius:50%;color:var(--brand-red);background:linear-gradient(135deg,#fff4e8,#fff0ee);font-size:10.5px;font-weight:850;letter-spacing:.02em}
+.team-org-avatar-photo{padding:0;overflow:hidden;background:#eef1f5;border-color:#e1e5eb}
+.team-org-avatar-photo img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
 .team-org-scroll{min-height:300px;max-height:68vh;overflow:auto;padding:24px 18px 30px;background:radial-gradient(circle at 50% 0,rgba(244,122,40,.055),transparent 32%),#fbfcfe;scrollbar-width:thin}
 .team-org-chart{display:flex;width:max-content;min-width:100%;flex-direction:column;align-items:center}
 .team-org-company{position:relative;display:flex;width:250px;min-height:62px;align-items:center;gap:11px;padding:11px 14px;border:1px solid #d8dfea;border-top:3px solid #d75b21;border-radius:13px;color:#fff;background:linear-gradient(128deg,#1f2b40 0%,#313a50 56%,#8e2d35 150%);box-shadow:0 10px 24px rgba(25,36,54,.16)}

@@ -71,7 +71,15 @@ function initials(name: string) {
   return ((words[0]?.[0] ?? "") + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase() || "?";
 }
 
-function Avatar({ name }: { name: string }) {
+function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (photoUrl && !failed) {
+    return (
+      <span className="team-org-avatar team-org-avatar-photo">
+        <img src={photoUrl} alt="" loading="lazy" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
   return <span className="team-org-avatar" aria-hidden="true">{initials(name)}</span>;
 }
 
@@ -81,7 +89,7 @@ function matches(node: TeamOrgNode, term: string) {
 
 function PersonCard({ node, reports, expanded, onToggle, onFocus }: { node: TeamOrgNode; reports: number; expanded: boolean; onToggle: () => void; onFocus: () => void }) {
   return <article className={`team-org-person ${node.relation}`} data-team-org-self={node.relation === "self" || undefined}>
-    <Avatar name={node.name} />
+    <Avatar name={node.name} photoUrl={node.photoUrl} />
     <div className="team-org-person-copy">
       <button type="button" title={`Show ${node.name} in the directory`} onClick={onFocus}>{node.name}</button>
       <span title={node.title}>{node.title}</span>
@@ -162,7 +170,7 @@ function Chart({ view, graph, companyName, onFocus }: { view: TeamOrgView; graph
     {graph.unmapped.length ? <details className="team-org-unmapped">
       <summary><span><strong>{graph.unmapped.length} {graph.unmapped.length === 1 ? "person has" : "people have"} no reporting manager</strong><small>They stay outside the map until People assigns their reporting line.</small></span><em>View</em></summary>
       <div className="team-org-unmapped-grid">{graph.unmapped.map((node) => <article key={node.id}>
-        <Avatar name={node.name} />
+        <Avatar name={node.name} photoUrl={node.photoUrl} />
         <div><strong>{node.name}</strong><span>{node.title}</span><small>{node.location ?? "Location not assigned"}</small></div>
       </article>)}</div>
     </details> : null}
@@ -241,7 +249,7 @@ function Directory({ view, graph, companyName, anchorId, onAnchor }: { view: Tea
 
     {anchor && !term ? <div className="team-org-focus">
       <div className="team-org-focus-head">
-        <Avatar name={anchor.name} />
+        <Avatar name={anchor.name} photoUrl={anchor.photoUrl} />
         <div><strong>{anchor.name}{anchor.relation === "self" ? " (you)" : ""}</strong><span>{[anchor.title, anchor.department, anchor.location].filter(Boolean).join(" · ")}</span></div>
       </div>
       <nav className="team-org-breadcrumb" aria-label="Reporting path">
@@ -267,7 +275,7 @@ function Directory({ view, graph, companyName, anchorId, onAnchor }: { view: Tea
             return <tr key={node.id} className={node.relation === "self" ? "self" : ""}>
               <td>
                 <div className="team-org-row-person" style={{ paddingLeft: depth * 18 }}>
-                  <Avatar name={node.name} />
+                  <Avatar name={node.name} photoUrl={node.photoUrl} />
                   <div>
                     <button type="button" className="team-org-link" onClick={() => focus(node.id)}>{node.name}</button>
                     {node.relation === "self" ? <em>You</em> : node.relation === "upline" ? <em className="upline">Reporting line</em> : null}
