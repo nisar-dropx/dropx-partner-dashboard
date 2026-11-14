@@ -1,0 +1,59 @@
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0; }
+.stats article { padding: 13px 15px; border: 1px solid #e1e5eb; border-radius: 12px; background: #fff; }
+.stats small { display: block; color: #667487; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.stats strong { display: block; margin-top: 4px; color: #182638; font-size: 20px; }
+
+.list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.case { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 14px 16px; border: 1px solid #e1e5eb; border-radius: 13px; background: #fff; }
+.caseMain { flex: 1; min-width: 0; }
+.caseHead { display: flex; align-items: center; gap: 9px; }
+.no { color: #182638; font-size: 13px; font-variant-numeric: tabular-nums; word-break: break-all; }
+.meta { display: block; margin-top: 4px; color: #667487; font-size: 10px; }
+.allocs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.alloc { padding: 3px 8px; border-radius: 7px; background: #eef4ff; color: #1f5fc0; font-size: 9px; font-weight: 700; }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 9px; font-weight: 800; border: 1px solid transparent; }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.stOpen { color: #b06a00; background: #fff5e4; border-color: #f4d9a3; }
+.stAssigned { color: #1f5fc0; background: #e9f1ff; border-color: #bcd4f7; }
+.stRecovering { color: #5a46c6; background: #efecff; border-color: #cfc6f4; }
+.stRecovered { color: #1f7a52; background: #e6f6ee; border-color: #b4e2cb; }
+.stClosed, .stCancelled { color: #9aa3ad; background: #f3f5f7; border-color: #e0e4ea; }
+
+.caseSide { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+.amount { text-align: right; }
+.amount small { display: block; color: #667487; font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.amount strong { display: block; color: #182638; font-size: 17px; }
+.amount em { display: block; margin-top: 2px; color: #1f5fc0; font-size: 9px; font-style: normal; font-weight: 700; }
+
+/* ---- Assign dialog ---- */
+.dialog { width: min(640px, 100%); }
+.dialogHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.dialogHead small { color: #d74720; font-size: 8px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.dialogHead h3 { margin: 3px 0; color: #182638; font-size: 17px; }
+.dialogHead > div > small:last-child { display: block; color: #667487; font-weight: 600; text-transform: none; letter-spacing: 0; }
+
+.split { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.split > span { color: #667487; font-size: 10px; font-weight: 700; }
+.seg { padding: 5px 13px; border: 1px solid #e1e5eb; border-radius: 8px; background: #fff; color: #3f535e; font-size: 10px; font-weight: 700; cursor: pointer; }
+.segOn { border-color: #d74720; color: #fff; background: #d74720; }
+
+.rows { display: flex; flex-direction: column; gap: 8px; }
+.row { display: grid; grid-template-columns: 1.6fr 1fr 1.1fr 64px 30px; gap: 8px; align-items: center; }
+.row select, .row input { height: 36px; border: 1px solid #e1e5eb; border-radius: 9px; padding: 0 9px; color: #182638; background: #fff; font: inherit; font-size: 10px; }
+.row input:disabled { background: #f5f6f8; color: #8795a2; }
+.x { height: 30px; width: 30px; border: 1px solid #e7aabd; border-radius: 8px; background: #fff1f5; color: #ad2857; font-size: 16px; line-height: 1; cursor: pointer; }
+
+.rowActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.total { color: #667487; font-size: 10px; font-weight: 700; }
+.totalOver { color: #b4233e; }
+
+.remarks { display: block; margin-top: 14px; color: #182638; font-size: 10px; font-weight: 700; }
+.remarks textarea { width: 100%; margin-top: 5px; padding: 8px 10px; border: 1px solid #e1e5eb; border-radius: 10px; outline: 0; resize: vertical; font: inherit; font-size: 10px; }
+
+@media (max-width: 680px) {
+  .stats { grid-template-columns: 1fr; }
+  .case { flex-direction: column; }
+  .caseSide { align-items: flex-start; width: 100%; }
+  .row { grid-template-columns: 1fr 1fr; }
+}

@@ -9,6 +9,8 @@ import { loadCurrentLossPayrollMonth, loadLossDebits } from "@/lib/ops-pulse/los
 import { mayViewLossApprovals, mayMarkAlreadyRecovered, defaultLossFilter, mayViewRedisputeBreakdown } from "@/lib/ops-pulse/loss-recovery-controls";
 import { loadRecoveryWorkspace } from "@/lib/ops-pulse/loss-recovery-workspace";
 import { LossRecoveryWorkspace } from "@/components/loss-recovery-workspace";
+import { loadChallanRecovery } from "@/lib/ops-pulse/challan-recovery";
+import { ChallanRecoveryWorkspace } from "@/components/challan-recovery-workspace";
 import { LossExceptionsDesk } from "@/components/loss-exceptions-desk";
 import { LossRedisputeDesk } from "@/components/loss-redispute-desk";
 import { readAllRows } from "@/lib/supabase-pagination";
@@ -73,6 +75,7 @@ const sections: Record<
 const primaryTabs: LossTab[] = [
  {key:"nl",label:"Disputes & outcomes",href:"/team-ops/losses/nl"},
  {key:"recovery",label:"Recovery",href:"/team-ops/losses/recovery"},
+ {key:"challan-recovery",label:"Challan recovery",href:"/team-ops/losses/challan-recovery"},
  {key:"exceptions",label:"Exceptions",href:"/team-ops/losses/exceptions"},
  {key:"claims",label:"Station claims",href:"/team-ops/losses/claims"},
  {key:"ledger",label:"Balances",href:"/team-ops/losses/ledger"},
@@ -131,6 +134,21 @@ export default async function LossesSectionPage({
   if (params.section === 'recovery-updates') {
     const view=await loadRecoveryWorkspace(auth);
     return <main className={styles.workspace}><LossHeader title="Recovery" intro="Save recovery against the current payroll, or choose an exception enabled for this TID." tabs={tabs} active="recovery"/><LossRecoveryWorkspace {...view}/></main>;
+  }
+  if (params.section === 'challan-recovery') {
+    const view = await loadChallanRecovery(auth);
+    return (
+      <main className={styles.workspace}>
+        <LossHeader
+          eyebrow="Team Ops · Losses"
+          title="Challan recovery"
+          intro="Recover approved traffic challans from the responsible associates — separate from NL/SLP loss recovery, deducted through the same payroll."
+          tabs={tabs}
+          active="challan-recovery"
+        />
+        <ChallanRecoveryWorkspace view={view} />
+      </main>
+    );
   }
   if (params.section === "claims") {
     try {
