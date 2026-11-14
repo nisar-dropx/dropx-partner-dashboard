@@ -222,9 +222,9 @@ export function filedInCloak(
   if (request.status === "filed") return true;
   const phase = casePhase(c).key;
   const held = String(c.extra?.dispute_selected ?? "").toUpperCase();
+  const revision = String(c.extra?.revision ?? "");
   return (
-    phase !== "action" &&
-    phase !== "respond" &&
+    (revision === "2" || (phase !== "action" && phase !== "respond")) &&
     held === (request.decision === "dispute" ? "YES" : "NO")
   );
 }
