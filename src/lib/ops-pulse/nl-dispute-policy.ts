@@ -255,6 +255,11 @@ export function cloakFilingBlock(
     return "Only a request sent to the Cloak desk can be filed.";
   if (request.decision !== "dispute")
     return "An accepted loss is filed in Cloak by hand.";
+  if (request.source_stage === "eDSP2" && stage === "NL2") {
+    if (!DISPUTE_REASONS.includes(request.reason)) return "The dispute reason is not one Cloak offers. Return it to the station.";
+    if (!request.remarks.trim()) return "The dispute has no remarks for Amazon.";
+    return "";
+  }
   if (!(["eDSP1", "eDSP2"] as const).includes(request.source_stage as "eDSP1" | "eDSP2") || !(["eDSP1", "eDSP2"] as const).includes(stage as "eDSP1" | "eDSP2"))
     return "This Cloak stage cannot be filed from OpsPulse.";
   if (!DISPUTE_REASONS.includes(request.reason))
