@@ -1170,7 +1170,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
       {selectedBankUnavailableCount.toLocaleString("en-IN")} selected row{selectedBankUnavailableCount === 1 ? " is" : "s are"} excluded by the status, balance, profile, PAN, hold or publication checks shown in the table. Eligible rows remain available and are not blocked by the excluded selection.
     </div> : null}
     {selectedBankRefreshPendingCount ? <div aria-live="polite" className="payout-inline-message warn"><strong>{selectedBankRefreshPendingCount} selected payout row{selectedBankRefreshPendingCount === 1 ? " has" : "s have"} a publication refresh pending.</strong> The refresh runs before bank-file generation, then the row balance and every payment eligibility rule are checked again. No stale publication will be paid.</div> : null}
-    {paymentStatus.loading ? <p className="subtle" role="status">Loading payment status and bank readiness… Filters will update when ready.</p> : paymentStatus.error ? <p className="subtle" role="status">Some payment statuses could not load. <button className="button secondary" onClick={paymentStatus.retry} type="button">Retry payment status</button></p> : null}
+    {paymentStatus.loading ? <div className="payout-inline-message payout-payment-status-loading" role="status">
+      <span aria-hidden="true" className="inline-spinner" />
+      <span>Loading payment status and bank readiness…</span>
+    </div> : paymentStatus.error ? <p className="subtle" role="status">Some payment statuses could not load. <button className="button secondary" onClick={paymentStatus.retry} type="button">Retry payment status</button></p> : null}
     <div aria-label="Payout filters" className="payout-filter-panel" id="payout-filter-panel">
       <PayoutMultiFilter allLabel="All allocated locations" label="Location" onChange={(values) => { setLocations(values); setPage(1); }} options={locationOptions} selected={locations} />
       <PayoutMultiFilter allLabel="All designations" label="Designation" onChange={(values) => { setDesignations(values); setPage(1); }} options={designationOptions} selected={designations} />

@@ -21825,6 +21825,16 @@ td strong,
 .payout-select-cell input { width: 16px; height: 16px; margin: 0; accent-color: #e84a24; cursor: pointer; }
 .payout-select-cell input:disabled { cursor: not-allowed; opacity: .45; }
 .payout-inline-message { margin: 0 16px 12px; padding: 9px 12px; border: 1px solid; border-radius: 9px; font-size: 12px; font-weight: 700; }
+.payout-payment-status-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  border-color: var(--border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .payout-payment-status-loading .inline-spinner { animation: none; }
+}
 .payout-inline-message.success { color: #067647; background: #ecfdf3; border-color: #abefc6; }
 .payout-inline-message.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
 .workforce-payout-bulk-upload { display: grid; justify-items: end; gap: 10px; }
