@@ -90,6 +90,35 @@ export async function uploadFleetChallanDriveFile(input: {
   };
 }
 
+/**
+ * Download a challan evidence file's bytes from Drive using the server OAuth token.
+ * Lets the app proxy evidence to org members without making the Drive file public.
+ */
+export async function downloadFleetChallanDriveFile(
+  fileId: string
+): Promise<{ bytes: Uint8Array; mime: string; name: string }> {
+  const id = clean(fileId);
+  if (!id) throw new Error("No Drive file id.");
+  const token = await googleAccessToken();
+  const metaResponse = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?supportsAllDrives=true&fields=name,mimeType`,
+    { headers: { authorization: `Bearer ${token}` }, cache: "no-store" }
+  );
+  const meta = (await metaResponse.json()) as { name?: string; mimeType?: string; error?: { message?: string } };
+  if (!metaResponse.ok) throw new Error(meta.error?.message || `Drive metadata HTTP ${metaResponse.status}`);
+  const mediaResponse = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media&supportsAllDrives=true`,
+    { headers: { authorization: `Bearer ${token}` }, cache: "no-store" }
+  );
+  if (!mediaResponse.ok) throw new Error(`Drive download HTTP ${mediaResponse.status}`);
+  const bytes = new Uint8Array(await mediaResponse.arrayBuffer());
+  return {
+    bytes,
+    mime: clean(meta.mimeType) || "application/octet-stream",
+    name: clean(meta.name) || `challan-evidence-${id}`
+  };
+}
+
 /** Pull remote challan PDF/image and stream into Drive without writing local disk. */
 export async function mirrorChallanEvidenceToDrive(input: {
   sourceUrl: string;

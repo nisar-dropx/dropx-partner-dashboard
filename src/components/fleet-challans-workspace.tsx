@@ -4,9 +4,11 @@ import {
   AlertTriangle,
   Building2,
   Check,
+  Download,
   ExternalLink,
   FileWarning,
   Image as ImageIcon,
+  Maximize2,
   Plus,
   ReceiptIndianRupee,
   Search,
@@ -44,7 +46,9 @@ type FleetChallan = {
   status: ChallanStatus;
   source: string;
   evidenceUrl: string;
+  driveFileId: string;
   driveViewUrl: string;
+  driveMimeType: string;
   responsibleNote: string;
   recoveryMonth: string | null;
   recoveryCaseKey: string | null;
@@ -217,6 +221,7 @@ export function FleetChallansWorkspace({
     evidenceUrl: ""
   });
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   async function loadList() {
     setLoading(true);
@@ -241,6 +246,7 @@ export function FleetChallansWorkspace({
   }, []);
 
   useEffect(() => {
+    setEvidenceOpen(false);
     if (!selectedId) {
       setDetail(null);
       setPending(null);
@@ -382,6 +388,11 @@ export function FleetChallansWorkspace({
   const hasRecoveryCase = Boolean(detailChallan?.recoveryCaseKey);
   const confirmSpec = pending && detailChallan ? confirmSpecFor(pending, detailChallan, hasRecoveryCase) : null;
   const evidenceLink = detailChallan ? detailChallan.driveViewUrl || detailChallan.evidenceUrl : "";
+  // The proxy streams the stored Drive file to any org member with Fleet access,
+  // so it is preferred over the raw Drive/external link (which needs Drive sign-in).
+  const evidenceProxy = detailChallan?.driveFileId ? `/api/fleet/challans/${detailChallan.id}/evidence` : "";
+  const evidenceViewSrc = evidenceProxy || evidenceLink;
+  const evidenceIsPdf = /pdf/i.test(detailChallan?.driveMimeType || "") || /\.pdf($|\?)/i.test(evidenceLink);
 
   return (
     <section className="fc-section">
@@ -593,9 +604,9 @@ export function FleetChallansWorkspace({
                         <strong>Evidence on file</strong>
                         <small>AI-camera image / notice stored in Google Drive</small>
                       </div>
-                      <a className="fc-button secondary" href={evidenceLink} target="_blank" rel="noreferrer">
-                        Open evidence <ExternalLink size={13} />
-                      </a>
+                      <button className="fc-button secondary" type="button" onClick={() => setEvidenceOpen(true)}>
+                        Open evidence <ImageIcon size={13} />
+                      </button>
                     </>
                   ) : (
                     <div><strong>No evidence linked</strong><small>No image or notice is attached to this challan yet.</small></div>
@@ -674,6 +685,59 @@ export function FleetChallansWorkspace({
               <button className={`fc-button ${confirmSpec.tone === "danger" ? "danger" : "primary"}`} type="button" disabled={busy} onClick={() => void confirmPending()}>
                 {busy ? "Working…" : confirmSpec.confirmLabel}
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {evidenceOpen && detailChallan && evidenceViewSrc ? (
+        <div className="fc-modal-backdrop fc-evidence-backdrop" onClick={() => setEvidenceOpen(false)}>
+          <section
+            className="fc-evidence-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="challan-evidence-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="fc-evidence-head">
+              <div className="fc-evidence-head-text">
+                <strong id="challan-evidence-title">Evidence · {detailChallan.challanNumber}</strong>
+                <small>{detailChallan.vehicleNo} · {detailChallan.stationCode}</small>
+              </div>
+              <div className="fc-evidence-tools">
+                <a
+                  className="fc-button secondary"
+                  href={evidenceProxy ? `${evidenceProxy}?download=1` : evidenceViewSrc}
+                  download
+                  target={evidenceProxy ? undefined : "_blank"}
+                  rel={evidenceProxy ? undefined : "noreferrer"}
+                >
+                  <Download size={14} /> Download
+                </a>
+                <button
+                  className="fc-button secondary"
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById("fc-evidence-stage");
+                    if (el?.requestFullscreen) void el.requestFullscreen();
+                  }}
+                >
+                  <Maximize2 size={14} /> Full screen
+                </button>
+                <a className="fc-button secondary" href={evidenceViewSrc} target="_blank" rel="noreferrer">
+                  <ExternalLink size={14} /> New tab
+                </a>
+                <button className="fc-button icon" type="button" onClick={() => setEvidenceOpen(false)} aria-label="Close">
+                  <X size={18} />
+                </button>
+              </div>
+            </header>
+            <div className="fc-evidence-stage" id="fc-evidence-stage">
+              {evidenceIsPdf ? (
+                <iframe title="Challan evidence" src={evidenceViewSrc} className="fc-evidence-frame" />
+              ) : (
+                <img src={evidenceViewSrc} alt={`Evidence for challan ${detailChallan.challanNumber}`} className="fc-evidence-img" />
+              )}
             </div>
           </section>
         </div>
