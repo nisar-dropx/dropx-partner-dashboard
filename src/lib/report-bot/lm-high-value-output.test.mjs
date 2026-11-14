@@ -30,7 +30,9 @@ function fixture(){
 }
 test('fresh exception produces a data image, precise caption and tags; repeated lookup is cached without customer data',async()=>{
  const f=fixture(); const result=await f.run();assert.equal(result.rows.length,1);assert.equal(result.outputs.length,1);
- assert.match(result.outputs[0].body.caption,/Escalation.*1 shipment.*5,000/);
+ assert.match(result.outputs[0].body.caption,/escalation.*1 shipment.*5,000.00/);
+ assert.match(result.outputs[0].body.caption,/375149438442 · ₹5,000.00/);
+ assert.match(result.outputs[0].body.caption,/No dispatch \/ attempt/);
  assert.deepEqual(result.outputs[0].body.mentions,['919999999999@s.whatsapp.net']);
  assert.match(Buffer.from(result.outputs[0].body.image_base64,'base64').toString(),/375149438442/);
  await f.run();assert.equal(f.counts().calls,1);assert.doesNotMatch(JSON.stringify([...f.cache.values()]),/PRIVATE|customerName/);

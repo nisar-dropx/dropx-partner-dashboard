@@ -131,13 +131,13 @@ export async function loadTodayEddSnapshot(stationCodes: string[], day: string):
   return { asOf, stations, unverifiedStations, pending: stations.some(row => row.count > 0) };
 }
 
-export async function loadEodDigest(stationCodes: string[], day: string, options:{maxAgeMinutes?:number;requireCReturn?:boolean}={}): Promise<EodDigest> {
+export async function loadEodDigest(stationCodes: string[], day: string, options:{maxAgeMinutes?:number;requireCReturn?:boolean;allowPartial?:boolean}={}): Promise<EodDigest> {
   const requested = [...new Set(stationCodes.map(code => code.trim().toUpperCase()).filter(Boolean))];
   if (!requested.length) throw new Error("No active source stations are configured.");
   const network = await fetchLoadFlashBoard(day, requested);
   const allowed = new Set(requested);
-  const stations = network.stations.filter(row => allowed.has(row.stationCode) && row.businessDate === day && row.hasSnapshot);
-  const missingStations = requested.filter(code => !stations.some(row => row.stationCode === code));
+  let stations = network.stations.filter(row => allowed.has(row.stationCode) && row.businessDate === day && row.hasSnapshot);
+  let missingStations = requested.filter(code => !stations.some(row => row.stationCode === code));
   if (options.maxAgeMinutes === 5) {
     const stale = requested.filter(code => {
       const station = stations.find(row => row.stationCode === code);
@@ -145,7 +145,9 @@ export async function loadEodDigest(stationCodes: string[], day: string, options
     });
     if (stale.length) {
       await queueLoadFlashStations(stale, 5);
-      throw new Error("Waiting for current refresh: " + stale.join(", "));
+      if(!options.allowPartial)throw new Error("Waiting for current refresh: " + stale.join(", "));
+      missingStations=[...new Set([...missingStations,...stale])];
+      stations=stations.filter(station=>!stale.includes(station.stationCode));
     }
   }
   const dsr:EodDsrRow[] = [];
@@ -164,7 +166,7 @@ export async function loadEodDigest(stationCodes: string[], day: string, options
     dot.push(eodDotRow(station.stationCode, stationDotTotals(station.board,"standard"), stationDotTotals(station.board,"premium")));
 
   }
-  if (!stations.length || missingStations.length) throw new Error("Current station snapshots missing: "+missingStations.join(", "));
+  if (!stations.length || (missingStations.length&&!options.allowPartial)) throw new Error("Current station snapshots missing: "+missingStations.join(", "));
   try {
     const inventory=await fetchLoadFlashTracking(day,stations.map(row=>row.stationCode),{buckets:[BOARD_TID.EDD,BOARD_TID.PHYSICAL,BOARD_TID.CRETURN]});
     for(const station of stations){

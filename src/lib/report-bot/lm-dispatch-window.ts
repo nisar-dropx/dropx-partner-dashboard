@@ -3,11 +3,11 @@ export function dispatchSlotDue(day:string,slot:string,slots:string[],report:str
  const due=Date.parse(`${day}T${slot}:00+05:30`);
  // Cash/scrub retries re-read current evidence and retain delivery/quiet-state dedupe.
  // Recover transient failures until the next two-hour check, without replaying old slots.
- const windowMinutes=['bank','scrub'].includes(report)?120:['dsr','creturn','eod','ageing','high_value'].includes(report)?30:20;
+ const windowMinutes=['bank','scrub'].includes(report)?120:['dsr','creturn'].includes(report)?60:['eod','ageing','high_value'].includes(report)?30:20;
  const next=slots.map(s=>Date.parse(`${day}T${s}:00+05:30`)).filter(t=>t>due).sort((a,b)=>a-b)[0]??Infinity;
  return now>=due&&now<Math.min(due+windowMinutes*60000,next);
 }
 export function dispatchSlotUpcoming(day:string,slot:string,now:number){
  const due=Date.parse(`${day}T${slot}:00+05:30`);
- return due>now&&due-now<=3*60000;
+ return due>now&&due-now<=10*60000;
 }

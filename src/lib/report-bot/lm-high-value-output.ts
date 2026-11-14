@@ -2,7 +2,7 @@ import 'server-only';
 import {fetchLoadFlashBoard,fetchLoadFlashTracking,queueLoadFlashStations} from '@/lib/ops-pulse/edd-worker';
 import {requireReportFreshness} from './lm-live-report';
 import {highValuePayment} from './lm-high-value';
-import {highValueClosed,highValueException,highValueExceptionCaption,highValueScanLabel,highValueHistoryRows,type HighValueEvidence} from './lm-high-value-exceptions';
+import {highValueMoney,highValueClosed,highValueException,highValueExceptionCaption,highValueScanLabel,highValueHistoryRows,type HighValueEvidence} from './lm-high-value-exceptions';
 import {tableReportSvg,reportPngBase64} from './lm-report-image';
 import {codCacheGet,codCachePut} from './lm-cod-journeys';
 import {CodRuntime} from './lm-cod-runtime';
@@ -31,7 +31,7 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
     const r=await res.json();
     if(r.status!=='ok'||r.trackingId!==row.trackingId||!r.packageStatus||!Array.isArray(r.history)||!r.history.length)throw new Error('Incomplete high-value evidence: '+row.trackingId);
     // Customer names and addresses are deliberately omitted from cache and reports.
-    return {trackingId:r.trackingId,stationCode:r.stationCode,state:r.packageStatus,checkedAt:new Date().toISOString(),updatedAt:r.lastUpdatedTime||null,product:String(r.itemDescription||'').slice(0,100),history:r.history.map((h:any)=>({state:String(h.state),time:h.time,source:h.source,destination:h.destination,reasonCode:h.reasonCode}))} satisfies HighValueEvidence;
+    return {trackingId:r.trackingId,stationCode:r.stationCode,state:r.packageStatus,checkedAt:new Date().toISOString(),updatedAt:r.lastUpdatedTime||null,reasonCode:r.reasonCode||null,product:String(r.itemDescription||'').slice(0,100),history:r.history.map((h:any)=>({state:String(h.state),time:h.time,source:h.source,destination:h.destination,reasonCode:h.reasonCode}))} satisfies HighValueEvidence;
    });
    await codCachePut(context.company,location,day,key,evidence,row.lastUpdatedAt?1440:5);
   }
@@ -43,18 +43,22 @@ export async function highValueOutputs(codes:string[],day:string,slot:string,reg
  for(const code of codes){
   const list=rows.filter(r=>r.stationCode===code).sort((a,b)=>(b.ageDays||0)-(a.ageDays||0)||b.shipmentValue!-a.shipmentValue!);
   if(!list.length)continue;
-  const title=`${code} · High-value exceptions · ${new Date(day+'T12:00:00+05:30').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})} · ${slot} IST`;
-  const caption=[highValueExceptionCaption(code,list.length,list.reduce((n,r)=>n+r.shipmentValue!,0),slot>=(context.escalationTime||'23:00')),mentions.map(n=>'@'+n).join(' ')].filter(Boolean).join('\n');
-  const clock=(at:string)=>new Date(at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-  const values=list.flatMap(r=>{
-   const events=highValueHistoryRows(r.history);
-   return [[r.trackingId,'₹'+r.shipmentValue!.toLocaleString('en-IN'),highValuePayment(r.paymentMethod),highValueScanLabel(r.state),r.ageDays===null?'Unknown':`${r.ageDays}d`,`${r.activityDays} days`],
-    ...(r.product?[[r.trackingId,'Product',r.product.length>30?r.product.slice(0,29)+'…':r.product,'','','']]:[]),
-    ...(r.firstAt?[[r.trackingId,'First seen',clock(r.firstAt),'','','']]:[]),
-    ...events.map(h=>[r.trackingId,'Scan',h.time?clock(h.time):'—',highValueScanLabel(h.state),h.reasonCode?.replaceAll('_',' ').slice(0,26)||'',''])];
-  });
-  for(let offset=0;offset<values.length;offset+=24){
-   outputs.push({key:`high_value_${code}_${offset/24+1}`,liveAsOf:asOf,body:{image_base64:await reportPngBase64(await tableReportSvg(title,['Tracking ID','Value / detail','Payment / time','Current status / scan','Age / reason','Activity days'],values.slice(offset,offset+24),[],()=>null)),mime:'image/png',caption:offset===0?caption:`*${title} · continued*`,mentions:mentions.map(n=>n+'@s.whatsapp.net')}});
+  const title=`${code} · High-value scan review · ${new Date(day+'T12:00:00+05:30').toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})} · ${slot} IST`;
+  const clock=(at:string)=>new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(at)?at:at.replace(' ','T')+'+05:30').toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  // Whole shipment blocks stay together. Each page has its own copyable TIDs and values.
+  for(let offset=0;offset<list.length;offset+=4){
+   const page=list.slice(offset,offset+4),values=page.flatMap(r=>{
+    const events=highValueHistoryRows(r.history);
+    return [[r.trackingId,highValueMoney(r.shipmentValue!),highValuePayment(r.paymentMethod),highValueScanLabel(r.state)],
+     ['Flag',r.kind==='repeated_scans'?`${r.activityDays} scan days`:`${r.idleDays} idle days`,r.kind==='repeated_scans'?'Repeated dispatch / attempt':'No dispatch / attempt','Unresolved'],
+     ...(r.product?[['Product',r.product.length>38?r.product.slice(0,37)+'…':r.product,'','']]:[]),
+     ...(r.firstAt?[['Inducted',clock(r.firstAt),'','']]:[]),
+     ...events.map(h=>['Scan',h.time?clock(h.time):'—',highValueScanLabel(h.state),h.reasonCode?.replaceAll('_',' ').slice(0,28)||''])];
+   });
+   const caption=[highValueExceptionCaption(code,page.length,page.reduce((n,r)=>n+r.shipmentValue!,0),slot>=(context.escalationTime||'23:00')),
+    ...page.map(r=>`${r.trackingId} · ${highValueMoney(r.shipmentValue!)} · ${r.reason}`),
+    mentions.map(n=>'@'+n).join(' ')].filter(Boolean).join('\n');
+   outputs.push({key:`high_value_${code}_${offset/4+1}`,liveAsOf:asOf,body:{image_base64:await reportPngBase64(await tableReportSvg(title,['Tracking ID','Shipment value ₹','Payment / scan','Current status / reason'],values,[],()=>null,0,true)),mime:'image/png',caption,mentions:mentions.map(n=>n+'@s.whatsapp.net')}});
   }
  }
  return {outputs,rows,asOf};

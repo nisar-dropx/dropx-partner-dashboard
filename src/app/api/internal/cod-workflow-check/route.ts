@@ -48,7 +48,7 @@ export async function POST(request:Request){
   const url=new URL(base+'/api/admin/executive/edd/lookup');url.searchParams.set('stationCode',source.station_code);url.searchParams.set('trackingId',tid);
   const response=await fetch(url,{headers:{'x-admin-key':key},cache:'no-store',signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw new Error('Tracking lookup unavailable');const result=await response.json();
-  return NextResponse.json({station:source.station_code,trackingId:tid,state:result.packageStatus,updatedAt:result.lastUpdatedTime,history:result.history?.map((h:{state:string;time:string;reasonCode?:string})=>({state:h.state,time:h.time,reason:h.reasonCode})),sent:false});
+  return NextResponse.json({station:source.station_code,trackingId:tid,state:result.packageStatus,updatedAt:result.lastUpdatedTime,orderAmount:result.orderAmount,paymentMethod:result.paymentMethod,product:result.itemDescription,history:result.history?.map((h:{state:string;time:string;reasonCode?:string})=>({state:h.state,time:h.time,reason:h.reasonCode})),sent:false});
  }
  if(input.operation==='refresh-edd')return NextResponse.json(await queueLoadFlashStations([source.station_code]));
  if(input.operation==='contacts')return NextResponse.json({station:source.station_code,contacts:await resolveBankReminderMentions(company,[source],route,day),sent:false});

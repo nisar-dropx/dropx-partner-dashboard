@@ -205,7 +205,8 @@ async function eodOutputs(route:Route,digest:EodDigest,region:string,day:string,
 export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeLabel:string,day:string,slot:string):Promise<{outputs:SendOutput[];snapshot:DispatchSnapshot}> {
   const dateLabel=new Date(`${day}T00:00:00+05:30`).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
   const stamp=asIst(digest.asOf);
-  const formats=route.formats?.length?route.formats:[route.format];
+  const partial=digest.missingStations.length>0;
+  const formats=(route.formats?.length?route.formats:[route.format]).filter(format=>!partial||format!=="excel");
   const outputs:SendOutput[]=[];
   let tableRows:Array<Record<string,string|number>>, columns:string[], percentage:string, tone:PercentageTone, title:string;
   if(route.report==="dsr") {
@@ -226,13 +227,19 @@ export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeL
     columns=CRETURN_COLUMNS.filter(column=>column!=='Other'||tableRows.some(row=>Number(row.Other)>0));
     percentage="Pickup %"; tone="pickup"; title=performanceTitle('creturn',day,digest.asOf,slot);
   }
+  if(partial){
+    const total=tableRows.pop();
+    tableRows.push(...digest.missingStations.map(Station=>Object.fromEntries(columns.map(column=>[column,column==='Station'?Station:column===percentage?'Refresh pending':'—']))));
+    if(total)tableRows.push({...total,Station:'Available total'});
+  }
+  const note=partial?`\nAwaiting fresh data: ${digest.missingStations.join(', ')}. Totals cover available stations only.`:'';
   const values=tableRows.map(row=>columns.map(column=>row[column]));
   const pace=route.report==='dsr'?dsrPaceTarget(digest.asOf,route.dsr_pace||[]):null;
   if(formats.includes("photo")) outputs.push({key:"photo",body:{image_base64:route.report==='dsr'
     ? await reportPngBase64(await tableReportSvg(title,columns,values,percentage,value=>liveDsrStyle(value,pace)))
-    : await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*`}});
+    : await tablePhoto(title,columns,values,percentage,tone),mime:"image/png",caption:`*${title}*${note}`}});
   if(formats.includes("text")) {
-    const lines=[`*${title}*`,...tableRows.map(row=>`${row.Station}: ${row[percentage]}`)];
+    const lines=[`*${title}*${note}`,...tableRows.map(row=>`${row.Station}: ${row[percentage]}`)];
     splitText(lines).forEach((value,index)=>outputs.push({key:`text_${String(index+1).padStart(3,"0")}`,body:{text:value}}));
   }
   if(formats.includes("excel")) {
@@ -245,7 +252,7 @@ export async function livePerformanceOutputs(route:Route,digest:EodDigest,scopeL
     const buffer=workbookBuffer(sheets);
     outputs.push({key:"excel",body:{document_base64:buffer.toString("base64"),mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",filename:`${route.report==="dsr"?"Live_DSR_Inventory":"Live_C-Return"}_${scopeLabel.replace(/[^A-Za-z0-9_-]/g,"_")}_${day}.xlsx`}});
   }
-  outputs.forEach(output=>{output.liveAsOf=digest.asOf;});
+  outputs.forEach(output=>{output.liveAsOf=digest.asOf;if(partial)output.key="partial_"+output.key;});
   const snapshotRows=tableRows.filter(row=>row.Station!=="Grand total").map(row=>[`${row.Station} · ${percentage}`,row[percentage]] as [string,string|number]);
   return {outputs,snapshot:{rows:snapshotRows,asOf:digest.asOf}};
 }
@@ -478,11 +485,13 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
           outputs=await eodOutputs(route,digest,region,day,recognitionNumbers,focusNumbers,staticNumbers);
           detail=`${region} · ${sources.length} source station(s) · Final DSR + DOT + C-Return`;
         } else if (["dsr","creturn"].includes(route.report)) {
-          const digest=await codRuntime.memo(`live:${route.report}:${day}:${sources.map(row=>row.station_code).sort().join(",")}`,()=>loadEodDigest(sources.map(row=>row.station_code),day,{maxAgeMinutes:5,requireCReturn:route.report==="creturn"}));
+          const allowPartial=Date.now()-Date.parse(`${day}T${slot}:00+05:30`)>=10*60000;
+          const digest=await codRuntime.memo(`live:${route.report}:${day}:${allowPartial}:${sources.map(row=>row.station_code).sort().join(",")}`,()=>loadEodDigest(sources.map(row=>row.station_code),day,{maxAgeMinutes:5,requireCReturn:route.report==="creturn",allowPartial}));
+          if(digest.missingStations.length)sourceFailures.push('Awaiting current data: '+digest.missingStations.join(', '));
           const pending=route.report==="dsr"
             ? digest.dsr.some(row=>Number.parseFloat(row["DSR %"])<100)
             : digest.creturn.some(row=>Number.parseFloat(row["Pickup %"])<100);
-          if(!route.pending_only||pending) {
+          if(!route.pending_only||pending||digest.missingStations.length) {
             const scopeLabel=route.scope_type==="region"
               ? (route.source_region_codes||[]).join(", ")
               : route.group.group_name || [...new Set(sources.map(row=>String(row.state||"").trim()).filter(Boolean))].join(", ") || sources.map(row=>row.station_code).join(", ");
@@ -493,7 +502,7 @@ export async function dispatchLastMile(settings: ReportBotSettings, deadline: nu
         } else if (route.report==="ageing" && (route.scope_type==="region" || sources.length>1)) {
           const digest=await loadAgeingDigest(sources.map(row=>row.station_code),day);
           const pending=digest.byStation.some(row=>row.total.count>0||row.total.amount>0);
-          if(!route.pending_only||pending) {
+          if(!route.pending_only||pending||digest.missingStations.length) {
             const scopeLabel=route.scope_type==="region"
               ? (route.source_region_codes||[]).join(", ")
               : route.group.group_name||sources.map(row=>row.station_code).join(", ");
