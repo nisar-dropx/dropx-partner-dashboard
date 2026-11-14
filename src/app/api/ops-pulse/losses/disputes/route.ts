@@ -66,6 +66,8 @@ async function fileInCloak(company: string, month: string, caseKey: string, vers
     reason: request!.reason,
     remarks: cloakRemarks(request!.remarks, request!.cctv_url),
     proof,
+    revision: details.extra?.current_sla_stage === "eDSP2" ? "2" : "1",
+    stage: details.extra?.current_sla_stage,
   });
   return filed.alreadyFiled
     ? "Already filed in Cloak — nothing was sent again."

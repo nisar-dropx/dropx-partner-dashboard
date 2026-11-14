@@ -244,8 +244,8 @@ export function requestSent(
 }
 /**
  * Why OpsPulse cannot file this request in Cloak itself ("" = it can).
- * Only the call we have seen Cloak accept is automated: a first-round dispute (eDSP1, revision 1).
- * Accepting a loss and answering Amazon in eDSP2 are still filed by hand.
+ * Cloak accepts the same partnerDispute action for the first dispute and the
+ * eDSP2 response (revision 1 and revision 2 respectively).
  */
 export function cloakFilingBlock(
   request: Pick<DisputeRequest, "decision" | "status" | "source_stage" | "reason" | "remarks"> | null,
@@ -255,8 +255,8 @@ export function cloakFilingBlock(
     return "Only a request sent to the Cloak desk can be filed.";
   if (request.decision !== "dispute")
     return "An accepted loss is filed in Cloak by hand.";
-  if (request.source_stage !== "eDSP1" || stage !== "eDSP1")
-    return "Only a first dispute (eDSP1) can be filed from OpsPulse. File this one in Cloak by hand.";
+  if (!(["eDSP1", "eDSP2"] as const).includes(request.source_stage as "eDSP1" | "eDSP2") || !(["eDSP1", "eDSP2"] as const).includes(stage as "eDSP1" | "eDSP2"))
+    return "This Cloak stage cannot be filed from OpsPulse.";
   if (!DISPUTE_REASONS.includes(request.reason))
     return "The dispute reason is not one Cloak offers. Return it to the station.";
   if (!request.remarks.trim()) return "The dispute has no remarks for Amazon.";
@@ -276,6 +276,7 @@ export function cloakDisputeBody(input: {
   value: string;
   country: string;
   now: number;
+  revision?: string;
 }) {
   return {
     action: "partnerDispute",
@@ -287,7 +288,7 @@ export function cloakDisputeBody(input: {
     case_with: input.caseWith,
     disputed_by: input.email,
     disputed_time: input.now,
-    revision: "1",
+    revision: input.revision ?? "1",
     value: input.value,
     country: input.country,
   };

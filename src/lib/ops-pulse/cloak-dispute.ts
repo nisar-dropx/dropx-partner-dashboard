@@ -9,9 +9,9 @@ const PDF = "application/pdf";
 
 type CloakDispute = {
   tid?: string;
-  revision?: string;
   dispute_selected?: string | null;
   dispute_proof?: string | null;
+  revision?: string | null;
 };
 type CloakCase = {
   tid?: string;
@@ -63,8 +63,12 @@ export async function fileDisputeInCloak(input: {
   reason: string;
   remarks: string;
   proof: Uint8Array | null;
+  revision?: string;
+  stage?: string;
 }): Promise<{ alreadyFiled: boolean; proofKey: string }> {
   const { tid } = input;
+  const revision = input.revision ?? "1";
+  const stage = input.stage ?? "eDSP1";
   if (!/^[A-Za-z0-9]{6,40}$/.test(tid))
     throw new CloakError("This case has no usable tracking ID for Cloak.", "STATE");
   const cookie = await cloakCookie();
@@ -79,7 +83,7 @@ export async function fileDisputeInCloak(input: {
     ),
   ]);
   const held = Array.isArray(disputes) ? disputes.find((d) => d?.tid === tid) : undefined;
-  if (held) {
+  if (held && revision === "1") {
     if (held.dispute_selected !== "YES")
       throw new CloakError("Cloak already holds this case as not disputed.", "STATE");
     return { alreadyFiled: true, proofKey: held.dispute_proof ?? "" };
@@ -88,8 +92,12 @@ export async function fileDisputeInCloak(input: {
   const row = rows[0];
   if (rows.length !== 1 || !row)
     throw new CloakError("Cloak does not list this case in the live month.", "STATE");
-  if (row.case_status !== "not_started" || row.current_sla_stage !== "eDSP1")
+  if (row.current_sla_stage !== stage)
+    throw new CloakError(`Cloak is no longer at ${stage} for this case.`, "STATE");
+  if (revision === "1" && (row.case_status !== "not_started" || held))
     throw new CloakError("Cloak is no longer waiting for a first dispute on this case.", "STATE");
+  if (revision === "2" && (!held || held.dispute_selected !== "YES"))
+    throw new CloakError("The first dispute is not recorded in Cloak; the response cannot be filed.", "STATE");
   if (!me.email || !me.permissions?.includes("write:own_data") || !row.value || !row.case_with)
     throw new CloakError("The Cloak login cannot file disputes right now.", "STATE");
 
@@ -104,7 +112,7 @@ export async function fileDisputeInCloak(input: {
       throw new CloakError("Cloak did not name its proof bucket.", "HTTP");
     const slot = await cloakPost<{ url?: string; key?: string }>(
       "/api/v1/presignedUpload",
-      { bucketName: bucket, fileName: `cloak-${tid}-1.pdf`, fileType: PDF },
+      { bucketName: bucket, fileName: `cloak-${tid}-${revision}.pdf`, fileType: PDF },
       cookie,
     );
     const target = slot.url ? new URL(slot.url) : null;
@@ -141,10 +149,11 @@ export async function fileDisputeInCloak(input: {
       value: row.value,
       country: row.country || COUNTRY,
       now: Date.now(),
+      revision,
     }),
     cookie,
   );
-  if (saved.updatedItem?.tid !== tid || saved.updatedItem.dispute_selected !== "YES")
+  if (saved.updatedItem?.tid !== tid || saved.updatedItem.dispute_selected !== "YES" || (saved.updatedItem.revision && saved.updatedItem.revision !== revision))
     throw new CloakError(
       "Cloak did not confirm the dispute. Open the case in Cloak before trying again.",
       "HTTP",

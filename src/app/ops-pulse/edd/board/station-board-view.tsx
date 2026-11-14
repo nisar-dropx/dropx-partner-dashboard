@@ -847,6 +847,28 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
     }
   }
 
+  async function downloadRawAgeingExcel() {
+    if (view !== "ageing") return;
+    setBusy("download");
+    try {
+      const codes = stations.map((row) => row.stationCode).join(",");
+      const response = await fetch(`/api/ops-pulse/edd/board/tids?${new URLSearchParams({ date: payload.businessDate, kind: "ageing", stations: codes })}`, { cache: "no-store" });
+      const body = await response.json().catch(() => ({})) as { rows?: Array<Record<string, unknown>>; error?: string };
+      if (!response.ok) throw new Error(String(body.error ?? "Unable to load raw ageing data."));
+      const headers = ["stationCode", "trackingId", "status", "currentState", "sourceBucket", "edd", "driverId", "driverName", "shipOption", "dotDispatched", "dotAtStation", "rtsValue", "lastUpdatedAt", "rtsReason", "rtsAgeDays"];
+      await downloadReportExcel({
+        title: "Raw Ageing",
+        scope: `${payload.businessDate} · ${regionLabel}`,
+        headers,
+        rows: (body.rows ?? []).map((row) => headers.map((header) => row[header] == null ? "" : String(row[header]))),
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Raw ageing Excel download failed. Retry.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function requestWhatsAppShare(target: WhatsAppTarget) {
     if (canFlashReportBot) {
       setWhatsAppTarget(target);
@@ -1165,6 +1187,9 @@ export function StationBoardView({ initial, stationNames = {}, clusters = [], in
           <button type="button" disabled={busy !== null || outputUnavailable} onClick={() => void onDownload()}>
             {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Excel
           </button>
+          {view === "ageing" ? <button type="button" disabled={busy !== null || outputUnavailable} onClick={() => void downloadRawAgeingExcel()}>
+            {busy === "download" ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Raw Excel
+          </button> : null}
           <button
             type="button"
             disabled={busy !== null || outputUnavailable}
