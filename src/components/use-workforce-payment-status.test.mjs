@@ -71,3 +71,26 @@ test("daily ranges and Helpers never use the Workforce monthly preview endpoint"
   }
   assert.equal(calls, 0);
 });
+
+test("progress counts only returned statuses across batches and stays incomplete on failure", async () => {
+  const rows = Array.from({ length: 51 }, (_, index) => ({ ...base, id: String(index), reviewSubjectId: "worker-" + index }));
+  let finish;
+  const h = harness(async (_url, options) => {
+    const requested = JSON.parse(options.body).rows;
+    if (requested.length === 1) return new Promise((resolve) => { finish = resolve; });
+    return { ok: true, json: async () => ({ rows: requested.map((row) => ({ ...preview, workforce_id: row.workforceId })) }) };
+  });
+  h.render(rows);
+  h.runEffects();
+  await flush();
+  const pending = h.render(rows);
+  assert.equal(pending.loading, true);
+  assert.equal(pending.loaded, 50);
+  assert.equal(pending.total, 51);
+  finish({ ok: false });
+  await flush();
+  const done = h.render(rows);
+  assert.equal(done.loading, false);
+  assert.equal(done.error, true);
+  assert.equal(done.loaded, 50);
+});

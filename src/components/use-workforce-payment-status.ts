@@ -11,8 +11,10 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
     source: WorkforcePayoutRow[];
     summaries: Map<string, WorkforcePayoutPaymentSummary>;
     loading: boolean;
+    loaded: number;
+    total: number;
     error: boolean;
-  }>({ source: sourceRows, summaries: new Map(), loading: false, error: false });
+  }>({ source: sourceRows, summaries: new Map(), loading: false, loaded: 0, total: 0, error: false });
 
   useEffect(() => {
     const missing = [...new Map(sourceRows.flatMap((row) => !row.paymentSummary && row.reviewSubjectId && row.locationId
@@ -23,10 +25,9 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
     if (audience !== "workforce" || !periodStart.endsWith("-01") || Number.isNaN(end.getTime()) || end.toISOString().slice(0, 10) !== periodEnd || !missing.length) return;
     const controller = new AbortController();
     let cancelled = false;
-    setState({ source: sourceRows, summaries: new Map(), loading: true, error: false });
+    setState({ source: sourceRows, summaries: new Map(), loading: true, loaded: 0, total: missing.length, error: false });
     void (async () => {
       const summaries = new Map<string, WorkforcePayoutPaymentSummary>();
-      let failed = false;
       await mapWithConcurrency(chunkedValues(missing, 50), 2, async (rows) => {
         if (cancelled) return;
         try {
@@ -38,10 +39,14 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
           if (!response.ok) throw new Error("Payment status unavailable");
           const result = await response.json();
           if (!Array.isArray(result.rows)) throw new Error("Payment status unavailable");
+          if (cancelled) return;
+          const requestedKeys = new Set(rows.map((row) => [row.workforceId.toLowerCase(), row.stationId.toLowerCase()].join("|")));
           for (const preview of result.rows) {
+            const key = [String(preview.workforce_id).toLowerCase(), String(preview.station_id).toLowerCase()].join("|");
+            if (!requestedKeys.has(key)) continue;
             const currentNetAmount = Number(preview.current_target_amount ?? 0);
             const paidAmount = Number(preview.paid_amount ?? 0);
-            summaries.set(`${String(preview.workforce_id).toLowerCase()}|${String(preview.station_id).toLowerCase()}`, {
+            summaries.set(key, {
               currentNetAmount, paidAmount,
               processingPaymentItemId: preview.processingPaymentItemId ?? null,
               processingInstructionAmount: preview.processingInstructionAmount ?? null,
@@ -56,9 +61,13 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
               eligibilityMessage: String(preview.eligibility_message ?? "").trim() || null
             });
           }
-        } catch { if (!cancelled) failed = true; }
+          const loaded = summaries.size;
+          setState((current) => ({ ...current, loaded }));
+        } catch {
+          // Leave missing statuses out of the loaded count and offer a retry below.
+        }
       });
-      if (!cancelled) setState({ source: sourceRows, summaries, loading: false, error: failed });
+      if (!cancelled) setState({ source: sourceRows, summaries, loading: false, loaded: summaries.size, total: missing.length, error: summaries.size < missing.length });
     })();
     return () => { cancelled = true; controller.abort(); };
   }, [sourceRows, audience, periodStart, periodEnd, attempt]);
@@ -70,5 +79,5 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
       ...row, paymentSummary: summary, publicationPaymentReady: summary.eligible === true
     }, audience) : row;
   }), [sourceRows, state.source, state.summaries, audience]);
-  return { rows, loading: state.source === sourceRows && state.loading, error: state.source === sourceRows && state.error, retry: () => setAttempt((n) => n + 1) };
+  return { rows, loaded: state.loaded, total: state.total, loading: state.source === sourceRows && state.loading, error: state.source === sourceRows && state.error, retry: () => setAttempt((n) => n + 1) };
 }
