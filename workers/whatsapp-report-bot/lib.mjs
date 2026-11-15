@@ -276,16 +276,15 @@ export function chatEntry(msg, { normalize, isBot }) {
   };
 }
 
-/** Recent messages per group, newest last, bounded; in memory only (never written to disk). */
+/** Recent messages per group, newest last, bounded; persisted to disk across restarts. */
 export class ChatLog {
-  constructor(perGroup = 300) {
+  constructor(perGroup = 500) {
     this.perGroup = perGroup;
     this.groups = new Map();
     this.names = new Map();
     this.startedAt = Math.floor(Date.now() / 1000);
   }
-  add(groupId, entry) {
-    if (!entry) return;
+  _upsert(groupId, entry) {
     const list = this.groups.get(groupId) ?? [];
     const existing = list.findIndex((item) => item.id === entry.id);
     if (existing >= 0) list[existing] = { ...list[existing], ...entry, bot: list[existing].bot || entry.bot };
@@ -293,6 +292,16 @@ export class ChatLog {
     list.sort((a, b) => a.ts - b.ts);
     while (list.length > this.perGroup) list.shift();
     this.groups.set(groupId, list);
+  }
+  add(groupId, entry) {
+    if (!entry) return;
+    this._upsert(groupId, entry);
+    if (entry.from && entry.name) this.names.set(entry.from, entry.name);
+  }
+  /** Load a persisted entry without triggering a re-persist (used on startup). */
+  addRaw(groupId, entry) {
+    if (!entry || typeof entry.id !== "string" || typeof entry.ts !== "number") return;
+    this._upsert(groupId, entry);
     if (entry.from && entry.name) this.names.set(entry.from, entry.name);
   }
   markBot(groupId, id) {
@@ -302,8 +311,13 @@ export class ChatLog {
   list(groupId, after = 0) {
     return (this.groups.get(groupId) ?? []).filter((entry) => entry.ts > after);
   }
+  /** Returns group ids that were removed (caller should delete their disk files). */
   forget(keepGroupIds) {
-    for (const id of [...this.groups.keys()]) if (!keepGroupIds.includes(id)) this.groups.delete(id);
+    const removed = [];
+    for (const id of [...this.groups.keys()]) {
+      if (!keepGroupIds.includes(id)) { this.groups.delete(id); removed.push(id); }
+    }
+    return removed;
   }
 }
 

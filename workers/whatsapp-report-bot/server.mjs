@@ -56,6 +56,7 @@ const PUBLIC_URL = (() => {
 const DATA_DIR = process.env.DATA_DIR || path.join(os.tmpdir(), "dropx-report-bot");
 const MEDIA_DIR = path.join(DATA_DIR, "media");
 const EVENTS_DIR = path.join(DATA_DIR, "events");
+const CHATS_DIR = path.join(DATA_DIR, "chats");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const SENT_FILE = path.join(DATA_DIR, "sent-refs.json");
 const MEDIA_TTL_HOURS = Math.max(Number(process.env.MEDIA_TTL_HOURS || 48), 1);
@@ -80,9 +81,24 @@ if (!/^https?:\/\//.test(PORTAL_URL)) {
 
 const queue = new EventQueue(EVENTS_DIR);
 const messageCache = new Lru(500); // recent group messages, for quoting replies
-// Live chat view for the portal: recent messages of enabled groups, memory only.
-const chatLog = new ChatLog(300);
+// Live chat view for the portal: recent messages per group, persisted across restarts.
+const chatLog = new ChatLog(500);
 const botMessageIds = new Lru(2000); // ids the bot itself sent, never forwarded back
+
+// Debounced chat persistence: a pending write per group, flushed within 2s of a change.
+// Files are stored as { groupId, messages } so they can be re-hydrated on restart.
+const chatPersistTimers = new Map();
+function chatFile(groupId) {
+  return path.join(CHATS_DIR, `${groupId.replace(/[^a-z0-9]/gi, "_")}.json`);
+}
+function scheduleChatPersist(groupId) {
+  if (chatPersistTimers.has(groupId)) return;
+  chatPersistTimers.set(groupId, setTimeout(async () => {
+    chatPersistTimers.delete(groupId);
+    const messages = chatLog.list(groupId);
+    await writeJsonAtomic(chatFile(groupId), { groupId, messages }).catch(() => {});
+  }, 2000));
+}
 let sentRefs = new Lru(1000); // client_ref -> result, so a retried /send never posts twice
 let config = normalizeConfig(null);
 
@@ -352,6 +368,7 @@ async function startSocket({ method, phone = null }) {
       const groupId = msg?.key?.remoteJid;
       if (groupId && config.groups.includes(groupId)) {
         chatLog.add(groupId, chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) }));
+        scheduleChatPersist(groupId);
       }
       try {
         await forwardMessage(msg);
@@ -439,6 +456,7 @@ async function sendToGroup(body) {
       quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
       mentions
     });
+    scheduleChatPersist(body.to);
   }
   sentRefs.set(body.client_ref, result);
   await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
@@ -541,7 +559,7 @@ async function handle(req, res) {
   }
   if (req.method === "POST" && url.pathname === "/config") {
     config = normalizeConfig(await readBody(req));
-    chatLog.forget(config.groups); // a group turned off in the portal stops being visible at once
+    for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
     await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     return json(res, 200, { ok: true, groups: config.groups.length });
   }
@@ -611,12 +629,26 @@ async function deliverLoop() {
   }
 }
 
+async function loadPersistedChats() {
+  const { readdir } = await import("node:fs/promises");
+  const files = await readdir(CHATS_DIR).catch(() => []);
+  let loaded = 0;
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    const data = await readJson(path.join(CHATS_DIR, file), null);
+    if (!data?.groupId || !Array.isArray(data.messages)) continue;
+    for (const entry of data.messages) chatLog.addRaw(data.groupId, entry);
+    loaded += 1;
+  }
+  if (loaded) logger.info({ loaded }, "restored chat history from disk");
+}
+
 async function configLoop() {
   try {
     const response = await portalFetch("/api/report-bot/worker/config");
     if (response.ok) {
       config = normalizeConfig(await response.json());
-      chatLog.forget(config.groups);
+      for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
       await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     } else {
       logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed");
@@ -640,8 +672,10 @@ async function resumeSavedSession(attempt = 0) {
 
 async function main() {
   await mkdir(MEDIA_DIR, { recursive: true });
+  await mkdir(CHATS_DIR, { recursive: true });
   await queue.init();
   config = normalizeConfig(await readJson(CONFIG_FILE, null));
+  await loadPersistedChats();
   sentRefs = new Lru(1000);
   for (const [key, value] of await readJson(SENT_FILE, [])) sentRefs.set(key, value);
   const server = http.createServer((req, res) => {

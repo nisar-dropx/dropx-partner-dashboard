@@ -29,8 +29,21 @@ test("chat log is bounded, ordered, de-duplicated and forgets groups that were t
   log.add(group, { id: "a", ts: 5, text: "edited" });
   assert.equal(log.list(group).length, 3);
   assert.deepEqual(log.list(group, 4).map((entry) => entry.id), ["a", "d"]);
-  log.forget([]);
+  const removed = log.forget([]);
+  assert.deepEqual(removed, [group], "forget returns removed group ids");
   assert.deepEqual(log.list(group), []);
+});
+
+test("chat log addRaw restores persisted entries on restart", () => {
+  const log = new ChatLog(3);
+  const group = "120363000000000002@g.us";
+  // addRaw loads entries without triggering external side-effects
+  log.addRaw(group, { id: "x", ts: 10, from: "2@s.whatsapp.net", name: "Ana", from_me: false, bot: false, type: "text", text: "hi", quoted: null, mentions: [] });
+  log.addRaw(group, { id: "y", ts: 20, from: null, name: null, from_me: true, bot: true, type: "text", text: "ok", quoted: null, mentions: [] });
+  log.addRaw(group, null); // null entry must not throw
+  log.addRaw(group, { id: "bad" }); // missing ts must not throw
+  assert.deepEqual(log.list(group).map((e) => e.id), ["x", "y"]);
+  assert.equal(log.names.get("2@s.whatsapp.net"), "Ana");
 });
 
 test("mentions sent to WhatsApp are limited to real member ids", () => {
