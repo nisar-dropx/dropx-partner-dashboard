@@ -284,6 +284,12 @@ async function startSocket({ method, phone = null }) {
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
+    // Don't replay history on reconnect — avoids the "Over 2000 messages into
+    // the future" flood of Signal decrypt errors after a long sleep.
+    shouldSyncHistoryMessage: () => false,
+    // Allow Baileys to request re-keying from senders when group session keys
+    // are stale after a long offline period ("No session found" errors).
+    retryRequestDelayMs: 250,
     getMessage: async (key) => messageCache.get(key.id)?.message ?? undefined
   });
   session.sock = sock;
