@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import ts from "typescript";
 import { discoveryLocations } from "./lm-group-scope.ts";
 import { canSendToGroup } from "./logic.ts";
+import { reportBotWorkspace } from "./workspace.ts";
 
 test("discovery respects station boundaries and workspace ownership", () => {
   const locations = [
@@ -88,6 +89,7 @@ test("manual messages require group edit access and live sending; retries use on
       loadReportBotSettings: () => ({ mode: "live" }),
     },
     "@/lib/report-bot/logic": { canSendToGroup },
+    "@/lib/report-bot/workspace": { reportBotWorkspace },
     "@/lib/report-bot/worker-client": {
       WorkerError: Error,
       workerRequest: (settings, path, { body }) => {
@@ -119,7 +121,7 @@ test("manual messages require group edit access and live sending; retries use on
       new Request("https://ops.example/api/report-bot/chats", {
         method: "POST",
         headers: { origin },
-        body: JSON.stringify({ group: id, reference: id, text: "Status?" }),
+        body: JSON.stringify({ group: id, reference: id, text: "Status?", workspace: "last_mile" }),
       }),
     );
   assert.equal((await post("https://wrong.example")).status, 403);
