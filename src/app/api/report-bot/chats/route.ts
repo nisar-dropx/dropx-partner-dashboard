@@ -81,23 +81,21 @@ export async function GET(request: Request) {
   };
 
   // Build stored messages from inbound_events (all message types) + outbox.
-  function storedMessages(beforeTs?: number): ChatMessage[] {
+  function storedMessages(): ChatMessage[] {
     const rows: ChatMessage[] = [];
     for (const row of inbound.data ?? []) {
       const ts = Math.floor(new Date(row.message_at).getTime() / 1000);
-      if (beforeTs !== undefined && ts >= beforeTs) continue;
       const quotedSub = row.quoted_message_id ? reportByMessage.get(row.quoted_message_id) : null;
       rows.push(enrich({
         id: row.wa_message_id, from: row.sender_jid, name: row.sender_name, from_me: row.from_me, bot: false, ts,
         type: row.message_type, text: row.text_body ?? row.caption,
-        quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: quotedSub ? "image" : "text", text: quotedSub?.caption ?? row.caption ?? null } : null,
+        quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: quotedSub ? "image" : "text", text: quotedSub?.caption ?? null } : null,
         mentions: []
       }, row.submission_id ?? null));
     }
     for (const row of outbox.data ?? []) {
       if (!row.sent_wa_message_id) continue;
       const ts = Math.floor(new Date(row.sent_at as string).getTime() / 1000);
-      if (beforeTs !== undefined && ts >= beforeTs) continue;
       rows.push(enrich({ id: row.sent_wa_message_id, from: null, name: null, from_me: true, bot: true, ts, type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }));
     }
     return rows;
@@ -105,11 +103,12 @@ export async function GET(request: Request) {
 
   let messages: ChatMessage[];
   if (live) {
-    messages = live.messages.map((m) => enrich(m));
-    // Anything older than the worker's in-memory window comes from stored history.
-    const seen = new Set(messages.map((message) => message.id));
-    const older = storedMessages(live.since).filter((m) => !seen.has(m.id));
-    messages = [...older, ...messages].sort((a, b) => a.ts - b.ts);
+    // Live entries win on conflict (richer data: mentions, bot flag); stored fills every gap
+    // including messages since the last worker restart that never reached chatLog.
+    const liveById = new Map(live.messages.map((m) => [m.id, enrich(m)]));
+    const stored = storedMessages();
+    for (const m of stored) if (!liveById.has(m.id)) liveById.set(m.id, m);
+    messages = [...liveById.values()].sort((a, b) => a.ts - b.ts);
     Object.assign(names, live.names);
   } else {
     messages = storedMessages().sort((a, b) => a.ts - b.ts);
