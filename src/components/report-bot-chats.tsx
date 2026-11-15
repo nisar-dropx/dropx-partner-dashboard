@@ -16,6 +16,7 @@ type Message = {
 type ChatPayload = {
   group: { id: string; name: string; size: number | null; enabled: boolean };
   live: boolean; connected: boolean; since: number | null; notice: string | null;
+  last_worker_seen_at: string | null;
   names: Record<string, string>; messages: Message[];
 };
 
@@ -135,7 +136,7 @@ function Bubble({ message, names, onOpenImage, byId }: { message: Message; names
   );
 }
 
-function GroupComposer({group, onSent, workspace, connected}: {group: ChatGroup; onSent: () => void; workspace?: string; connected: boolean}) {
+function GroupComposer({group, onSent, workspace, connected, lastWorkerSeenAt}: {group: ChatGroup; onSent: () => void; workspace?: string; connected: boolean; lastWorkerSeenAt: string | null}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -168,8 +169,17 @@ function GroupComposer({group, onSent, workspace, connected}: {group: ChatGroup;
       setBusy(false);
     }
   }
+  const workerWarnMsg = (() => {
+    if (connected) return null;
+    if (!lastWorkerSeenAt) return "⚠ WhatsApp is not connected — messages may fail until the bot reconnects.";
+    const agoMs = Date.now() - new Date(lastWorkerSeenAt).getTime();
+    const agoMin = Math.round(agoMs / 60000);
+    if (agoMin > 60) return `⚠ The bot worker hasn't been seen for ${Math.round(agoMin / 60)}h — it may be sleeping (Render free tier spins down). Messages sent now will be queued and delivered once it wakes up.`;
+    if (agoMin > 15) return `⚠ WhatsApp is not connected (last seen ${agoMin}m ago) — messages may fail until the bot reconnects.`;
+    return "⚠ WhatsApp is not connected — messages may fail until the bot reconnects.";
+  })();
   return <footer className={s.chatFoot}>
-    {!connected && <div className={s.chatSendWarn}>⚠ WhatsApp is not connected — messages may fail until the bot reconnects.</div>}
+    {workerWarnMsg && <div className={s.chatSendWarn}>{workerWarnMsg}</div>}
     <form className={s.formActions} onSubmit={e => {e.preventDefault(); void send();}}>
       <input className={s.input} aria-label={"Message " + group.name} placeholder={"Message " + group.name}
         maxLength={4000} value={text} disabled={busy} onChange={e => {setText(e.target.value); reference.current = ""; setNotice(""); setIsError(false);}}/>
@@ -302,7 +312,7 @@ export function ReportBotChats({ groups, initialGroupId, manualPosts, workspace 
                 );
               })}
             </div>
-            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} connected={data?.connected ?? false} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
+            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} connected={data?.connected ?? false} lastWorkerSeenAt={data?.last_worker_seen_at ?? null} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
           </>
         ) : (
           <div className={s.chatEmpty}>

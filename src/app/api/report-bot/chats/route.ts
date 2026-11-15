@@ -53,8 +53,10 @@ export async function GET(request: Request) {
 
   let live: WorkerChats | null = null;
   let liveError: string | null = null;
+  let lastWorkerSeenAt: string | null = null;
   if (group.data.is_enabled) {
     const settings = await loadReportBotSettings(authorization.companyId!);
+    lastWorkerSeenAt = settings.last_worker_seen_at;
     if (settings.mode === "off") {
       // An Off bot listens to no group, so the worker has no live messages to show.
       liveError = "The bot is Off, so live messages aren't collected. Showing stored reports and replies.";
@@ -62,9 +64,15 @@ export async function GET(request: Request) {
       try {
         live = await workerRequest<WorkerChats>(settings, `/chats?group=${encodeURIComponent(group.data.wa_group_id)}`, { timeoutMs: 8000 });
       } catch (error) {
+        const seenAgo = settings.last_worker_seen_at
+          ? Math.round((Date.now() - new Date(settings.last_worker_seen_at).getTime()) / 60000)
+          : null;
+        const sleepHint = seenAgo !== null && seenAgo > 15
+          ? ` (last seen ${seenAgo < 60 ? `${seenAgo}m` : `${Math.round(seenAgo / 60)}h`} ago — the worker may be sleeping)`
+          : "";
         liveError = error instanceof WorkerError
           ? error.status === 404 ? "The worker hasn't picked up this group yet (it refreshes within a minute)." : error.message
-          : "The worker is unreachable.";
+          : `The worker is unreachable${sleepHint}. Showing stored messages.`;
       }
     }
   } else {
@@ -119,6 +127,7 @@ export async function GET(request: Request) {
     live: Boolean(live),
     connected: live?.connected ?? false,
     since: live?.since ?? null,
+    last_worker_seen_at: lastWorkerSeenAt,
     notice: liveError,
     names,
     messages
