@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { canSeeGroup, reportBotApiAuthorization } from "@/lib/report-bot/access";
 import { loadReportBotSettings, reportBotDb } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
+import { reportBotWorkspace } from "@/lib/report-bot/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -112,26 +113,28 @@ export async function GET(request: Request) {
   }, { headers: { "cache-control": "no-store" } });
 }
 
-/** Manual Last Mile group post. The client never supplies a WhatsApp address. */
+/** Manual group post. The client never supplies a WhatsApp address. */
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin) {
     return NextResponse.json({ error: "Invalid origin." }, { status: 403 });
   }
-  const auth = await reportBotApiAuthorization("edit", "last_mile");
-  if (!auth) return NextResponse.json({ error: "Access denied." }, { status: 403 });
   const input = await request.json().catch(() => null);
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const text = typeof input?.text === "string" ? input.text.trim() : "";
   if (!text || text.length > 4000 || !uuid.test(input?.group) || !uuid.test(input?.reference)) {
     return NextResponse.json({ error: "Choose a group and enter up to 4,000 characters." }, { status: 400 });
   }
+  let workspace;
+  try { workspace = reportBotWorkspace(input?.workspace ?? "dark_store"); } catch { workspace = "dark_store" as const; }
+  const auth = await reportBotApiAuthorization("edit", workspace);
+  if (!auth) return NextResponse.json({ error: "Access denied." }, { status: 403 });
   const { data: group, error } = await reportBotDb().from("report_bot_groups")
     .select("id,location_id,workspace,mode,group_name,wa_group_id").eq("id", input.group)
-    .eq("company_id", auth.companyId!).eq("workspace", "last_mile").eq("is_enabled", true).maybeSingle();
+    .eq("company_id", auth.companyId!).eq("workspace", workspace).eq("is_enabled", true).maybeSingle();
   if (error) return NextResponse.json({ error: "Could not verify the group. Retry." }, { status: 503 });
-  if (!group?.location_id || !canSeeGroup(auth, group)) return NextResponse.json({ error: "Choose a mapped Last Mile group in your scope." }, { status: 404 });
+  if (!group?.location_id || !canSeeGroup(auth, group)) return NextResponse.json({ error: "Choose a mapped group in your scope." }, { status: 404 });
   const settings = await loadReportBotSettings(auth.companyId!);
-  if (!canSendToGroup(settings.mode, group.mode, group.group_name, "last_mile")) {
+  if (!canSendToGroup(settings.mode, group.mode, group.group_name, workspace)) {
     return NextResponse.json({ error: "Set the bot to Live and the group to Review or Live before sending." }, { status: 409 });
   }
   try {

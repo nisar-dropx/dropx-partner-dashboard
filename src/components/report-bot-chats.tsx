@@ -135,7 +135,7 @@ function Bubble({ message, names, onOpenImage, byId }: { message: Message; names
   );
 }
 
-function GroupComposer({group, onSent}: {group: ChatGroup; onSent: () => void}) {
+function GroupComposer({group, onSent, workspace}: {group: ChatGroup; onSent: () => void; workspace?: string}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -150,7 +150,7 @@ function GroupComposer({group, onSent}: {group: ChatGroup; onSent: () => void}) 
     try {
       reference.current ||= crypto.randomUUID();
       const r = await fetch("/api/report-bot/chats", {method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({group:group.id, text, reference:reference.current})});
+        body:JSON.stringify({group:group.id, text, reference:reference.current, workspace})});
       const receipt = await r.json();
       if (!r.ok || !receipt.id) throw new Error(receipt.error || "WhatsApp did not confirm this message.");
       setText("");
@@ -173,7 +173,7 @@ function GroupComposer({group, onSent}: {group: ChatGroup; onSent: () => void}) 
   </footer>;
 }
 
-export function ReportBotChats({ groups, initialGroupId, manualPosts }: { manualPosts: boolean; groups: ChatGroup[]; initialGroupId: string | null }) {
+export function ReportBotChats({ groups, initialGroupId, manualPosts, workspace }: { manualPosts: boolean; groups: ChatGroup[]; initialGroupId: string | null; workspace?: string }) {
   const [activeId, setActiveId] = useState<string | null>(initialGroupId);
   const [loadedData, setData] = useState<ChatPayload | null>(null);
   const data = loadedData?.group.id === activeId ? loadedData : null;
@@ -296,7 +296,7 @@ export function ReportBotChats({ groups, initialGroupId, manualPosts }: { manual
                 );
               })}
             </div>
-            {manualPosts ? <GroupComposer key={active.id} group={active} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
+            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
           </>
         ) : (
           <div className={s.chatEmpty}>

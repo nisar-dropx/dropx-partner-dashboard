@@ -65,7 +65,7 @@ export default async function ReportBotChatsPage({ searchParams }: { searchParam
           </div>
         </header>
         <ReportBotNav workspace={workspace} active="chats" />
-        <ReportBotChats groups={chatGroups} initialGroupId={initial} manualPosts={workspace === "last_mile" && hasPermission(authorization, pageCode, "edit")} />
+        <ReportBotChats groups={chatGroups} initialGroupId={initial} workspace={workspace} manualPosts={hasPermission(authorization, pageCode, "edit")} />
       </div>
     </AppShell>
   );
