@@ -135,10 +135,11 @@ function Bubble({ message, names, onOpenImage, byId }: { message: Message; names
   );
 }
 
-function GroupComposer({group, onSent, workspace}: {group: ChatGroup; onSent: () => void; workspace?: string}) {
+function GroupComposer({group, onSent, workspace, connected}: {group: ChatGroup; onSent: () => void; workspace?: string; connected: boolean}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [isError, setIsError] = useState(false);
   const pending = useRef(false);
   const reference = useRef("");
   if (!group.canSend) return <footer className={s.chatFoot}>In Groups, map this group to a station and choose Review or Live to send.</footer>;
@@ -147,6 +148,7 @@ function GroupComposer({group, onSent, workspace}: {group: ChatGroup; onSent: ()
     pending.current = true;
     setBusy(true);
     setNotice("");
+    setIsError(false);
     try {
       reference.current ||= crypto.randomUUID();
       const r = await fetch("/api/report-bot/chats", {method:"POST", headers:{"Content-Type":"application/json"},
@@ -155,9 +157,11 @@ function GroupComposer({group, onSent, workspace}: {group: ChatGroup; onSent: ()
       if (!r.ok || !receipt.id) throw new Error(receipt.error || "WhatsApp did not confirm this message.");
       setText("");
       reference.current = "";
-      setNotice("Sent to " + group.name);
+      setNotice("✓ Sent to " + group.name);
+      setIsError(false);
       onSent();
     } catch (e) {
+      setIsError(true);
       setNotice(e instanceof Error ? e.message : "Could not confirm the send.");
     } finally {
       pending.current = false;
@@ -165,11 +169,13 @@ function GroupComposer({group, onSent, workspace}: {group: ChatGroup; onSent: ()
     }
   }
   return <footer className={s.chatFoot}>
+    {!connected && <div className={s.chatSendWarn}>⚠ WhatsApp is not connected — messages may fail until the bot reconnects.</div>}
     <form className={s.formActions} onSubmit={e => {e.preventDefault(); void send();}}>
       <input className={s.input} aria-label={"Message " + group.name} placeholder={"Message " + group.name}
-        maxLength={4000} value={text} disabled={busy} onChange={e => {setText(e.target.value); reference.current = ""; setNotice("");}}/>
+        maxLength={4000} value={text} disabled={busy} onChange={e => {setText(e.target.value); reference.current = ""; setNotice(""); setIsError(false);}}/>
       <button className={s.button} disabled={busy || !text.trim()}>{busy ? "Sending…" : "Send"}</button>
-    </form><small role="status">{notice}</small>
+    </form>
+    {notice && <small role="status" style={isError ? {color:"var(--bad,#cf1f35)", fontWeight:600} : {color:"#087443"}}>{notice}</small>}
   </footer>;
 }
 
@@ -296,7 +302,7 @@ export function ReportBotChats({ groups, initialGroupId, manualPosts, workspace 
                 );
               })}
             </div>
-            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
+            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} connected={data?.connected ?? false} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
           </>
         ) : (
           <div className={s.chatEmpty}>
