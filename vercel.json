@@ -73,7 +73,7 @@
     },
     {
       "path": "/api/cron/report-bot",
-      "schedule": "* 0-17,23 * * *"
+      "schedule": "* 0-19,23 * * *"
     },
     {
       "path": "/api/cron/google-workspace",
