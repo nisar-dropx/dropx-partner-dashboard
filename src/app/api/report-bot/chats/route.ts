@@ -134,7 +134,7 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: "Could not verify the group. Retry." }, { status: 503 });
   if (!group?.location_id || !canSeeGroup(auth, group)) return NextResponse.json({ error: "Choose a mapped group in your scope." }, { status: 404 });
   const settings = await loadReportBotSettings(auth.companyId!);
-  if (!canSendToGroup(settings.mode, group.mode, group.group_name, workspace)) {
+  if (!canSendToGroup(settings.mode, group.mode ?? "observe", group.group_name, workspace)) {
     return NextResponse.json({ error: "Set the bot to Live and the group to Review or Live before sending." }, { status: 409 });
   }
   try {
