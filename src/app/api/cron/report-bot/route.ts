@@ -34,6 +34,8 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Keep workers awake on every host — the cycle below runs only on OpsPulse.
+  await keepWorkersAwake();
   if (!isEddCronHost(new URL(request.url).hostname)) return NextResponse.json({ skipped: "Report Bot runs on OpsPulse only" });
   const deadline = Date.now() + 280_000;
   const db = reportBotDb();
@@ -42,7 +44,6 @@ export async function GET(request: Request) {
     const cleanup=await db.rpc('purge_cod_report_evidence');
     if(cleanup.error)console.error('[report-bot] COD retention failed',cleanup.error.message);
   }
-  await keepWorkersAwake();
   const companies = await db.from("report_bot_settings").select("*").neq("mode", "off");
   if (companies.error) return NextResponse.json({ error: companies.error.message }, { status: 500 });
   const results = [];
