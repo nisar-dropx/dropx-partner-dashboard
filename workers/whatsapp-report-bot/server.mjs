@@ -15,7 +15,8 @@ import {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   makeWASocket,
-  normalizeMessageContent
+  normalizeMessageContent,
+  proto
 } from "@whiskeysockets/baileys";
 import { clearRemoteSession, hasRemoteSession, useRemoteAuthState } from "./auth-state.mjs";
 import {
@@ -300,9 +301,12 @@ async function startSocket({ method, phone = null }) {
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
-    // Don't replay history on reconnect — avoids the "Over 2000 messages into
-    // the future" flood of Signal decrypt errors after a long sleep.
-    shouldSyncHistoryMessage: () => false,
+    // Allow RECENT history sync (last ~50 messages per group on reconnect, like WhatsApp Web).
+    // Block INITIAL_BOOTSTRAP and FULL which send thousands of messages and cause decrypt floods.
+    shouldSyncHistoryMessage: (msg) => {
+      const t = proto.HistorySync.HistorySyncType;
+      return msg.syncType === t.RECENT || msg.syncType === t.PUSH_NAME;
+    },
     // Allow Baileys to request re-keying from senders when group session keys
     // are stale after a long offline period ("No session found" errors).
     retryRequestDelayMs: 250,
@@ -375,6 +379,28 @@ async function startSocket({ method, phone = null }) {
       } catch (error) {
         logger.warn({ err: error, id: msg?.key?.id }, "could not forward message");
       }
+    }
+  });
+
+  // Load WhatsApp's own RECENT history on reconnect (last ~50 messages per group).
+  // Only RECENT/PUSH_NAME syncs are allowed by shouldSyncHistoryMessage above,
+  // so this never fires for the large INITIAL_BOOTSTRAP or FULL syncs.
+  sock.ev.on("messaging-history.set", ({ messages }) => {
+    if (!Array.isArray(messages)) return;
+    let loaded = 0;
+    for (const msg of messages) {
+      const groupId = msg?.key?.remoteJid;
+      if (!groupId || !GROUP_JID.test(groupId) || !config.groups.includes(groupId)) continue;
+      const entry = chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) });
+      if (!entry) continue;
+      chatLog.addRaw(groupId, entry); // addRaw: no persist trigger (bulk load)
+      loaded += 1;
+    }
+    if (loaded) {
+      // Persist all affected groups after bulk load
+      const groups = new Set(messages.map((m) => m?.key?.remoteJid).filter((id) => id && GROUP_JID.test(id) && config.groups.includes(id)));
+      for (const groupId of groups) scheduleChatPersist(groupId);
+      logger.info({ loaded }, "loaded whatsapp recent history into chat log");
     }
   });
 
