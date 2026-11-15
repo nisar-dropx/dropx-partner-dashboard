@@ -37,16 +37,19 @@ export async function GET(request: Request) {
   if (!group.data || !canSeeGroup(authorization, group.data)) return NextResponse.json({ error: "Group not found." }, { status: 404 });
 
   const since = new Date(Date.now() - HISTORY_HOURS * 3600 * 1000).toISOString();
-  const [submissions, outbox] = await Promise.all([
-    db.from("report_bot_submissions").select("id,wa_message_id,sender_jid,sender_name,from_me,caption,message_at,verdict,status,media_ref")
+  const [inbound, submissions, outbox] = await Promise.all([
+    db.from("report_bot_inbound_events").select("wa_message_id,sender_jid,sender_name,from_me,message_at,message_type,text_body,caption,quoted_message_id,quoted_participant,submission_id")
+      .eq("group_id", groupId).gte("message_at", since).order("message_at").limit(500),
+    db.from("report_bot_submissions").select("id,wa_message_id,verdict,status,media_ref,caption")
       .eq("group_id", groupId).gte("message_at", since).order("message_at").limit(500),
     db.from("report_bot_outbox").select("id,kind,body,sent_wa_message_id,sent_at,quoted_message_id,quoted_participant,mentions")
       .eq("group_id", groupId).eq("status", "sent").gte("sent_at", since).order("sent_at").limit(500)
   ]);
+  const reportById = new Map((submissions.data ?? []).map((row) => [row.id, row]));
   const reportByMessage = new Map((submissions.data ?? []).map((row) => [row.wa_message_id, row]));
   const kindBySent = new Map((outbox.data ?? []).filter((row) => row.sent_wa_message_id).map((row) => [row.sent_wa_message_id as string, row.kind]));
   const names: Record<string, string> = {};
-  for (const row of submissions.data ?? []) if (row.sender_jid && row.sender_name) names[row.sender_jid] = row.sender_name;
+  for (const row of inbound.data ?? []) if (row.sender_jid && row.sender_name) names[row.sender_jid] = row.sender_name;
 
   let live: WorkerChats | null = null;
   let liveError: string | null = null;
@@ -68,8 +71,8 @@ export async function GET(request: Request) {
     liveError = "This group is turned off, so only stored reports and replies are shown.";
   }
 
-  const enrich = (entry: WorkerChatEntry): ChatMessage => {
-    const report = reportByMessage.get(entry.id);
+  const enrich = (entry: WorkerChatEntry, submissionId?: string | null): ChatMessage => {
+    const report = submissionId ? reportById.get(submissionId) : reportByMessage.get(entry.id);
     return {
       ...entry,
       report: report ? { submission_id: report.id, verdict: report.verdict, status: report.status, has_image: Boolean(report.media_ref) } : null,
@@ -77,29 +80,39 @@ export async function GET(request: Request) {
     };
   };
 
-  let messages: ChatMessage[];
-  if (live) {
-    messages = live.messages.map(enrich);
-    // Anything older than the worker's memory still appears from the stored history.
-    const seen = new Set(messages.map((message) => message.id));
-    const older: ChatMessage[] = [];
-    for (const row of submissions.data ?? []) {
+  // Build stored messages from inbound_events (all message types) + outbox.
+  function storedMessages(beforeTs?: number): ChatMessage[] {
+    const rows: ChatMessage[] = [];
+    for (const row of inbound.data ?? []) {
       const ts = Math.floor(new Date(row.message_at).getTime() / 1000);
-      if (seen.has(row.wa_message_id) || ts >= live.since) continue;
-      older.push(enrich({ id: row.wa_message_id, from: row.sender_jid, name: row.sender_name, from_me: row.from_me, bot: false, ts, type: "image", text: row.caption, quoted: null, mentions: [] }));
+      if (beforeTs !== undefined && ts >= beforeTs) continue;
+      const quotedSub = row.quoted_message_id ? reportByMessage.get(row.quoted_message_id) : null;
+      rows.push(enrich({
+        id: row.wa_message_id, from: row.sender_jid, name: row.sender_name, from_me: row.from_me, bot: false, ts,
+        type: row.message_type, text: row.text_body ?? row.caption,
+        quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: quotedSub ? "image" : "text", text: quotedSub?.caption ?? row.caption ?? null } : null,
+        mentions: []
+      }, row.submission_id ?? null));
     }
     for (const row of outbox.data ?? []) {
+      if (!row.sent_wa_message_id) continue;
       const ts = Math.floor(new Date(row.sent_at as string).getTime() / 1000);
-      if (!row.sent_wa_message_id || seen.has(row.sent_wa_message_id) || ts >= live.since) continue;
-      older.push(enrich({ id: row.sent_wa_message_id, from: null, name: null, from_me: true, bot: true, ts, type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }));
+      if (beforeTs !== undefined && ts >= beforeTs) continue;
+      rows.push(enrich({ id: row.sent_wa_message_id, from: null, name: null, from_me: true, bot: true, ts, type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }));
     }
+    return rows;
+  }
+
+  let messages: ChatMessage[];
+  if (live) {
+    messages = live.messages.map((m) => enrich(m));
+    // Anything older than the worker's in-memory window comes from stored history.
+    const seen = new Set(messages.map((message) => message.id));
+    const older = storedMessages(live.since).filter((m) => !seen.has(m.id));
     messages = [...older, ...messages].sort((a, b) => a.ts - b.ts);
     Object.assign(names, live.names);
   } else {
-    messages = [
-      ...(submissions.data ?? []).map((row) => enrich({ id: row.wa_message_id, from: row.sender_jid, name: row.sender_name, from_me: row.from_me, bot: false, ts: Math.floor(new Date(row.message_at).getTime() / 1000), type: "image", text: row.caption, quoted: null, mentions: [] })),
-      ...(outbox.data ?? []).filter((row) => row.sent_wa_message_id).map((row) => enrich({ id: row.sent_wa_message_id as string, from: null, name: null, from_me: true, bot: true, ts: Math.floor(new Date(row.sent_at as string).getTime() / 1000), type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }))
-    ].sort((a, b) => a.ts - b.ts);
+    messages = storedMessages().sort((a, b) => a.ts - b.ts);
   }
 
   return NextResponse.json({
