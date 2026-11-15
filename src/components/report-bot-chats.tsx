@@ -12,6 +12,8 @@ type Message = {
   quoted: Quoted | null; mentions: string[];
   report: { submission_id: string; verdict: string | null; status: string; has_image: boolean } | null;
   kind: string | null;
+  inbound_id: string | null;
+  inbound_media_ref: string | null;
 };
 type ChatPayload = {
   group: { id: string; name: string; size: number | null; enabled: boolean };
@@ -98,7 +100,7 @@ function clock(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
-function Bubble({ message, names, onOpenImage, byId }: { message: Message; names: Record<string, string>; onOpenImage: (id: string, title: string) => void; byId: Map<string, Message> }) {
+function Bubble({ message, names, onOpenImage, byId }: { message: Message; names: Record<string, string>; onOpenImage: (src: string, title: string) => void; byId: Map<string, Message> }) {
   const outgoing = message.from_me;
   const sender = displayName(message.from, message.name, names);
   const media = mediaLabel(message.type, message.text);
@@ -122,9 +124,14 @@ function Bubble({ message, names, onOpenImage, byId }: { message: Message; names
         ) : null}
         {message.type === "image" ? (
           message.report?.has_image ? (
-            <button type="button" className={s.chatImage} onClick={() => onOpenImage(message.report!.submission_id, `Photo from ${sender}`)}>
+            <button type="button" className={s.chatImage} onClick={() => onOpenImage(`/api/report-bot/image/${message.report!.submission_id}`, `Photo from ${sender}`)}>
               {/* eslint-disable-next-line @next/next/no-img-element -- streamed from the worker */}
               <img src={`/api/report-bot/image/${message.report.submission_id}`} alt={`Photo from ${sender}`} loading="lazy" />
+            </button>
+          ) : message.inbound_id && message.inbound_media_ref ? (
+            <button type="button" className={s.chatImage} onClick={() => onOpenImage(`/api/report-bot/image/inbound/${message.inbound_id}`, `Photo from ${sender}`)}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- streamed from the worker */}
+              <img src={`/api/report-bot/image/inbound/${message.inbound_id}`} alt={`Photo from ${sender}`} loading="lazy" />
             </button>
           ) : <div className={s.chatMedia}><Camera size={16} aria-hidden />Photo</div>
         ) : media.label ? <div className={s.chatMedia}>{media.icon}{media.label}</div> : null}
@@ -307,7 +314,7 @@ export function ReportBotChats({ groups, initialGroupId, manualPosts, workspace 
                 return (
                   <Fragment key={message.id}>
                     {newDay ? <div className={s.chatDay}><span>{dayLabel(message.ts)}</span></div> : null}
-                    <Bubble message={message} names={data.names} byId={byId} onOpenImage={(id, title) => setImage({ src: `/api/report-bot/image/${id}`, title })} />
+                    <Bubble message={message} names={data.names} byId={byId} onOpenImage={(src, title) => setImage({ src, title })} />
                   </Fragment>
                 );
               })}

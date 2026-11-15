@@ -17,6 +17,8 @@ type WorkerChats = { messages: WorkerChatEntry[]; names: Record<string, string>;
 export type ChatMessage = WorkerChatEntry & {
   report: { submission_id: string; verdict: string | null; status: string; has_image: boolean } | null;
   kind: string | null;
+  inbound_id: string | null;
+  inbound_media_ref: string | null;
 };
 
 const HISTORY_HOURS = 72;
@@ -38,7 +40,7 @@ export async function GET(request: Request) {
 
   const since = new Date(Date.now() - HISTORY_HOURS * 3600 * 1000).toISOString();
   const [inbound, submissions, outbox] = await Promise.all([
-    db.from("report_bot_inbound_events").select("wa_message_id,sender_jid,sender_name,from_me,message_at,message_type,text_body,caption,quoted_message_id,quoted_participant,submission_id")
+    db.from("report_bot_inbound_events").select("id,wa_message_id,sender_jid,sender_name,from_me,message_at,message_type,text_body,caption,quoted_message_id,quoted_participant,submission_id,media_ref")
       .eq("group_id", groupId).gte("message_at", since).order("message_at").limit(500),
     db.from("report_bot_submissions").select("id,wa_message_id,verdict,status,media_ref,caption")
       .eq("group_id", groupId).gte("message_at", since).order("message_at").limit(500),
@@ -79,12 +81,14 @@ export async function GET(request: Request) {
     liveError = "This group is turned off, so only stored reports and replies are shown.";
   }
 
-  const enrich = (entry: WorkerChatEntry, submissionId?: string | null): ChatMessage => {
+  const enrich = (entry: WorkerChatEntry, submissionId?: string | null, inboundId?: string | null, inboundMediaRef?: string | null): ChatMessage => {
     const report = submissionId ? reportById.get(submissionId) : reportByMessage.get(entry.id);
     return {
       ...entry,
       report: report ? { submission_id: report.id, verdict: report.verdict, status: report.status, has_image: Boolean(report.media_ref) } : null,
-      kind: kindBySent.get(entry.id) ?? null
+      kind: kindBySent.get(entry.id) ?? null,
+      inbound_id: inboundId ?? null,
+      inbound_media_ref: inboundMediaRef ?? null
     };
   };
 
@@ -99,12 +103,12 @@ export async function GET(request: Request) {
         type: row.message_type, text: row.text_body ?? row.caption,
         quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: quotedSub ? "image" : "text", text: quotedSub?.caption ?? null } : null,
         mentions: []
-      }, row.submission_id ?? null));
+      }, row.submission_id ?? null, row.id, row.media_ref ?? null));
     }
     for (const row of outbox.data ?? []) {
       if (!row.sent_wa_message_id) continue;
       const ts = Math.floor(new Date(row.sent_at as string).getTime() / 1000);
-      rows.push(enrich({ id: row.sent_wa_message_id, from: null, name: null, from_me: true, bot: true, ts, type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }));
+      rows.push(enrich({ id: row.sent_wa_message_id, from: null, name: null, from_me: true, bot: true, ts, type: "text", text: row.body, quoted: row.quoted_message_id ? { id: row.quoted_message_id, from: row.quoted_participant, type: "image", text: reportByMessage.get(row.quoted_message_id)?.caption ?? null } : null, mentions: row.mentions ?? [] }, null, null, null));
     }
     return rows;
   }
