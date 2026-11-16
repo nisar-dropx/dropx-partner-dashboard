@@ -43,7 +43,10 @@ if (existsSync(envPath)) {
 async function readFirefoxCookie(host, name, profileHint) {
   try {
     const profilesDir = join(process.env.APPDATA || "", "Mozilla", "Firefox", "Profiles");
-    if (!existsSync(profilesDir)) return null;
+    if (!existsSync(profilesDir)) {
+      console.warn(`  [cookie-reader] Firefox profiles dir not found: ${profilesDir}`);
+      return null;
+    }
     const profiles = (await import("node:fs")).readdirSync(profilesDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => d.name);
@@ -51,9 +54,13 @@ async function readFirefoxCookie(host, name, profileHint) {
     const chosen = profileHint
       ? (profiles.find(p => p.includes(profileHint)) ?? profiles[0])
       : profiles[0];
-    if (!chosen) return null;
+    if (!chosen) { console.warn("  [cookie-reader] No Firefox profiles found"); return null; }
     const dbSrc = join(profilesDir, chosen, "cookies.sqlite");
-    if (!existsSync(dbSrc)) return null;
+    console.log(`  [cookie-reader] Trying profile: ${chosen}`);
+    if (!existsSync(dbSrc)) {
+      console.warn(`  [cookie-reader] cookies.sqlite not found in profile: ${chosen}`);
+      return null;
+    }
     // Firefox locks cookies.sqlite while running — copy to temp to avoid SQLITE_BUSY
     const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}.sqlite`);
     copyFileSync(dbSrc, dbTmp);
