@@ -65,8 +65,8 @@ async function readFirefoxCookie(host, name, profileHint) {
       .filter(d => d.isDirectory())
       .map(d => d.name);
 
-    // Pick profile: prefer one with cookies.sqlite, prefer most-recently-modified
-    // Priority: default-esr > default-release > default > profile hint > any with cookies
+    // Search ALL profiles for the cookie — the active session may be in any profile
+    const { DatabaseSync } = await import("node:sqlite");
     const priority = ["default-esr", "default-release", "default"];
     const rank = (p) => {
       if (profileHint && p.includes(profileHint)) return 0;
@@ -75,44 +75,32 @@ async function readFirefoxCookie(host, name, profileHint) {
     };
     const sorted = [...profiles].sort((a, b) => rank(a) - rank(b));
 
-    let chosen = null;
-    for (const p of sorted) {
-      if (existsSync(join(profilesDir, p, "cookies.sqlite"))) { chosen = p; break; }
-    }
-    // fallback: any profile directory even without cookies.sqlite yet
-    if (!chosen) chosen = sorted[0];
-    if (!chosen) { console.warn("  [cookie-reader] No Firefox profiles found"); return null; }
-
-    const dbSrc = join(profilesDir, chosen, "cookies.sqlite");
-    console.log(`  [cookie-reader] Trying profile: ${chosen}`);
-    if (!existsSync(dbSrc)) {
-      console.warn(`  [cookie-reader] cookies.sqlite not found in profile: ${chosen}`);
-      return null;
-    }
-    // Firefox locks cookies.sqlite while running — copy to temp to avoid SQLITE_BUSY
-    const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}.sqlite`);
-    copyFileSync(dbSrc, dbTmp);
-    // Also copy WAL/SHM if present so the copy is consistent
-    for (const ext of ["-wal", "-shm"]) {
-      const src = dbSrc + ext;
-      if (existsSync(src)) copyFileSync(src, dbTmp + ext);
-    }
-    try {
-      const { DatabaseSync } = await import("node:sqlite");
-      // Open read-write on temp copy so we can checkpoint the WAL into the main db
-      const db = new DatabaseSync(dbTmp);
-      try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
-      const row = db.prepare(
-        "SELECT value FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
-      ).get(host, `.${host}`, name);
-      db.close();
-      return row?.value ?? null;
-    } finally {
-      try { unlinkSync(dbTmp); } catch {}
+    for (const profileName of sorted) {
+      const dbSrc = join(profilesDir, profileName, "cookies.sqlite");
+      if (!existsSync(dbSrc)) continue;
+      console.log(`  [cookie-reader] Trying profile: ${profileName}`);
+      const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}.sqlite`);
+      copyFileSync(dbSrc, dbTmp);
       for (const ext of ["-wal", "-shm"]) {
-        try { unlinkSync(dbTmp + ext); } catch {}
+        const s = dbSrc + ext;
+        if (existsSync(s)) copyFileSync(s, dbTmp + ext);
+      }
+      try {
+        const db = new DatabaseSync(dbTmp);
+        try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
+        const row = db.prepare(
+          "SELECT value FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
+        ).get(host, `.${host}`, name);
+        db.close();
+        if (row?.value) return row.value;
+      } catch (e) {
+        console.warn(`  [cookie-reader] profile ${profileName}: ${e.message}`);
+      } finally {
+        try { unlinkSync(dbTmp); } catch {}
+        for (const ext of ["-wal", "-shm"]) { try { unlinkSync(dbTmp + ext); } catch {} }
       }
     }
+    return null;
   } catch (e) {
     console.warn(`  [cookie-reader] ${e.message}`);
     return null;
