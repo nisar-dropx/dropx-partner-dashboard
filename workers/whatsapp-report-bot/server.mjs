@@ -375,12 +375,19 @@ async function startSocket({ method, phone = null }) {
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages }) => {
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
     for (const msg of messages ?? []) {
       const groupId = msg?.key?.remoteJid;
-      if (groupId && config.groups.includes(groupId)) {
-        chatLog.add(groupId, chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) }));
-        scheduleChatPersist(groupId);
+      if (groupId && GROUP_JID.test(groupId)) {
+        if (config.groups.includes(groupId)) {
+          const entry = chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) });
+          if (entry) {
+            chatLog.add(groupId, entry);
+            scheduleChatPersist(groupId);
+          }
+        } else {
+          logger.info({ groupId, type, configGroups: config.groups.length }, "group message not in config.groups — not shown in chat");
+        }
       }
       try {
         await forwardMessage(msg);
@@ -396,19 +403,23 @@ async function startSocket({ method, phone = null }) {
   sock.ev.on("messaging-history.set", ({ messages }) => {
     if (!Array.isArray(messages)) return;
     let loaded = 0;
+    let skippedGroup = 0;
+    const groupsInHistory = new Set();
     for (const msg of messages) {
       const groupId = msg?.key?.remoteJid;
-      if (!groupId || !GROUP_JID.test(groupId) || !config.groups.includes(groupId)) continue;
+      if (!groupId || !GROUP_JID.test(groupId)) continue;
+      groupsInHistory.add(groupId);
+      if (!config.groups.includes(groupId)) { skippedGroup++; continue; }
       const entry = chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) });
       if (!entry) continue;
       chatLog.addRaw(groupId, entry); // addRaw: no persist trigger (bulk load)
       loaded += 1;
     }
+    logger.info({ total: messages.length, loaded, skippedGroup, configGroups: config.groups.length, groupsInHistory: groupsInHistory.size }, "messaging-history.set processed");
     if (loaded) {
       // Persist all affected groups after bulk load
       const groups = new Set(messages.map((m) => m?.key?.remoteJid).filter((id) => id && GROUP_JID.test(id) && config.groups.includes(id)));
       for (const groupId of groups) scheduleChatPersist(groupId);
-      logger.info({ loaded }, "loaded whatsapp recent history into chat log");
     }
   });
 
