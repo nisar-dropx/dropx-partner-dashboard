@@ -55,7 +55,17 @@ const stations = splitList(process.env.AMAZON_STATIONS, "TCD4_SS,STORE_2,STORE_3
 const intervalMinutes = Number(process.env.AMAZON_CHECK_INTERVAL_MINUTES ?? "1");
 const whatsappUrl = String(process.env.WHATSAPP_WORKER_URL || "").replace(/\/$/, "");
 const whatsappToken = process.env.WHATSAPP_WORKER_TOKEN || "";
-const group = process.env.DARK_STORE_OPS_GROUP_JID || "";
+const fallbackGroup = process.env.DARK_STORE_OPS_GROUP_JID || "";
+// Per-station war room JIDs: "TCC3:jid1,TCD4:jid2,..."
+const stationGroupMap = Object.fromEntries(
+  String(process.env.AMAZON_STATION_GROUP_JIDS || "")
+    .split(",").map(s => s.trim()).filter(Boolean)
+    .map(s => { const [k, ...v] = s.split(":"); return [k.trim(), v.join(":").trim()]; })
+);
+function groupForStation(code) {
+  const bare = String(code || "").replace(/_SS$/i, "");
+  return stationGroupMap[bare] || fallbackGroup;
+}
 const geminiKey = process.env.GEMINI_API_KEY || "";
 const geminiModel = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
@@ -210,8 +220,9 @@ async function geminiCaption(alert) {
 }
 
 async function sendWhatsApp(alert, caption) {
-  if (!whatsappUrl || !whatsappToken || !group) {
-    console.log(`WhatsApp delivery skipped for ${alert.station} (set WHATSAPP_WORKER_URL, WHATSAPP_WORKER_TOKEN, DARK_STORE_OPS_GROUP_JID).`);
+  const dest = groupForStation(alert.station);
+  if (!whatsappUrl || !whatsappToken || !dest) {
+    console.log(`WhatsApp delivery skipped for ${alert.station} (set WHATSAPP_WORKER_URL, WHATSAPP_WORKER_TOKEN, AMAZON_STATION_GROUP_JIDS or DARK_STORE_OPS_GROUP_JID).`);
     return { skipped: true };
   }
   const response = await fetch(`${whatsappUrl}/send`, {
@@ -222,7 +233,7 @@ async function sendWhatsApp(alert, caption) {
     },
     body: JSON.stringify({
       client_ref: `site-summary-${alert.station}-${alertSignature(alert).slice(0, 16)}`,
-      to: group,
+      to: dest,
       image_base64: alert.image_base64,
       mime: alert.mime || "image/png",
       caption: String(caption || "").slice(0, 1024)
