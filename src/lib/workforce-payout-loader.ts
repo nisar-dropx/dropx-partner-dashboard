@@ -665,6 +665,7 @@ export async function loadWorkforcePayoutRows(
   }
   const aggregateAttendancePeriodKey = (period: { id?: string | null; workforce_id: string; station_id: string; attendance_basis: string; effective_from: string; effective_to: string }) =>
     String(period.id ?? `${period.workforce_id}|${period.station_id}|${period.attendance_basis}|${period.effective_from}|${period.effective_to}`);
+  const aggregateAttendanceSettlementByPeriod = new Map<string, string>();
   const aggregateAttendanceIssueByPeriod = new Map<string, string>();
   const aggregateAttendanceSourceByPeriod = new Map<string, string>();
   const aggregateAttendanceForDate = (workforceId: string, stationId: string, date: string, sourceKey?: string) => {
@@ -674,15 +675,17 @@ export async function loadWorkforcePayoutRows(
     const configuredSource = aggregateAttendanceSourceByPeriod.get(periodKey);
     if (sourceKey && configuredSource && configuredSource !== sourceKey) return null;
     const issue = aggregateAttendanceIssueByPeriod.get(periodKey) ?? null;
+    const settlementDate = aggregateAttendanceSettlementByPeriod.get(periodKey) ?? period.effective_to;
     return {
       period,
       issue,
+      settlementDate,
       input: {
         basis: period.attendance_basis,
         // The workbook value is a total for the inclusive range. Settle it once
-        // on the final day while zeroing biometric attendance pay on preceding
+        // on the final eligible day while zeroing biometric attendance pay on preceding
         // covered dates, so no quantity is invented or counted twice.
-        quantity: !issue && date === period.effective_to ? period.quantity : 0
+        quantity: !issue && date === settlementDate ? period.quantity : 0
       }
     } as const;
   };
@@ -953,8 +956,18 @@ export async function loadWorkforcePayoutRows(
     const markIssue = (message: string) => {
       if (!aggregateAttendanceIssueByPeriod.has(periodKey)) aggregateAttendanceIssueByPeriod.set(periodKey, message);
     };
-    if (dateRange(period.effective_from, period.effective_to).some(date => paidWorkerDay(period.workforce_id, period.station_id, date) || absentDay(period.workforce_id, date))) {
-      markIssue("This attendance range includes an excluded ad hoc / absent day. Replace the range with dated attendance to exclude that day correctly.");
+    const periodDates = dateRange(period.effective_from, period.effective_to);
+    const adHocDates = periodDates.filter((date) => paidWorkerDay(period.workforce_id, period.station_id, date));
+    if (period.attendance_basis === "days") {
+      if (period.quantity + adHocDates.length > periodDates.length) {
+        markIssue("Uploaded attendance plus paid ad hoc days exceeds the number of days in the attendance range.");
+      }
+      const settlementDate = periodDates.findLast((date) =>
+        !paidWorkerDay(period.workforce_id, period.station_id, date) && !absentDay(period.workforce_id, date));
+      if (settlementDate) aggregateAttendanceSettlementByPeriod.set(periodKey, settlementDate);
+      else if (period.quantity > 0) markIssue("There is no eligible day to apply this attendance total.");
+    } else if (adHocDates.length || periodDates.some((date) => absentDay(period.workforce_id, date))) {
+      markIssue("This hourly attendance range includes an excluded ad hoc or absent day. Use dated attendance.");
     }
     if (overlapsVisiblePeriod && (period.effective_from < fromDate || period.effective_to > toDate)) {
       markIssue("Aggregate attendance cannot be prorated in a partial payout view. Open the complete uploaded attendance range.");
@@ -1347,7 +1360,7 @@ export async function loadWorkforcePayoutRows(
           && !aggregateAttendance.issue
           ? "Bulk upload range"
           : hasImportedAttendance ? "Bulk upload" : attendanceCaptureLabel(captureSetting.capture_method),
-        attendanceRange: !dailyOnlyDeliveryCost && aggregateAttendance && date === aggregateAttendance.period.effective_to
+        attendanceRange: !dailyOnlyDeliveryCost && aggregateAttendance && date === aggregateAttendance.settlementDate
           ? {
             basis: aggregateAttendance.period.attendance_basis,
             quantity: aggregateAttendance.period.quantity,
@@ -1379,7 +1392,7 @@ export async function loadWorkforcePayoutRows(
             : captureSetting.capture_method,
         aggregateRange: aggregateAttendance?.period.attendance_basis === "days"
           && !aggregateAttendance.issue
-          && date === aggregateAttendance.period.effective_to
+          && date === aggregateAttendance.settlementDate
       };
     }));
     const paymentMethodBreakdown = summarizePaymentMethodAmounts([{ methodId: paymentMethodId, label: paymentMethodName, amount: baseAmount }]);
@@ -1692,8 +1705,8 @@ export async function loadWorkforcePayoutRows(
             : hasImportedDayAttendance ? "biometric" as const : captureSetting.capture_method,
           aggregateWorkDays: aggregateAttendance?.period.attendance_basis === "days"
             && !aggregateAttendance.issue
-            && date === aggregateAttendance.period.effective_to,
-          attendanceRange: aggregateAttendance && date === aggregateAttendance.period.effective_to
+            && date === aggregateAttendance.settlementDate,
+          attendanceRange: aggregateAttendance && date === aggregateAttendance.settlementDate
             ? {
               basis: aggregateAttendance.period.attendance_basis,
               quantity: aggregateAttendance.period.quantity,
