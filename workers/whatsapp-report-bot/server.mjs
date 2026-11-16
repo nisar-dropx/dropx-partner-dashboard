@@ -7,6 +7,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import pino from "pino";
+import { Boom } from "@hapi/boom";
 import {
   Browsers,
   BufferJSON,
@@ -200,7 +201,7 @@ async function wipeSession() {
   session.groups.clear();
 }
 
-function closeSocket() {
+function closeSocket(graceful = false) {
   if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
   session.reconnectTimer = null;
   const sock = session.sock;
@@ -208,7 +209,10 @@ function closeSocket() {
   if (sock) {
     sock.ev.removeAllListeners();
     try {
-      sock.end(undefined);
+      // A graceful close (shutdown/reconnect) tells WhatsApp the device is restarting.
+      // WhatsApp then sends RECENT history on the next connection so chat history restores.
+      // A non-graceful close (logout/wipe) passes undefined to avoid sending anything.
+      sock.end(graceful ? new Boom("Restart", { statusCode: DisconnectReason.restartRequired }) : undefined);
     } catch {
       // already closed
     }
@@ -284,7 +288,7 @@ function scheduleReconnect() {
 }
 
 async function startSocket({ method, phone = null }) {
-  closeSocket();
+  closeSocket(true);
   session.manualStop = false;
   session.pairingPhone = method === "code" ? phone : null;
   const { state: authState, saveCreds, registered } = await useRemoteAuthState(authCall);
@@ -688,19 +692,27 @@ async function loadPersistedChats() {
   if (loaded) logger.info({ loaded }, "restored chat history from disk");
 }
 
-async function configLoop() {
+/** One config fetch: updates config and returns true on success, false on failure. */
+async function fetchConfig() {
   try {
     const response = await portalFetch("/api/report-bot/worker/config");
     if (response.ok) {
       config = normalizeConfig(await response.json());
       for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
       await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
+      return true;
     } else {
       logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed");
+      return false;
     }
   } catch (error) {
     logger.warn({ err: error.message }, "config refresh failed");
+    return false;
   }
+}
+
+async function configLoop() {
+  await fetchConfig();
   setTimeout(configLoop, 60_000);
 }
 
@@ -734,8 +746,18 @@ async function main() {
   // Eagerly fetch config from the portal before starting the WhatsApp socket.
   // messaging-history.set fires within seconds of connection; if config.groups
   // is still empty at that point, all RECENT history messages are silently dropped.
-  // configLoop() runs first synchronously here, then every 60s afterwards.
-  await configLoop();
+  // Retry up to 3 times (with backoff) if the portal is temporarily unavailable on cold start.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await fetchConfig();
+    if (config.groups.length > 0 || config.mode === "off") break;
+    if (attempt < 2) {
+      const delay = backoffMs(attempt);
+      logger.warn({ attempt, delay }, "config.groups empty after fetch; retrying before starting socket");
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  // Start the 60s background refresh loop (single instance).
+  setTimeout(configLoop, 60_000);
   const prune = () => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin").catch(() => {});
   setInterval(prune, 3600 * 1000);
   prune();
@@ -755,7 +777,7 @@ async function main() {
 
   const shutdown = () => {
     session.manualStop = true;
-    closeSocket(); // keep the saved session; this is a restart, not an unlink
+    closeSocket(true); // graceful: tells WhatsApp the device is restarting so it sends RECENT history on next connect
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   };
