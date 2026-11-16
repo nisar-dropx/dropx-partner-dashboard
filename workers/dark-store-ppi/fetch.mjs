@@ -206,12 +206,59 @@ async function readCognitoIdTokenFromLocalStorage() {
   }
 }
 
+async function dumpCookiesForHost(exactHost) {
+  try {
+    const appDataCandidates = [
+      process.env.APPDATA,
+      process.env.APPDATA?.replace(/^C:/, "D:"),
+      `D:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+      `C:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+    ].filter(Boolean);
+    let profilesDir = null;
+    for (const base of appDataCandidates) {
+      const c = join(base, "Mozilla", "Firefox", "Profiles");
+      if (existsSync(c)) { profilesDir = c; break; }
+    }
+    if (!profilesDir) return;
+    const { readdirSync } = await import("node:fs");
+    const profiles = readdirSync(profilesDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+    const priority = ["default-esr", "default-release", "default"];
+    const rank = (p) => { for (let i = 0; i < priority.length; i++) if (p.includes(priority[i])) return i; return 99; };
+    const sorted = [...profiles].sort((a, b) => rank(a) - rank(b));
+    let dbSrc = null, chosenProfile = null;
+    for (const p of sorted) {
+      const c = join(profilesDir, p, "cookies.sqlite");
+      if (existsSync(c)) { dbSrc = c; chosenProfile = p; break; }
+    }
+    if (!dbSrc) return;
+    const dbTmp = join(tmpdir(), `ff-dump-${Date.now()}.sqlite`);
+    copyFileSync(dbSrc, dbTmp);
+    for (const ext of ["-wal", "-shm"]) { try { copyFileSync(dbSrc + ext, dbTmp + ext); } catch {} }
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(dbTmp, { readonly: true });
+      const rows = db.prepare(
+        "SELECT name, value FROM moz_cookies WHERE host = ? ORDER BY lastAccessed DESC"
+      ).all(exactHost);
+      db.close();
+      console.log(`  [cookie-dump] Profile: ${chosenProfile}, host: ${exactHost} — ${rows.length} cookies:`);
+      for (const r of rows) console.log(`    name=${r.name}  value=${String(r.value).substring(0, 60)}...`);
+    } finally {
+      try { unlinkSync(dbTmp); } catch {}
+      for (const ext of ["-wal", "-shm"]) { try { unlinkSync(dbTmp + ext); } catch {} }
+    }
+  } catch (e) { console.warn(`  [cookie-dump] ${e.message}`); }
+}
+
 async function autoFillCookies() {
-  // Whitetree Cognito idToken — read from Firefox localStorage (webappsstore.sqlite)
+  // Whitetree Cognito idToken — try localStorage first, fall back to cookie dump for diagnosis
   if (!process.env.WH_COGNITO_COOKIE) {
     const val = await readCognitoIdTokenFromLocalStorage();
     if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [ls-reader] WH_COGNITO_COOKIE loaded from Firefox localStorage"); }
-    else console.warn("  [ls-reader] WH_COGNITO_COOKIE not found — set it manually in .env");
+    else {
+      console.warn("  [ls-reader] WH_COGNITO_COOKIE not found in localStorage — dumping cookies for diagnosis:");
+      await dumpCookiesForHost("eu.store-management.f3.amazon.dev");
+    }
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
