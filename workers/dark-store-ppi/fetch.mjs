@@ -109,10 +109,12 @@ if (!SUPABASE_KEY) { console.error("SUPABASE_SERVICE_KEY not set"); process.exit
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const argDate    = args[args.indexOf("--date")   + 1];
-const argStore   = args[args.indexOf("--store")  + 1];
-const doInbound  = args.includes("--inbound");
-const dryRun     = args.includes("--dry-run");
+const _dateIdx  = args.indexOf("--date");
+const _storeIdx = args.indexOf("--store");
+const argDate   = _dateIdx  >= 0 ? args[_dateIdx  + 1] : undefined;
+const argStore  = _storeIdx >= 0 ? args[_storeIdx + 1] : undefined;
+const doInbound = args.includes("--inbound");
+const dryRun    = args.includes("--dry-run");
 
 // Business date defaults to today (IST = UTC+5:30)
 function todayIST() {
