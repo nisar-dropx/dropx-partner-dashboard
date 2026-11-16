@@ -272,35 +272,23 @@ function readJwtFromLogFile(logPath) {
 }
 
 async function autoFillCookies() {
-  // Whitetree — read ALL Cognito cookies and build a combined header for the SSO call
-  if (!process.env.WH_COGNITO_COOKIE_HEADER) {
+  // Whitetree — read idToken and accessToken directly from Firefox cookies.
+  // The inventory audit APIs use custom headers, NOT Authorization: Bearer.
+  if (!process.env.WH_ID_TOKEN || !process.env.WH_ACCESS_TOKEN) {
     const prefix = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l";
-    const cookieNames = [
-      `${prefix}.idToken`,
-      `${prefix}.accessToken`,
-      `${prefix}.refreshToken`,
-      `${prefix}.LastAuthUser`,
-    ];
-    const parts = [];
-    for (const name of cookieNames) {
-      const val = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", name);
-      if (val) parts.push(`${name}=${val}`);
-    }
-    if (parts.length > 0) {
-      process.env.WH_COGNITO_COOKIE_HEADER = parts.join("; ");
-      // Also set WH_COGNITO_COOKIE to the idToken for backwards compat
-      const idPart = parts.find(p => p.startsWith(`${prefix}.idToken=`));
-      if (idPart) process.env.WH_COGNITO_COOKIE = idPart.slice(idPart.indexOf("=") + 1);
-      console.log(`  [cookie-reader] Loaded ${parts.length} Cognito cookies from Firefox (Profile 1)`);
+    const idToken     = process.env.WH_ID_TOKEN     || await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", `${prefix}.idToken`);
+    const accessToken = process.env.WH_ACCESS_TOKEN || await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", `${prefix}.accessToken`);
+    if (idToken)     { process.env.WH_ID_TOKEN     = idToken;     }
+    if (accessToken) { process.env.WH_ACCESS_TOKEN = accessToken; }
+    if (idToken && accessToken) {
+      console.log("  [cookie-reader] Loaded Whitetree idToken + accessToken from Firefox");
+    } else if (idToken || accessToken) {
+      console.log("  [cookie-reader] Loaded partial Whitetree cookies from Firefox");
     }
   }
-  // Fallback: read JWT from log.txt
-  if (!process.env.WH_COGNITO_COOKIE_HEADER && !process.env.WH_COGNITO_COOKIE) {
-    const logCandidates = [join(__dir, "log.txt"), "C:\\ppi-worker\\log.txt"];
-    for (const p of logCandidates) {
-      const jwt = readJwtFromLogFile(p);
-      if (jwt) { process.env.WH_COGNITO_COOKIE = jwt; break; }
-    }
+  // Legacy fallback — WH_COGNITO_COOKIE in .env sets idToken
+  if (!process.env.WH_ID_TOKEN && process.env.WH_COGNITO_COOKIE) {
+    process.env.WH_ID_TOKEN = process.env.WH_COGNITO_COOKIE;
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
@@ -376,41 +364,20 @@ async function loadStores() {
 }
 
 // ── Whitetree auth ────────────────────────────────────────────────────────────
-let cachedToken = null;
-let cachedTokenExp = 0; // epoch seconds
-
-async function getIdToken(forceRefresh = false) {
-  const nowSec = Date.now() / 1000;
-  // Refresh if forced, not cached, or expiring within 5 minutes
-  if (!forceRefresh && cachedToken && cachedTokenExp > nowSec + 300) return cachedToken;
-
-  // SSO requires ALL Cognito cookies, not just idToken
-  const cookieHeader = process.env.WH_COGNITO_COOKIE_HEADER;
-  if (!cookieHeader && !process.env.WH_COGNITO_COOKIE) {
-    throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
-  }
-  const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-    headers: { "Cookie": cookieHeader || `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${process.env.WH_COGNITO_COOKIE}` }
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`SSO auth failed: ${r.status}${body ? " — " + body.slice(0, 120) : ""}`);
-  }
-  const token = (await r.text()).trim();
-  cachedToken = token;
-  // JWT exp is in payload (second segment)
-  try {
-    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
-    cachedTokenExp = payload.exp ?? (nowSec + 3600);
-  } catch {
-    cachedTokenExp = nowSec + 3600;
-  }
-  return cachedToken;
+function whitetreeHeaders() {
+  const idToken     = process.env.WH_ID_TOKEN;
+  const accessToken = process.env.WH_ACCESS_TOKEN;
+  if (!idToken) throw new Error("WH_ID_TOKEN not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
+  return {
+    "x-ihmwhitetree-id-token":       idToken,
+    "x-ihmwhitetree-cognito-auth":   accessToken || idToken,
+    "Content-Type": "application/json",
+    "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com",
+  };
 }
 
 // ── Inventory Audit download ─────────────────────────────────────────────────
 async function fetchInventoryAudit(store, fromMs, toMs) {
-  const token = await getIdToken(false);
   const body = {
     format: "STRUCTURED",
     fromTimeMs: fromMs,
@@ -427,13 +394,11 @@ async function fetchInventoryAudit(store, fromMs, toMs) {
       process: true, unit: true, referenceId: true, timestamp: true
     }
   };
-  const doFetch = async (tok) => fetch("https://wt.prod-zaz.ihminvaudit.ihm.a2z.com/get_inventory_audit_data", {
+  const r = await fetch("https://wt.prod-zaz.ihminvaudit.ihm.a2z.com/get_inventory_audit_data", {
     method: "POST",
-    headers: { "Authorization": `Bearer ${tok}`, "Content-Type": "application/json", "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com" },
+    headers: whitetreeHeaders(),
     body: JSON.stringify(body)
   });
-  let r = await doFetch(token);
-  if (r.status === 401) r = await doFetch(await getIdToken(true));
   if (!r.ok) throw new Error(`InventoryAudit ${store.station_code}: ${r.status} ${await r.text()}`);
   const data = await r.json();
   return data.inventoryAuditResults ?? [];
@@ -441,7 +406,6 @@ async function fetchInventoryAudit(store, fromMs, toMs) {
 
 // ── Associate Audit download ─────────────────────────────────────────────────
 async function fetchAssociateAudit(store, fromMs, toMs) {
-  const token = await getIdToken(false);
   // Subdomain: {store-id-lowercase-dash}.{region}.ihmlabortrackingnative.jihmcdo.com
   const subdomain = `${store.amazon_store_id.toLowerCase()}.${store.region_code}`;
   const body = {
@@ -455,13 +419,11 @@ async function fetchAssociateAudit(store, fromMs, toMs) {
     user: "",
     storeFamily: store.store_family
   };
-  const doFetch = async (tok) => fetch(`https://${subdomain}.ihmlabortrackingnative.jihmcdo.com/`, {
+  const r = await fetch(`https://${subdomain}.ihmlabortrackingnative.jihmcdo.com/`, {
     method: "POST",
-    headers: { "Authorization": `Bearer ${tok}`, "Content-Type": "application/json", "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com" },
+    headers: whitetreeHeaders(),
     body: JSON.stringify(body)
   });
-  let r = await doFetch(token);
-  if (r.status === 401) r = await doFetch(await getIdToken(true));
   if (!r.ok) throw new Error(`AssociateAudit ${store.station_code}: ${r.status} ${await r.text()}`);
   const data = await r.json();
   return (data.AssociateAuditData ?? []).map(row => {
