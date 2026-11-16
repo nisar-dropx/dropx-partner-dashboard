@@ -105,15 +105,11 @@ async function readFirefoxCookie(host, name, profileHint) {
         "SELECT value FROM moz_cookies WHERE host LIKE ? AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
       ).get(`%${host}%`, name);
       if (!row) {
-        // Debug: show what whitetree cookies exist
-        const all = db.prepare(
-          "SELECT name, host FROM moz_cookies WHERE host LIKE ? LIMIT 10"
-        ).all(`%${host.split(".").slice(-3).join(".")}%`);
-        if (all.length) {
-          console.warn(`  [cookie-reader] Cookie '${name}' not found. Available: ${all.map(r => r.name).join(", ")}`);
-        } else {
-          console.warn(`  [cookie-reader] No cookies for host '${host}' in this profile`);
-        }
+        // Debug: show ALL distinct hosts in the cookie DB
+        const hosts = db.prepare("SELECT DISTINCT host FROM moz_cookies LIMIT 30").all();
+        const hostList = hosts.map(r => r.host).join(", ");
+        console.warn(`  [cookie-reader] Cookie '${name}' not found for host '${host}'.`);
+        console.warn(`  [cookie-reader] All hosts in DB: ${hostList || "(empty)"}`);
       }
       db.close();
       return row?.value ?? null;
