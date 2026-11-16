@@ -393,9 +393,26 @@ async function getIdToken(forceRefresh = false) {
 
   const cookie = process.env.WH_COGNITO_COOKIE;
   if (!cookie) throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
-  const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-    headers: { "Cookie": `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cookie}` }
-  });
+  const COOKIE_NAME = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
+  // Try sending as plain JWT first, then as JSON-encoded array (how Firefox stores it)
+  const cookieVariants = [cookie];
+  if (!cookie.startsWith("[")) {
+    // Also try sending as JSON array (raw Firefox storage format)
+    const parts = cookie.split(".");
+    if (parts.length === 3) cookieVariants.push(JSON.stringify(parts));
+  }
+  let r;
+  for (const val of cookieVariants) {
+    r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
+      headers: { "Cookie": `${COOKIE_NAME}=${encodeURIComponent(val)}` }
+    });
+    if (r.ok) break;
+    // Try without URL-encoding too
+    r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
+      headers: { "Cookie": `${COOKIE_NAME}=${val}` }
+    });
+    if (r.ok) break;
+  }
   if (!r.ok) throw new Error(`SSO auth failed: ${r.status}`);
   const token = (await r.text()).trim();
   cachedToken = token;
