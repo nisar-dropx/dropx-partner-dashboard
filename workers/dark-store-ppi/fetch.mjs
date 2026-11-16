@@ -101,16 +101,10 @@ async function readFirefoxCookie(host, name, profileHint) {
       const { DatabaseSync } = await import("node:sqlite");
       const db = new DatabaseSync(dbTmp, { readonly: true });
       // List all cookie names for debug if cookie not found
+      // Try exact host match first, then LIKE (some cookies stored with leading dot)
       const row = db.prepare(
-        "SELECT value FROM moz_cookies WHERE host LIKE ? AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
-      ).get(`%${host}%`, name);
-      if (!row) {
-        // Debug: show ALL distinct hosts in the cookie DB
-        const hosts = db.prepare("SELECT DISTINCT host FROM moz_cookies LIMIT 30").all();
-        const hostList = hosts.map(r => r.host).join(", ");
-        console.warn(`  [cookie-reader] Cookie '${name}' not found for host '${host}'.`);
-        console.warn(`  [cookie-reader] All hosts in DB: ${hostList || "(empty)"}`);
-      }
+        "SELECT value FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
+      ).get(host, `.${host}`, name);
       db.close();
       return row?.value ?? null;
     } finally {
@@ -250,15 +244,31 @@ async function dumpCookiesForHost(exactHost) {
   } catch (e) { console.warn(`  [cookie-dump] ${e.message}`); }
 }
 
+async function readMonsCookies() {
+  // Read all __Host-mons-* cookies for eu.store-management.f3.amazon.dev
+  const names = ["__Host-mons-st", "__Host-mons-sid", "__Host-mons-ubid", "__Host-mons-sidp"];
+  const result = {};
+  for (const name of names) {
+    const val = await readFirefoxCookie("eu.store-management.f3.amazon.dev", name);
+    if (val) result[name] = val;
+  }
+  return result;
+}
+
 async function autoFillCookies() {
-  // Whitetree Cognito idToken — try localStorage first, fall back to cookie dump for diagnosis
+  // Whitetree auth — try localStorage idToken first, then fall back to mons-* session cookies
   if (!process.env.WH_COGNITO_COOKIE) {
     const val = await readCognitoIdTokenFromLocalStorage();
     if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [ls-reader] WH_COGNITO_COOKIE loaded from Firefox localStorage"); }
-    else {
-      console.warn("  [ls-reader] WH_COGNITO_COOKIE not found in localStorage — dumping cookies for diagnosis:");
-      await dumpCookiesForHost("eu.store-management.f3.amazon.dev");
-    }
+  }
+  // Always load mons-* cookies for eu.store-management.f3.amazon.dev (used as fallback auth)
+  if (!process.env.WH_MONS_ST) {
+    const mons = await readMonsCookies();
+    if (mons["__Host-mons-st"])   process.env.WH_MONS_ST   = mons["__Host-mons-st"];
+    if (mons["__Host-mons-sid"])  process.env.WH_MONS_SID  = mons["__Host-mons-sid"];
+    if (mons["__Host-mons-ubid"]) process.env.WH_MONS_UBID = mons["__Host-mons-ubid"];
+    if (mons["__Host-mons-sidp"]) process.env.WH_MONS_SIDP = mons["__Host-mons-sidp"];
+    if (mons["__Host-mons-st"]) console.log("  [cookie-reader] Loaded WH mons-* cookies from Firefox");
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
@@ -341,10 +351,30 @@ async function getIdToken(forceRefresh = false) {
   const nowSec = Date.now() / 1000;
   // Refresh if forced, not cached, or expiring within 5 minutes
   if (!forceRefresh && cachedToken && cachedTokenExp > nowSec + 300) return cachedToken;
-  const cookie = process.env.WH_COGNITO_COOKIE;
-  if (!cookie) throw new Error("WH_COGNITO_COOKIE not set");
+
+  // Build cookie header — prefer Cognito idToken, fall back to mons-* session cookies
+  let cookieHeader = "";
+  const cognitoCookie = process.env.WH_COGNITO_COOKIE;
+  const monsSt   = process.env.WH_MONS_ST;
+  const monsSid  = process.env.WH_MONS_SID;
+  const monsUbid = process.env.WH_MONS_UBID;
+  const monsSidp = process.env.WH_MONS_SIDP;
+
+  if (cognitoCookie) {
+    cookieHeader = `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cognitoCookie}`;
+  } else if (monsSt) {
+    const parts = [];
+    if (monsSt)   parts.push(`__Host-mons-st=${monsSt}`);
+    if (monsSid)  parts.push(`__Host-mons-sid=${monsSid}`);
+    if (monsUbid) parts.push(`__Host-mons-ubid=${monsUbid}`);
+    if (monsSidp) parts.push(`__Host-mons-sidp=${monsSidp}`);
+    cookieHeader = parts.join("; ");
+  } else {
+    throw new Error("No auth cookies available — set WH_COGNITO_COOKIE in .env or log in to eu.store-management.f3.amazon.dev in Firefox");
+  }
+
   const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-    headers: { "Cookie": `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cookie}` }
+    headers: { "Cookie": cookieHeader }
   });
   if (!r.ok) throw new Error(`SSO auth failed: ${r.status}`);
   const token = (await r.text()).trim();
