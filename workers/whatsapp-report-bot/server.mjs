@@ -113,6 +113,7 @@ const session = {
   manualStop: false,
   reconnectFailures: 0,
   reconnectTimer: null,
+  connectedAt: 0, // ms since epoch when state went "open"
   groups: new Map() // id -> { subject, size, announce }
 };
 
@@ -310,6 +311,11 @@ async function startSocket({ method, phone = null }) {
     // Allow Baileys to request re-keying from senders when group session keys
     // are stale after a long offline period ("No session found" errors).
     retryRequestDelayMs: 250,
+    // Give WhatsApp more time to respond on slow connections / after long sleep.
+    connectTimeoutMs: 60_000,
+    // No timeout for one-shot init queries (fetchProps etc.) — a slow WhatsApp
+    // response during reconnect should wait, not break the session silently.
+    defaultQueryTimeoutMs: undefined,
     getMessage: async (key) => messageCache.get(key.id)?.message ?? undefined
   });
   session.sock = sock;
@@ -342,6 +348,7 @@ async function startSocket({ method, phone = null }) {
     if (connection === "open") {
       session.reconnectFailures = 0;
       session.pairingPhone = null;
+      session.connectedAt = Date.now();
       setState("open");
       refreshGroups().catch((error) => logger.warn({ err: error }, "group refresh failed"));
       logger.info({ me: sock.user?.id }, "whatsapp connected");
@@ -717,6 +724,19 @@ async function main() {
   setInterval(prune, 3600 * 1000);
   prune();
   resumeSavedSession();
+
+  // Watchdog: if the socket went "open" but the underlying WebSocket is no longer
+  // connected (e.g. init queries timed out silently), force a reconnect after 5 min.
+  setInterval(() => {
+    if (session.manualStop || session.reconnectTimer) return;
+    if (session.state !== "open") return;
+    const ws = session.sock?.ws;
+    const wsOpen = ws && (ws.isOpen || ws.readyState === 1);
+    if (!wsOpen) {
+      logger.warn("watchdog: socket state is 'open' but WebSocket is not alive; reconnecting");
+      scheduleReconnect();
+    }
+  }, 5 * 60 * 1000);
 
   const shutdown = () => {
     session.manualStop = true;
