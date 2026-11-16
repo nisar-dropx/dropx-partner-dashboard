@@ -125,7 +125,9 @@ async function readFirefoxCookie(host, name, profileHint) {
   }
 }
 
-async function readFirefoxCookieDebug(exactHost) {
+// Read Cognito idToken from Firefox localStorage (webappsstore.sqlite)
+// The token is stored as a JSON array [header, payload, signature] — we join with '.'
+async function readCognitoIdTokenFromLocalStorage() {
   try {
     const appDataCandidates = [
       process.env.APPDATA,
@@ -138,26 +140,60 @@ async function readFirefoxCookieDebug(exactHost) {
       const c = join(base, "Mozilla", "Firefox", "Profiles");
       if (existsSync(c)) { profilesDir = c; break; }
     }
-    if (!profilesDir) return null;
+    if (!profilesDir) { console.warn("  [ls-reader] Firefox profiles dir not found"); return null; }
+
     const { readdirSync } = await import("node:fs");
     const profiles = readdirSync(profilesDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
-    const dbSrc = profiles.map(p => join(profilesDir, p, "cookies.sqlite")).find(p => existsSync(p));
-    if (!dbSrc) return null;
-    const dbTmp = join(tmpdir(), `ff-dbg-${Date.now()}.sqlite`);
+
+    // Priority: default-esr > default-release > default
+    const priority = ["default-esr", "default-release", "default"];
+    const rank = (p) => { for (let i = 0; i < priority.length; i++) if (p.includes(priority[i])) return i; return 99; };
+    const sorted = [...profiles].sort((a, b) => rank(a) - rank(b));
+
+    let dbSrc = null;
+    let chosenProfile = null;
+    for (const p of sorted) {
+      const candidate = join(profilesDir, p, "webappsstore.sqlite");
+      if (existsSync(candidate)) { dbSrc = candidate; chosenProfile = p; break; }
+    }
+    if (!dbSrc) { console.warn("  [ls-reader] webappsstore.sqlite not found in any profile"); return null; }
+    console.log(`  [ls-reader] Reading localStorage from profile: ${chosenProfile}`);
+
+    const dbTmp = join(tmpdir(), `ff-ls-${Date.now()}.sqlite`);
     copyFileSync(dbSrc, dbTmp);
     for (const ext of ["-wal", "-shm"]) { try { copyFileSync(dbSrc + ext, dbTmp + ext); } catch {} }
     try {
       const { DatabaseSync } = await import("node:sqlite");
       const db = new DatabaseSync(dbTmp, { readonly: true });
-      const rows = db.prepare("SELECT name, value FROM moz_cookies WHERE host = ? ORDER BY lastAccessed DESC").all(exactHost);
+      // webappsstore.sqlite schema: key, value, scope, secure, owner
+      // scope is like "moc.nozama.3f.tnemegam-erots.ue.:https:443" (reversed hostname)
+      const rows = db.prepare(
+        "SELECT key, value FROM webappsstore2 WHERE key LIKE '%idToken%' ORDER BY rowid DESC"
+      ).all();
       db.close();
-      console.log(`  [cookie-reader] Cookies for ${exactHost} (${rows.length} found):`);
-      for (const r of rows) console.log(`    ${r.name} = ${String(r.value).substring(0, 40)}...`);
-      // Return the idToken value if found
-      const idRow = rows.find(r => r.name.includes("idToken"));
-      if (idRow) {
-        console.log(`  [cookie-reader] Found idToken cookie: ${idRow.name}`);
-        return idRow.value;
+      if (rows.length === 0) {
+        console.warn("  [ls-reader] No idToken key found in localStorage");
+        // Show what keys exist for amazon domains
+        const db2 = new DatabaseSync(dbTmp, { readonly: true });
+        const scopes = db2.prepare("SELECT DISTINCT scope FROM webappsstore2 WHERE scope LIKE '%amazon%' LIMIT 20").all();
+        db2.close();
+        console.warn(`  [ls-reader] Amazon scopes: ${scopes.map(r => r.scope).join(", ")}`);
+        return null;
+      }
+      for (const r of rows) {
+        console.log(`  [ls-reader] Found key: ${r.key}`);
+        try {
+          const parts = JSON.parse(r.value);
+          if (Array.isArray(parts) && parts.length === 3) {
+            const jwt = parts.join(".");
+            console.log(`  [ls-reader] JWT assembled (${jwt.length} chars)`);
+            return jwt;
+          }
+          // If value is already a plain JWT string
+          if (typeof r.value === "string" && r.value.startsWith("eyJ")) return r.value;
+        } catch {
+          if (typeof r.value === "string" && r.value.startsWith("eyJ")) return r.value;
+        }
       }
       return null;
     } finally {
@@ -165,16 +201,17 @@ async function readFirefoxCookieDebug(exactHost) {
       for (const ext of ["-wal", "-shm"]) { try { unlinkSync(dbTmp + ext); } catch {} }
     }
   } catch (e) {
-    console.warn(`  [cookie-reader] debug error: ${e.message}`);
+    console.warn(`  [ls-reader] ${e.message}`);
     return null;
   }
 }
 
 async function autoFillCookies() {
-  // Whitetree Cognito idToken — dump ALL cookies for eu.store-management.f3.amazon.dev to find the right name
+  // Whitetree Cognito idToken — read from Firefox localStorage (webappsstore.sqlite)
   if (!process.env.WH_COGNITO_COOKIE) {
-    const val = await readFirefoxCookieDebug("eu.store-management.f3.amazon.dev");
-    if (val) process.env.WH_COGNITO_COOKIE = val;
+    const val = await readCognitoIdTokenFromLocalStorage();
+    if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [ls-reader] WH_COGNITO_COOKIE loaded from Firefox localStorage"); }
+    else console.warn("  [ls-reader] WH_COGNITO_COOKIE not found — set it manually in .env");
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
