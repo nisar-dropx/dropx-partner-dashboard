@@ -79,6 +79,7 @@ export async function GET(request: Request) {
   const today = todayIST();
 
   const pad = (n: number) => String(n).padStart(2, "0");
+  const windowLabel = `${pad(hour)}:00`;
 
   const db = reportBotDb();
 
