@@ -100,10 +100,21 @@ async function readFirefoxCookie(host, name, profileHint) {
     try {
       const { DatabaseSync } = await import("node:sqlite");
       const db = new DatabaseSync(dbTmp, { readonly: true });
-      // cookies.sqlite schema: moz_cookies(host, name, value, ...)
+      // List all cookie names for debug if cookie not found
       const row = db.prepare(
         "SELECT value FROM moz_cookies WHERE host LIKE ? AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
       ).get(`%${host}%`, name);
+      if (!row) {
+        // Debug: show what whitetree cookies exist
+        const all = db.prepare(
+          "SELECT name, host FROM moz_cookies WHERE host LIKE ? LIMIT 10"
+        ).all(`%${host.split(".").slice(-3).join(".")}%`);
+        if (all.length) {
+          console.warn(`  [cookie-reader] Cookie '${name}' not found. Available: ${all.map(r => r.name).join(", ")}`);
+        } else {
+          console.warn(`  [cookie-reader] No cookies for host '${host}' in this profile`);
+        }
+      }
       db.close();
       return row?.value ?? null;
     } finally {
