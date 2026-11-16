@@ -256,19 +256,20 @@ async function readMonsCookies() {
 }
 
 async function autoFillCookies() {
-  // Whitetree auth — try localStorage idToken first, then fall back to mons-* session cookies
+  // Whitetree Cognito idToken — stored as cookie on dashboard.prod.whitetree.ihm.a2z.com
   if (!process.env.WH_COGNITO_COOKIE) {
-    const val = await readCognitoIdTokenFromLocalStorage();
-    if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [ls-reader] WH_COGNITO_COOKIE loaded from Firefox localStorage"); }
-  }
-  // Always load mons-* cookies for eu.store-management.f3.amazon.dev (used as fallback auth)
-  if (!process.env.WH_MONS_ST) {
-    const mons = await readMonsCookies();
-    if (mons["__Host-mons-st"])   process.env.WH_MONS_ST   = mons["__Host-mons-st"];
-    if (mons["__Host-mons-sid"])  process.env.WH_MONS_SID  = mons["__Host-mons-sid"];
-    if (mons["__Host-mons-ubid"]) process.env.WH_MONS_UBID = mons["__Host-mons-ubid"];
-    if (mons["__Host-mons-sidp"]) process.env.WH_MONS_SIDP = mons["__Host-mons-sidp"];
-    if (mons["__Host-mons-st"]) console.log("  [cookie-reader] Loaded WH mons-* cookies from Firefox");
+    const cookieName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
+    const raw = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", cookieName);
+    if (raw) {
+      // Stored as JSON array [header, payload, signature] — join to form JWT
+      let jwt = raw;
+      try {
+        const parts = JSON.parse(raw);
+        if (Array.isArray(parts) && parts.length === 3) jwt = parts.join(".");
+      } catch {}
+      process.env.WH_COGNITO_COOKIE = jwt;
+      console.log("  [cookie-reader] WH_COGNITO_COOKIE loaded from Firefox (Whitetree dashboard cookies)");
+    }
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
@@ -352,29 +353,10 @@ async function getIdToken(forceRefresh = false) {
   // Refresh if forced, not cached, or expiring within 5 minutes
   if (!forceRefresh && cachedToken && cachedTokenExp > nowSec + 300) return cachedToken;
 
-  // Build cookie header — prefer Cognito idToken, fall back to mons-* session cookies
-  let cookieHeader = "";
-  const cognitoCookie = process.env.WH_COGNITO_COOKIE;
-  const monsSt   = process.env.WH_MONS_ST;
-  const monsSid  = process.env.WH_MONS_SID;
-  const monsUbid = process.env.WH_MONS_UBID;
-  const monsSidp = process.env.WH_MONS_SIDP;
-
-  if (cognitoCookie) {
-    cookieHeader = `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cognitoCookie}`;
-  } else if (monsSt) {
-    const parts = [];
-    if (monsSt)   parts.push(`__Host-mons-st=${monsSt}`);
-    if (monsSid)  parts.push(`__Host-mons-sid=${monsSid}`);
-    if (monsUbid) parts.push(`__Host-mons-ubid=${monsUbid}`);
-    if (monsSidp) parts.push(`__Host-mons-sidp=${monsSidp}`);
-    cookieHeader = parts.join("; ");
-  } else {
-    throw new Error("No auth cookies available — set WH_COGNITO_COOKIE in .env or log in to eu.store-management.f3.amazon.dev in Firefox");
-  }
-
+  const cookie = process.env.WH_COGNITO_COOKIE;
+  if (!cookie) throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
   const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-    headers: { "Cookie": cookieHeader }
+    headers: { "Cookie": `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cookie}` }
   });
   if (!r.ok) throw new Error(`SSO auth failed: ${r.status}`);
   const token = (await r.text()).trim();
