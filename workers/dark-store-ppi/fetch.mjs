@@ -21,9 +21,10 @@
  *   GC_MONS_ST            __Host-mons-st cookie value
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,70 @@ if (existsSync(envPath)) {
     if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
+
+// ── Auto-read cookies from Firefox profile (Windows) ─────────────────────────
+// Reads cookies.sqlite directly so WH_COGNITO_COOKIE never needs manual updates.
+// Falls back to .env value if Firefox is not found or cookie is missing.
+async function readFirefoxCookie(host, name, profileHint) {
+  try {
+    const profilesDir = join(process.env.APPDATA || "", "Mozilla", "Firefox", "Profiles");
+    if (!existsSync(profilesDir)) return null;
+    const profiles = (await import("node:fs")).readdirSync(profilesDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    // prefer profile matching hint (e.g. "profile-1", "default"), else first
+    const chosen = profileHint
+      ? (profiles.find(p => p.includes(profileHint)) ?? profiles[0])
+      : profiles[0];
+    if (!chosen) return null;
+    const dbSrc = join(profilesDir, chosen, "cookies.sqlite");
+    if (!existsSync(dbSrc)) return null;
+    // Firefox locks cookies.sqlite while running — copy to temp to avoid SQLITE_BUSY
+    const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}.sqlite`);
+    copyFileSync(dbSrc, dbTmp);
+    // Also copy WAL/SHM if present so the copy is consistent
+    for (const ext of ["-wal", "-shm"]) {
+      const src = dbSrc + ext;
+      if (existsSync(src)) copyFileSync(src, dbTmp + ext);
+    }
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(dbTmp, { readonly: true });
+      // cookies.sqlite schema: moz_cookies(host, name, value, ...)
+      const row = db.prepare(
+        "SELECT value FROM moz_cookies WHERE host LIKE ? AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
+      ).get(`%${host}%`, name);
+      db.close();
+      return row?.value ?? null;
+    } finally {
+      try { unlinkSync(dbTmp); } catch {}
+      for (const ext of ["-wal", "-shm"]) {
+        try { unlinkSync(dbTmp + ext); } catch {}
+      }
+    }
+  } catch (e) {
+    console.warn(`  [cookie-reader] ${e.message}`);
+    return null;
+  }
+}
+
+async function autoFillCookies() {
+  // Whitetree Cognito idToken
+  if (!process.env.WH_COGNITO_COOKIE) {
+    const val = await readFirefoxCookie("whitetree.ihm.a2z.com", "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken");
+    if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [cookie-reader] Loaded WH_COGNITO_COOKIE from Firefox"); }
+  }
+  // GroceryCentral cookies
+  if (!process.env.GC_MONS_SID) {
+    const sid  = await readFirefoxCookie("grocerycentral.amazon.dev", "__Host-mons-sid");
+    const ubid = await readFirefoxCookie("grocerycentral.amazon.dev", "__Host-mons-ubid");
+    const st   = await readFirefoxCookie("grocerycentral.amazon.dev", "__Host-mons-st");
+    if (sid)  { process.env.GC_MONS_SID  = sid;  console.log("  [cookie-reader] Loaded GC_MONS_SID from Firefox"); }
+    if (ubid) { process.env.GC_MONS_UBID = ubid; }
+    if (st)   { process.env.GC_MONS_ST   = st;   }
+  }
+}
+await autoFillCookies();
 
 const SUPABASE_URL  = (process.env.SUPABASE_URL  || "https://uimajyffojydenqsegjv.supabase.co").replace(/\/$/, "");
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
