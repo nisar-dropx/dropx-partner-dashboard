@@ -221,7 +221,7 @@ export function PaymentAllocationHistoryButton({
                       <p><b>{readableDate(entry.effectiveFrom)} – {readableDate(entry.effectiveTo)}</b>{entry.sourceLabel ? <> · {entry.sourceLabel}</> : null}</p>
                       <p>Both the DropX mapping and the payment method/rates for only this location-period will become unmapped. History remains available, and all other locations and periods remain unchanged.</p>
                       <p>For a published payout, unlock the associate and month in Workforce Payouts, then select that month here. Review and republish the payout after correcting the mapping.</p>
-                      <label>Limit removal to an unlocked payout month
+                      <label>Limit removal to one payout month
                         <input type="month" min={entry.effectiveFrom.slice(0, 7)} max={entry.effectiveTo ? entry.effectiveTo.slice(0, 7) : undefined} value={unlockedMonth} disabled={Boolean(clearingEntryId)} onChange={(event) => { setUnlockedMonth(event.target.value); setClearError(""); }} />
                       </label>
                       {unlockedMonth && removal.from <= removal.to ? <p>Dates to remove: <b>{readableDate(removal.from)} – {readableDate(removal.to)}</b></p> : null}

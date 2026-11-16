@@ -237,6 +237,7 @@ test("an open October unlock removes October coverage and preserves a locked Nov
              ('${company}', '${worker}', '2026-11-01', '2026-11-30', 'worksheet');
     `);
     await db.exec(await migration("20261112170618_workforce_mapping_removal_unlocked_month.sql"));
+    await db.exec(await migration("20261116060336_mapping_removal_unpublished_month.sql"));
     const removeOctober = () => db.query(`
       select public.workforce_clear_unlocked_mapping_month(
         '${company}', '${actor}', '${worker}', '${currentMapping}',
@@ -258,6 +259,16 @@ test("an open October unlock removes October coverage and preserves a locked Nov
       effective_from: "2026-11-01", effective_to: null, status: "active", payment_values: { DELIVERY: 18 }
     }]);
     assert.equal((await db.query("select count(*)::int as total from public.workforce_payout_publications")).rows[0].total, 2);
+
+    const december = (await db.query(`
+      select public.workforce_clear_unlocked_mapping_month(
+        '${company}', '${actor}', '${worker}', '${currentMapping}',
+        (select updated_at from public.field_executive_provider_mappings where id = '${currentMapping}'),
+        array['${registeredStation}'::uuid], 'Period reviewer', '2026-12-01'
+      ) as result
+    `)).rows[0].result;
+    assert.equal(december.effective_from, "2026-12-01");
+    assert.equal(december.effective_to, "2026-12-31");
 
     await db.exec(await migration("20261112190411_allow_bounded_active_mapping_month_removal.sql"));
     await db.exec(`

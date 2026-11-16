@@ -19,7 +19,7 @@ test("period clearing confirms the exact range and explains its bounded effect",
   assert.match(component, /Remove the \{locationLabel\} mapping for this period\?/);
   assert.match(component, /Both the DropX mapping and the payment method\/rates for only this location-period will become unmapped\./);
   assert.match(component, /History remains available, and all other locations and periods remain unchanged\./);
-  assert.match(component, /Limit removal to an unlocked payout month/);
+  assert.match(component, /Limit removal to one payout month/);
   assert.match(component, />Remove this period<|"Remove this period"/);
   assert.doesNotMatch(component, /(?:window\.)?confirm\s*\(/);
 });
