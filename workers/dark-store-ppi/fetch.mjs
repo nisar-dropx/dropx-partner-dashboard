@@ -421,7 +421,12 @@ async function fetchAssociateAudit(store, fromMs, toMs) {
   };
   const r = await fetch(`https://${subdomain}.ihmlabortrackingnative.jihmcdo.com/`, {
     method: "POST",
-    headers: whitetreeHeaders(),
+    headers: {
+      ...whitetreeHeaders(),
+      "x-midway-passthrough": "true",
+      "Content-Encoding": "amz-1.0",
+      "X-Amz-Target": "com.amazon.ihmlabortrackingservice.IhmLaborTrackingService.GetAssociateAuditData",
+    },
     body: JSON.stringify(body)
   });
   if (!r.ok) throw new Error(`AssociateAudit ${store.station_code}: ${r.status} ${await r.text()}`);
