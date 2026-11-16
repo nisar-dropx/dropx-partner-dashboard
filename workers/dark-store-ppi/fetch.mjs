@@ -272,22 +272,31 @@ function readJwtFromLogFile(logPath) {
 }
 
 async function autoFillCookies() {
-  // Whitetree Cognito idToken — stored as cookie on dashboard.prod.whitetree.ihm.a2z.com
-  if (!process.env.WH_COGNITO_COOKIE) {
-    const cookieName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
-    const raw = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", cookieName);
-    if (raw) {
-      // Store raw value as-is — getIdToken() tries multiple formats when calling SSO
-      process.env.WH_COGNITO_COOKIE = raw;
-      console.log("  [cookie-reader] WH_COGNITO_COOKIE loaded from Firefox (Whitetree dashboard cookies)");
+  // Whitetree — read ALL Cognito cookies and build a combined header for the SSO call
+  if (!process.env.WH_COGNITO_COOKIE_HEADER) {
+    const prefix = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l";
+    const cookieNames = [
+      `${prefix}.idToken`,
+      `${prefix}.accessToken`,
+      `${prefix}.refreshToken`,
+      `${prefix}.LastAuthUser`,
+    ];
+    const parts = [];
+    for (const name of cookieNames) {
+      const val = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", name);
+      if (val) parts.push(`${name}=${val}`);
+    }
+    if (parts.length > 0) {
+      process.env.WH_COGNITO_COOKIE_HEADER = parts.join("; ");
+      // Also set WH_COGNITO_COOKIE to the idToken for backwards compat
+      const idPart = parts.find(p => p.startsWith(`${prefix}.idToken=`));
+      if (idPart) process.env.WH_COGNITO_COOKIE = idPart.slice(idPart.indexOf("=") + 1);
+      console.log(`  [cookie-reader] Loaded ${parts.length} Cognito cookies from Firefox (Profile 1)`);
     }
   }
-  // Fallback: read JWT from log.txt written by the browser console snippet
-  if (!process.env.WH_COGNITO_COOKIE) {
-    const logCandidates = [
-      join(__dir, "log.txt"),
-      "C:\\ppi-worker\\log.txt",
-    ];
+  // Fallback: read JWT from log.txt
+  if (!process.env.WH_COGNITO_COOKIE_HEADER && !process.env.WH_COGNITO_COOKIE) {
+    const logCandidates = [join(__dir, "log.txt"), "C:\\ppi-worker\\log.txt"];
     for (const p of logCandidates) {
       const jwt = readJwtFromLogFile(p);
       if (jwt) { process.env.WH_COGNITO_COOKIE = jwt; break; }
@@ -375,27 +384,14 @@ async function getIdToken(forceRefresh = false) {
   // Refresh if forced, not cached, or expiring within 5 minutes
   if (!forceRefresh && cachedToken && cachedTokenExp > nowSec + 300) return cachedToken;
 
-  const cookie = process.env.WH_COGNITO_COOKIE;
-  if (!cookie) throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
-  const COOKIE_NAME = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
-  // The SSO endpoint reads the raw cookie value as stored by the browser.
-  // Firefox stores it as a JSON array string: ["header","payload","sig"]
-  // We store the joined JWT in WH_COGNITO_COOKIE, so we must re-encode as array for the SSO call.
-  // Try all formats: joined JWT plain, joined JWT URL-encoded, JSON array plain, JSON array URL-encoded.
-  const jwt = cookie.startsWith("eyJ") ? cookie : null;
-  const arr = jwt ? JSON.stringify(jwt.split(".")) : (cookie.startsWith("[") ? cookie : null);
-  const variants = [...new Set([
-    jwt, arr,
-    jwt ? encodeURIComponent(jwt) : null,
-    arr ? encodeURIComponent(arr) : null,
-  ].filter(Boolean))];
-  let r;
-  for (const val of variants) {
-    r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-      headers: { "Cookie": `${COOKIE_NAME}=${val}` }
-    });
-    if (r.ok) break;
+  // SSO requires ALL Cognito cookies, not just idToken
+  const cookieHeader = process.env.WH_COGNITO_COOKIE_HEADER;
+  if (!cookieHeader && !process.env.WH_COGNITO_COOKIE) {
+    throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
   }
+  const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
+    headers: { "Cookie": cookieHeader || `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${process.env.WH_COGNITO_COOKIE}` }
+  });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
     throw new Error(`SSO auth failed: ${r.status}${body ? " — " + body.slice(0, 120) : ""}`);
