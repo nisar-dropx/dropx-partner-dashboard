@@ -314,9 +314,9 @@ async function startSocket({ method, phone = null }) {
     retryRequestDelayMs: 250,
     // Give WhatsApp more time to respond on slow connections / after long sleep.
     connectTimeoutMs: 60_000,
-    // No timeout for one-shot init queries (fetchProps etc.) — a slow WhatsApp
-    // response during reconnect should wait, not break the session silently.
-    defaultQueryTimeoutMs: undefined,
+    // Allow 2 minutes for each init query (fetchProps etc.) on reconnect.
+    // The default is 60s, which is too short when Render wakes from sleep.
+    defaultQueryTimeoutMs: 120_000,
     getMessage: async (key) => messageCache.get(key.id)?.message ?? undefined
   });
   session.sock = sock;
