@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 type PayoutPeriodMode = "monthly" | "daily" | "range";
 
 type WorkforcePayoutPeriodFilterProps = {
+  title: string;
   audience?: "workforce" | "helpers";
   mode: PayoutPeriodMode;
   month: string;
@@ -14,7 +15,7 @@ type WorkforcePayoutPeriodFilterProps = {
   to: string;
 };
 
-export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: initialMode, month, day, from, to }: WorkforcePayoutPeriodFilterProps) {
+export function WorkforcePayoutPeriodFilter({ title, audience = "workforce", mode: initialMode, month, day, from, to }: WorkforcePayoutPeriodFilterProps) {
   const router=useRouter(),pathname=usePathname();
   const [pending,startTransition]=useTransition();
   const [mode, setMode] = useState<PayoutPeriodMode>(initialMode);
@@ -33,37 +34,46 @@ export function WorkforcePayoutPeriodFilter({ audience = "workforce", mode: init
       else router.push(target);
     });
   }
-  return <form className="payout-period-filter" method="get" onSubmit={applyPeriod} aria-busy={pending}>
-    <input name="audience" type="hidden" value={audience} />
-    <label>
-      View by
-      <select className="field" name="period" value={mode} onChange={(event) => setMode(event.target.value as PayoutPeriodMode)}>
-        <option value="monthly">Month</option>
-        <option value="daily">Single day</option>
-        <option value="range">Date range</option>
-      </select>
-    </label>
-    {mode === "monthly" ? <label>
-      Month
-      <input className="field" type="month" name="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
-    </label> : null}
-    {mode === "daily" ? <label>
-      Day
-      <input className="field" type="date" name="day" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} />
-    </label> : null}
-    {mode === "range" ? <>
-      <label>
-        From
-        <input className="field" type="date" name="from" value={selectedFrom} onChange={(event) => setSelectedFrom(event.target.value)} />
-      </label>
-      <label>
-        To
-        <input className="field" type="date" name="to" value={selectedTo} onChange={(event) => setSelectedTo(event.target.value)} />
-      </label>
-    </> : null}
-    {mode !== "monthly" ? <input type="hidden" name="month" value={selectedMonth} /> : null}
-    {mode !== "daily" ? <input type="hidden" name="day" value={selectedDay} /> : null}
-    {mode !== "range" ? <><input type="hidden" name="from" value={selectedFrom} /><input type="hidden" name="to" value={selectedTo} /></> : null}
-    <button className="button secondary" type="submit" disabled={pending}>{pending?'Loading payout…':'Apply period'}</button>
-  </form>;
+  return <>
+    <div className="panel-head payout-period-head">
+      <h2>{title}</h2>
+      <form className="payout-period-filter" method="get" onSubmit={applyPeriod} aria-busy={pending}>
+        <input name="audience" type="hidden" value={audience} />
+        <label>
+          View by
+          <select className="field" name="period" value={mode} onChange={(event) => setMode(event.target.value as PayoutPeriodMode)}>
+            <option value="monthly">Month</option>
+            <option value="daily">Single day</option>
+            <option value="range">Date range</option>
+          </select>
+        </label>
+        {mode === "monthly" ? <label>
+          Month
+          <input className="field" type="month" name="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
+        </label> : null}
+        {mode === "daily" ? <label>
+          Day
+          <input className="field" type="date" name="day" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} />
+        </label> : null}
+        {mode === "range" ? <>
+          <label>
+            From
+            <input className="field" type="date" name="from" value={selectedFrom} onChange={(event) => setSelectedFrom(event.target.value)} />
+          </label>
+          <label>
+            To
+            <input className="field" type="date" name="to" value={selectedTo} onChange={(event) => setSelectedTo(event.target.value)} />
+          </label>
+        </> : null}
+        {mode !== "monthly" ? <input type="hidden" name="month" value={selectedMonth} /> : null}
+        {mode !== "daily" ? <input type="hidden" name="day" value={selectedDay} /> : null}
+        {mode !== "range" ? <><input type="hidden" name="from" value={selectedFrom} /><input type="hidden" name="to" value={selectedTo} /></> : null}
+        <button className="button secondary" type="submit" disabled={pending}>{pending?'Loading payout…':'Apply period'}</button>
+      </form>
+    </div>
+    {pending ? <div className="payout-inline-message payout-payment-status-loading">
+      <span>Loading payout worksheet…</span>
+      <progress aria-label="Loading payout worksheet" />
+    </div> : null}
+  </>;
 }

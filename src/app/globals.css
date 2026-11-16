@@ -21849,6 +21849,9 @@ td strong,
   color: #005bd3;
   accent-color: #005bd3;
 }
+.payout-payment-status-loading progress:indeterminate {
+  appearance: auto;
+}
 .payout-payment-status-loading progress::-webkit-progress-bar {
   background: #dbe3ee;
 }

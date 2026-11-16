@@ -868,10 +868,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
               </div>
             </section> : null}
             <section className="panel">
-              <div className="panel-head payout-period-head">
-                <h2>{period.title}</h2>
-                <WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} />
-              </div>
+              <WorkforcePayoutPeriodFilter audience={audience} mode={period.mode} month={period.month} day={period.day} from={period.from} to={period.to} title={period.title} />
               {period.mode === "monthly" ? <div style={{ padding: "0 16px" }}><WorkforcePayoutChecks rows={rows} /></div> : null}
               <WorkforcePayoutTable key={`${audience}-${period.fromDate}-${period.toDate}`}
                 audience={audience}
