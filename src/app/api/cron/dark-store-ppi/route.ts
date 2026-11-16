@@ -158,10 +158,50 @@ export async function GET(request: Request) {
 
   const combinedText = storeLines.join("\n\n");
 
+  // Build PPI image
+  let imageBase64: string | undefined;
+  try {
+    const sharp = (await import("sharp")).default;
+    const rows = stationCodes.sort().map(code => {
+      const daily = dailyByStore.get(code) ?? [];
+      const totalOrders = daily.reduce((s, r) => s + r.order_count, 0);
+      const totalPptS = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
+      const avgPpt = totalOrders > 0 ? totalPptS / totalOrders : null;
+      const prevPpt = prevPptByStore.get(code) ?? null;
+      const diff = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
+      const trend = diff == null ? "" : diff > 0 ? `▲ ${diff}s` : diff < 0 ? `▼ ${Math.abs(diff)}s` : "—";
+      const trendColor = diff == null ? "#888" : diff > 0 ? "#22c55e" : diff < 0 ? "#ef4444" : "#888";
+      return { code, ppt: avgPpt, orders: totalOrders, trend, trendColor };
+    });
+    const W = 520, ROW_H = 52, HEADER_H = 72, FOOTER_H = 36;
+    const H = HEADER_H + rows.length * ROW_H + FOOTER_H;
+    const svgRows = rows.map((r, i) => {
+      const y = HEADER_H + i * ROW_H;
+      const bg = i % 2 === 0 ? "#1e293b" : "#0f172a";
+      const pptText = r.ppt != null ? fmtSeconds(r.ppt) : "No data";
+      return `<rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
+        <text x="28" y="${y + 33}" font-family="monospace" font-size="18" font-weight="bold" fill="#f8fafc">${r.code}</text>
+        <text x="${W / 2}" y="${y + 33}" font-family="monospace" font-size="18" fill="${r.ppt != null ? "#f8fafc" : "#64748b"}" text-anchor="middle">${pptText}</text>
+        <text x="${W - 28}" y="${y + 33}" font-family="monospace" font-size="16" fill="${r.trendColor}" text-anchor="end">${r.trend}</text>`;
+    }).join("\n");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <rect width="${W}" height="${H}" fill="#0f172a"/>
+      <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="#1d4ed8"/>
+      <text x="${W / 2}" y="30" font-family="monospace" font-size="16" fill="#bfdbfe" text-anchor="middle">DropX Dark Store PPI</text>
+      <text x="${W / 2}" y="56" font-family="monospace" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle">As of ${windowLabel} hrs · ${today}</text>
+      <text x="28" y="${HEADER_H + rows.length * ROW_H + 24}" font-family="monospace" font-size="13" fill="#475569">▲ Improved  ▼ Declined  vs previous 2h window</text>
+      ${svgRows}
+    </svg>`;
+    const buf = await sharp(Buffer.from(svg)).png().toBuffer();
+    imageBase64 = buf.toString("base64");
+  } catch { /* skip image if sharp unavailable */ }
+
   try {
     await workerRequest<{ id: string }>(settings, "/send", {
       method: "POST",
-      body: { to: TESTING_GROUP_ID, text: combinedText, client_ref: `ppi-all-${today}-${hour}` },
+      body: imageBase64
+        ? { to: TESTING_GROUP_ID, image_base64: imageBase64, mime: "image/png", caption: combinedText, client_ref: `ppi-all-${today}-${hour}` }
+        : { to: TESTING_GROUP_ID, text: combinedText, client_ref: `ppi-all-${today}-${hour}` },
       timeoutMs: 30000,
     });
     results.push({ store: "all", group: "Dark Store Testing", status: "sent" });
