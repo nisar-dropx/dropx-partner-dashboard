@@ -65,17 +65,6 @@ function buildCaption(
   ].join("\n");
 }
 
-/** Generate a PPI dashboard image as a base64 PNG using sharp + SVG */
-async function buildPpiImage(
-  stationCode: string,
-  windowLabel: string,
-  daily: DailyRow[],
-  hourly: HourlyRow[],
-  windowHour: number,
-  today: string
-): Promise<string> {
-  const sharp = (await import("sharp")).default;
-
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
