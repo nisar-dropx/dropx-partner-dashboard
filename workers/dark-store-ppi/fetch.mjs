@@ -125,17 +125,55 @@ async function readFirefoxCookie(host, name, profileHint) {
   }
 }
 
-async function autoFillCookies() {
-  // Whitetree Cognito idToken — stored under various hosts depending on the machine
-  if (!process.env.WH_COGNITO_COOKIE) {
-    const cognitoName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
-    // Try all known host variants
-    const hosts = ["whitetree.ihm.a2z.com", "store-management.f3.amazon.dev", "amazon.dev", "amazon.com"];
-    let val = null;
-    for (const h of hosts) {
-      val = await readFirefoxCookie(h, cognitoName);
-      if (val) { console.log(`  [cookie-reader] Loaded WH_COGNITO_COOKIE from Firefox (host: ${h})`); break; }
+async function readFirefoxCookieDebug(exactHost) {
+  try {
+    const appDataCandidates = [
+      process.env.APPDATA,
+      process.env.APPDATA?.replace(/^C:/, "D:"),
+      `D:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+      `C:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+    ].filter(Boolean);
+    let profilesDir = null;
+    for (const base of appDataCandidates) {
+      const c = join(base, "Mozilla", "Firefox", "Profiles");
+      if (existsSync(c)) { profilesDir = c; break; }
     }
+    if (!profilesDir) return null;
+    const { readdirSync } = await import("node:fs");
+    const profiles = readdirSync(profilesDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+    const dbSrc = profiles.map(p => join(profilesDir, p, "cookies.sqlite")).find(p => existsSync(p));
+    if (!dbSrc) return null;
+    const dbTmp = join(tmpdir(), `ff-dbg-${Date.now()}.sqlite`);
+    copyFileSync(dbSrc, dbTmp);
+    for (const ext of ["-wal", "-shm"]) { try { copyFileSync(dbSrc + ext, dbTmp + ext); } catch {} }
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(dbTmp, { readonly: true });
+      const rows = db.prepare("SELECT name, value FROM moz_cookies WHERE host = ? ORDER BY lastAccessed DESC").all(exactHost);
+      db.close();
+      console.log(`  [cookie-reader] Cookies for ${exactHost} (${rows.length} found):`);
+      for (const r of rows) console.log(`    ${r.name} = ${String(r.value).substring(0, 40)}...`);
+      // Return the idToken value if found
+      const idRow = rows.find(r => r.name.includes("idToken"));
+      if (idRow) {
+        console.log(`  [cookie-reader] Found idToken cookie: ${idRow.name}`);
+        return idRow.value;
+      }
+      return null;
+    } finally {
+      try { unlinkSync(dbTmp); } catch {}
+      for (const ext of ["-wal", "-shm"]) { try { unlinkSync(dbTmp + ext); } catch {} }
+    }
+  } catch (e) {
+    console.warn(`  [cookie-reader] debug error: ${e.message}`);
+    return null;
+  }
+}
+
+async function autoFillCookies() {
+  // Whitetree Cognito idToken — dump ALL cookies for eu.store-management.f3.amazon.dev to find the right name
+  if (!process.env.WH_COGNITO_COOKIE) {
+    const val = await readFirefoxCookieDebug("eu.store-management.f3.amazon.dev");
     if (val) process.env.WH_COGNITO_COOKIE = val;
   }
   // GroceryCentral cookies
