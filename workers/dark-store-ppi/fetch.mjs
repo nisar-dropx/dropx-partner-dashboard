@@ -255,13 +255,40 @@ async function readMonsCookies() {
   return result;
 }
 
+/** Read JWT from log.txt written by the browser console snippet.
+ *  Format (each part on its own line, prefixed with 0: 1: 2:):
+ *    CognitoIdentityServiceProvider.*.idToken:Array
+ *    0:"<header>"
+ *    1:"<payload>"
+ *    2:"<signature>"
+ */
+function readJwtFromLogFile(logPath) {
+  try {
+    if (!existsSync(logPath)) return null;
+    const text = readFileSync(logPath, "utf8");
+    // Find the last occurrence of the idToken array block
+    const blocks = [...text.matchAll(/CognitoIdentityServiceProvider\.[^:]+:Array\s+((?:[0-2]:"[^"\n]+"\n?)+)/g)];
+    if (!blocks.length) return null;
+    const lastBlock = blocks[blocks.length - 1][1];
+    const parts = [];
+    for (const m of lastBlock.matchAll(/[0-2]:"([^"]+)"/g)) parts.push(m[1]);
+    if (parts.length === 3) {
+      console.log(`  [log-reader] WH_COGNITO_COOKIE loaded from ${logPath}`);
+      return parts.join(".");
+    }
+    return null;
+  } catch (e) {
+    console.warn(`  [log-reader] ${e.message}`);
+    return null;
+  }
+}
+
 async function autoFillCookies() {
   // Whitetree Cognito idToken — stored as cookie on dashboard.prod.whitetree.ihm.a2z.com
   if (!process.env.WH_COGNITO_COOKIE) {
     const cookieName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
     const raw = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", cookieName);
     if (raw) {
-      // Stored as JSON array [header, payload, signature] — join to form JWT
       let jwt = raw;
       try {
         const parts = JSON.parse(raw);
@@ -269,6 +296,17 @@ async function autoFillCookies() {
       } catch {}
       process.env.WH_COGNITO_COOKIE = jwt;
       console.log("  [cookie-reader] WH_COGNITO_COOKIE loaded from Firefox (Whitetree dashboard cookies)");
+    }
+  }
+  // Fallback: read JWT from log.txt written by the browser console snippet
+  if (!process.env.WH_COGNITO_COOKIE) {
+    const logCandidates = [
+      join(__dir, "log.txt"),
+      "C:\\ppi-worker\\log.txt",
+    ];
+    for (const p of logCandidates) {
+      const jwt = readJwtFromLogFile(p);
+      if (jwt) { process.env.WH_COGNITO_COOKIE = jwt; break; }
     }
   }
   // GroceryCentral cookies
