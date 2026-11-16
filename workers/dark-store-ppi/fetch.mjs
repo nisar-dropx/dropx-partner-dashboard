@@ -126,10 +126,17 @@ async function readFirefoxCookie(host, name, profileHint) {
 }
 
 async function autoFillCookies() {
-  // Whitetree Cognito idToken
+  // Whitetree Cognito idToken — stored under various hosts depending on the machine
   if (!process.env.WH_COGNITO_COOKIE) {
-    const val = await readFirefoxCookie("whitetree.ihm.a2z.com", "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken");
-    if (val) { process.env.WH_COGNITO_COOKIE = val; console.log("  [cookie-reader] Loaded WH_COGNITO_COOKIE from Firefox"); }
+    const cognitoName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
+    // Try all known host variants
+    const hosts = ["whitetree.ihm.a2z.com", "store-management.f3.amazon.dev", "amazon.dev", "amazon.com"];
+    let val = null;
+    for (const h of hosts) {
+      val = await readFirefoxCookie(h, cognitoName);
+      if (val) { console.log(`  [cookie-reader] Loaded WH_COGNITO_COOKIE from Firefox (host: ${h})`); break; }
+    }
+    if (val) process.env.WH_COGNITO_COOKIE = val;
   }
   // GroceryCentral cookies
   if (!process.env.GC_MONS_SID) {
