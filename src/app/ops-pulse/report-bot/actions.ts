@@ -97,6 +97,12 @@ export async function saveBotSettings(form: FormData) {
     const model = requiredText(form, "ai_model", "AI model", 100);
     if (!/^[A-Za-z0-9._:-]+$/.test(model)) throw new Error("AI model may only contain letters, numbers, dot, dash, colon and underscore.");
     const effort = field(form, "ai_effort");
+    const rawFallbackProvider = field(form, "ai_fallback_provider");
+    const fallbackProvider = ["gemini", "anthropic", "openai"].includes(rawFallbackProvider) ? rawFallbackProvider as "gemini" | "anthropic" | "openai" : null;
+    const rawFallbackModel = String(form.get("ai_fallback_model") ?? "").trim();
+    const fallbackModel = rawFallbackModel && /^[A-Za-z0-9._:-]+$/.test(rawFallbackModel) ? rawFallbackModel : null;
+    if (fallbackProvider && !fallbackModel) throw new Error("Enter a fallback model name when a fallback provider is set.");
+    if (fallbackModel && !fallbackProvider) throw new Error("Choose a fallback provider when a fallback model is set.");
     if (!["low", "medium", "high"].includes(effort)) throw new Error("Choose an AI effort level.");
     const approval = field(form, "approval_mode");
     if (!["manual", "auto"].includes(approval)) throw new Error("Choose an approval mode.");
@@ -114,6 +120,8 @@ export async function saveBotSettings(form: FormData) {
       ai_provider: provider,
       ai_model: model,
       ai_effort: effort,
+      ai_fallback_provider: fallbackProvider,
+      ai_fallback_model: fallbackModel,
       approval_mode: approval,
       auto_send_min_confidence: threshold,
       reply_delay_min_seconds: delayMin,

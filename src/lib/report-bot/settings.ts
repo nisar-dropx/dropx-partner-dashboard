@@ -14,6 +14,8 @@ export type ReportBotSettings = {
   ai_provider: "gemini" | "anthropic" | "openai";
   ai_model: string;
   ai_effort: "low" | "medium" | "high";
+  ai_fallback_provider: "gemini" | "anthropic" | "openai" | null;
+  ai_fallback_model: string | null;
   approval_mode: "manual" | "auto";
   auto_send_min_confidence: number;
   reply_delay_min_seconds: number;

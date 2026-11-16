@@ -307,6 +307,23 @@ function SettingsForm({ workspace, settings, canEdit }: { workspace: ReportBotWo
                   <option value="high">Thorough</option>
                 </select>
               </Field>
+              <Field label="Fallback provider" hint="Used automatically when the primary hits its rate limit.">
+                <select className={s.select} name="ai_fallback_provider" defaultValue={settings.ai_fallback_provider ?? ""}>
+                  <option value="">None</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="anthropic">Anthropic Claude</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </Field>
+              <Field label="Fallback model" hint="Leave blank if no fallback is set.">
+                <input className={s.input} name="ai_fallback_model" defaultValue={settings.ai_fallback_model ?? ""} maxLength={100} list="report-bot-fallback-models" placeholder="e.g. gemini-2.5-flash" />
+              </Field>
+              <datalist id="report-bot-fallback-models">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash · free · lower usage</option>
+                <option value="gemini-4-hydrogen">Gemini 4 Hydrogen · free · lower usage</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite · free · high daily limit</option>
+                <option value="claude-haiku-5-5">Claude Haiku · paid · fast</option>
+              </datalist>
             </div>
             {settings.ai_provider === "gemini" ? (
               <p className={s.note} style={{ marginTop: 14 }}><Info size={16} aria-hidden /><span>Get a free key at aistudio.google.com. The free tier has daily limits (photos over the limit are retried later), and Google may use free-tier photos to improve its products; choose a paid provider if report photos must stay private.</span></p>

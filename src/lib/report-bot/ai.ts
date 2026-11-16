@@ -246,15 +246,36 @@ export async function analyseReportImage(settings: ReportBotSettings, input: Ana
   return analyseOperationalReport(settings, input);
 }
 
+async function analyseWith(provider: ReportBotSettings["ai_provider"], settings: ReportBotSettings, input: AnalysisInput): Promise<unknown> {
+  if (provider === "gemini") return analyseWithGemini(settings, input);
+  if (provider === "openai") return analyseWithOpenAi(settings, input);
+  return analyseWithAnthropic(settings, input);
+}
+
 /** Text-only, image, or evidence-bundle classification. Structured JSON only. */
 export async function analyseOperationalReport(settings: ReportBotSettings, input: AnalysisInput): Promise<Analysis> {
   if (!input.candidates.length) throw new AiError("No report type is available for this group.", false);
   if (!input.image?.length && !String(input.text ?? input.caption ?? "").trim() && !(input.bundleTexts ?? []).some((part) => String(part ?? "").trim())) {
     throw new AiError("Nothing to analyse.", false);
   }
-  const raw = settings.ai_provider === "gemini"
-    ? await analyseWithGemini(settings, input)
-    : settings.ai_provider === "openai" ? await analyseWithOpenAi(settings, input) : await analyseWithAnthropic(settings, input);
+  let raw: unknown;
+  try {
+    raw = await analyseWith(settings.ai_provider, settings, input);
+  } catch (primaryError) {
+    // On retryable errors (rate limit, transient failure) try the fallback provider if configured.
+    const hasFallback = settings.ai_fallback_provider && settings.ai_fallback_model &&
+      settings.ai_fallback_provider !== settings.ai_provider;
+    if (primaryError instanceof AiError && primaryError.retryable && hasFallback) {
+      const fallbackSettings: ReportBotSettings = {
+        ...settings,
+        ai_provider: settings.ai_fallback_provider!,
+        ai_model: settings.ai_fallback_model!
+      };
+      raw = await analyseWith(settings.ai_fallback_provider!, fallbackSettings, input);
+    } else {
+      throw primaryError;
+    }
+  }
   try {
     return parseAnalysis(raw, input.candidates.map((candidate) => candidate.id));
   } catch (error) {
