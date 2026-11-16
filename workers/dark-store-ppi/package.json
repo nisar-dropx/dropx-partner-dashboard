@@ -1,0 +1,14 @@
+{
+  "name": "dropx-dark-store-ppi",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "DropX Dark Store PPI + Inbound Shipment worker",
+  "scripts": {
+    "start": "node fetch.mjs",
+    "inbound": "node fetch.mjs --inbound",
+    "dry-run": "node fetch.mjs --dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

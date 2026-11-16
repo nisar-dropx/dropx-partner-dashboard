@@ -4,7 +4,7 @@
 -- Store config: maps our station_code (TZC4) to Amazon warehouse/store IDs
 create table if not exists ds_store_config (
   id              uuid primary key default gen_random_uuid(),
-  company_id      uuid not null references auth.users on delete cascade,
+  company_id      uuid not null,
   station_id      uuid references stations(id),
   station_code    text not null,          -- e.g. TZC4
   amazon_store_id text not null,          -- e.g. DU-AA-533

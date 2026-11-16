@@ -97,24 +97,33 @@ async function loadStores() {
 
 // ── Whitetree auth ────────────────────────────────────────────────────────────
 let cachedToken = null;
+let cachedTokenExp = 0; // epoch seconds
 
-async function getIdToken() {
-  if (cachedToken) return cachedToken;
+async function getIdToken(forceRefresh = false) {
+  const nowSec = Date.now() / 1000;
+  // Refresh if forced, not cached, or expiring within 5 minutes
+  if (!forceRefresh && cachedToken && cachedTokenExp > nowSec + 300) return cachedToken;
   const cookie = process.env.WH_COGNITO_COOKIE;
   if (!cookie) throw new Error("WH_COGNITO_COOKIE not set");
-  // The /sso endpoint exchanges the Cognito cookie for a fresh idToken JWT
   const r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
     headers: { "Cookie": `CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken=${cookie}` }
   });
   if (!r.ok) throw new Error(`SSO auth failed: ${r.status}`);
-  const text = await r.text();
-  cachedToken = text.trim();
+  const token = (await r.text()).trim();
+  cachedToken = token;
+  // JWT exp is in payload (second segment)
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+    cachedTokenExp = payload.exp ?? (nowSec + 3600);
+  } catch {
+    cachedTokenExp = nowSec + 3600;
+  }
   return cachedToken;
 }
 
 // ── Inventory Audit download ─────────────────────────────────────────────────
 async function fetchInventoryAudit(store, fromMs, toMs) {
-  const token = await getIdToken();
+  const token = await getIdToken(false);
   const body = {
     format: "STRUCTURED",
     fromTimeMs: fromMs,
@@ -131,15 +140,13 @@ async function fetchInventoryAudit(store, fromMs, toMs) {
       process: true, unit: true, referenceId: true, timestamp: true
     }
   };
-  const r = await fetch("https://wt.prod-zaz.ihminvaudit.ihm.a2z.com/get_inventory_audit_data", {
+  const doFetch = async (tok) => fetch("https://wt.prod-zaz.ihminvaudit.ihm.a2z.com/get_inventory_audit_data", {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com"
-    },
+    headers: { "Authorization": `Bearer ${tok}`, "Content-Type": "application/json", "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com" },
     body: JSON.stringify(body)
   });
+  let r = await doFetch(token);
+  if (r.status === 401) r = await doFetch(await getIdToken(true));
   if (!r.ok) throw new Error(`InventoryAudit ${store.station_code}: ${r.status} ${await r.text()}`);
   const data = await r.json();
   return data.inventoryAuditResults ?? [];
@@ -147,7 +154,7 @@ async function fetchInventoryAudit(store, fromMs, toMs) {
 
 // ── Associate Audit download ─────────────────────────────────────────────────
 async function fetchAssociateAudit(store, fromMs, toMs) {
-  const token = await getIdToken();
+  const token = await getIdToken(false);
   // Subdomain: {store-id-lowercase-dash}.{region}.ihmlabortrackingnative.jihmcdo.com
   const subdomain = `${store.amazon_store_id.toLowerCase()}.${store.region_code}`;
   const body = {
@@ -161,15 +168,13 @@ async function fetchAssociateAudit(store, fromMs, toMs) {
     user: "",
     storeFamily: store.store_family
   };
-  const r = await fetch(`https://${subdomain}.ihmlabortrackingnative.jihmcdo.com/`, {
+  const doFetch = async (tok) => fetch(`https://${subdomain}.ihmlabortrackingnative.jihmcdo.com/`, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com"
-    },
+    headers: { "Authorization": `Bearer ${tok}`, "Content-Type": "application/json", "Origin": "https://dashboard.prod.whitetree.ihm.a2z.com" },
     body: JSON.stringify(body)
   });
+  let r = await doFetch(token);
+  if (r.status === 401) r = await doFetch(await getIdToken(true));
   if (!r.ok) throw new Error(`AssociateAudit ${store.station_code}: ${r.status} ${await r.text()}`);
   const data = await r.json();
   return (data.AssociateAuditData ?? []).map(row => {
@@ -223,8 +228,10 @@ function computePPI(auditRows, invRows) {
   const orderResults = [];
   for (const [id, o] of orders) {
     if (!o.offered || !o.complete) continue;
+    // Skip rows where timestamps were not populated (zero = missing data)
+    if (!o.offered.startMs || !o.complete.endMs) continue;
     const pptMs = o.complete.endMs - o.offered.startMs;
-    if (pptMs < 0 || pptMs > 7200000) continue; // skip bogus (>2h)
+    if (pptMs < 0 || pptMs > 7200000) continue; // skip bogus (negative or >2h)
     const completedAt = new Date(o.complete.endMs).toISOString();
     orderResults.push({
       procurement_list_id: id,
@@ -246,10 +253,10 @@ function computePPI(auditRows, invRows) {
     u.totalPptMs += o.ppt_ms;
   }
 
-  // Hourly breakdown
+  // Hourly breakdown — use IST hour (UTC+5:30) so it matches the cron window labels
   const byHour = new Map();
   for (const o of orderResults) {
-    const h = new Date(o.completed_at).getUTCHours();
+    const h = Math.floor((new Date(o.completed_at).getTime() / 1000 + 5.5 * 3600) / 3600) % 24;
     if (!byHour.has(h)) byHour.set(h, { orders: 0, units: 0, totalPptMs: 0 });
     const hd = byHour.get(h);
     hd.orders++;
