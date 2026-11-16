@@ -42,19 +42,47 @@ if (existsSync(envPath)) {
 // Falls back to .env value if Firefox is not found or cookie is missing.
 async function readFirefoxCookie(host, name, profileHint) {
   try {
-    const profilesDir = join(process.env.APPDATA || "", "Mozilla", "Firefox", "Profiles");
-    if (!existsSync(profilesDir)) {
-      console.warn(`  [cookie-reader] Firefox profiles dir not found: ${profilesDir}`);
+    // APPDATA may point to wrong drive — search common locations
+    const appDataCandidates = [
+      process.env.APPDATA,
+      process.env.APPDATA?.replace(/^C:/, "D:"),
+      `D:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+      `C:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+    ].filter(Boolean);
+
+    let profilesDir = null;
+    for (const base of appDataCandidates) {
+      const candidate = join(base, "Mozilla", "Firefox", "Profiles");
+      if (existsSync(candidate)) { profilesDir = candidate; break; }
+    }
+    if (!profilesDir) {
+      console.warn(`  [cookie-reader] Firefox profiles dir not found (tried: ${appDataCandidates.join(", ")})`);
       return null;
     }
-    const profiles = (await import("node:fs")).readdirSync(profilesDir, { withFileTypes: true })
+
+    const { readdirSync } = await import("node:fs");
+    const profiles = readdirSync(profilesDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => d.name);
-    // prefer profile matching hint (e.g. "profile-1", "default"), else first
-    const chosen = profileHint
-      ? (profiles.find(p => p.includes(profileHint)) ?? profiles[0])
-      : profiles[0];
+
+    // Pick profile: prefer one with cookies.sqlite, prefer most-recently-modified
+    // Priority: default-esr > default-release > default > profile hint > any with cookies
+    const priority = ["default-esr", "default-release", "default"];
+    const rank = (p) => {
+      if (profileHint && p.includes(profileHint)) return 0;
+      for (let i = 0; i < priority.length; i++) if (p.includes(priority[i])) return i + 1;
+      return 99;
+    };
+    const sorted = [...profiles].sort((a, b) => rank(a) - rank(b));
+
+    let chosen = null;
+    for (const p of sorted) {
+      if (existsSync(join(profilesDir, p, "cookies.sqlite"))) { chosen = p; break; }
+    }
+    // fallback: any profile directory even without cookies.sqlite yet
+    if (!chosen) chosen = sorted[0];
     if (!chosen) { console.warn("  [cookie-reader] No Firefox profiles found"); return null; }
+
     const dbSrc = join(profilesDir, chosen, "cookies.sqlite");
     console.log(`  [cookie-reader] Trying profile: ${chosen}`);
     if (!existsSync(dbSrc)) {
