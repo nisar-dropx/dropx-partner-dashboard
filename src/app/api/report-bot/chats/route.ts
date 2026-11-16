@@ -117,9 +117,19 @@ export async function GET(request: Request) {
   if (live) {
     // Live entries win on conflict (richer data: mentions, bot flag); stored fills every gap
     // including messages since the last worker restart that never reached chatLog.
+    // For messages present in both: merge inbound_id/inbound_media_ref from stored into the
+    // live entry so image thumbnails aren't lost when the live entry wins.
     const liveById = new Map(live.messages.map((m) => [m.id, enrich(m)]));
     const stored = storedMessages();
-    for (const m of stored) if (!liveById.has(m.id)) liveById.set(m.id, m);
+    for (const m of stored) {
+      const existing = liveById.get(m.id);
+      if (!existing) {
+        liveById.set(m.id, m);
+      } else if (!existing.inbound_id && m.inbound_id) {
+        // Stored row knows the inbound DB id/media_ref; live entry doesn't — merge them in.
+        liveById.set(m.id, { ...existing, inbound_id: m.inbound_id, inbound_media_ref: m.inbound_media_ref, report: existing.report ?? m.report });
+      }
+    }
     messages = [...liveById.values()].sort((a, b) => a.ts - b.ts);
     Object.assign(names, live.names);
   } else {

@@ -93,7 +93,8 @@ function chatFile(groupId) {
   return path.join(CHATS_DIR, `${groupId.replace(/[^a-z0-9]/gi, "_")}.json`);
 }
 function scheduleChatPersist(groupId) {
-  if (chatPersistTimers.has(groupId)) return;
+  const existing = chatPersistTimers.get(groupId);
+  if (existing) clearTimeout(existing);
   chatPersistTimers.set(groupId, setTimeout(async () => {
     chatPersistTimers.delete(groupId);
     const messages = chatLog.list(groupId);
@@ -731,8 +732,7 @@ async function main() {
     if (session.manualStop || session.reconnectTimer) return;
     if (session.state !== "open") return;
     const ws = session.sock?.ws;
-    const wsOpen = ws && (ws.isOpen || ws.readyState === 1);
-    if (!wsOpen) {
+    if (!ws?.isOpen) {
       logger.warn("watchdog: socket state is 'open' but WebSocket is not alive; reconnecting");
       scheduleReconnect();
     }
