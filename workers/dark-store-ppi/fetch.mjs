@@ -99,9 +99,9 @@ async function readFirefoxCookie(host, name, profileHint) {
     }
     try {
       const { DatabaseSync } = await import("node:sqlite");
-      const db = new DatabaseSync(dbTmp, { readonly: true });
-      // List all cookie names for debug if cookie not found
-      // Try exact host match first, then LIKE (some cookies stored with leading dot)
+      // Open read-write on temp copy so we can checkpoint the WAL into the main db
+      const db = new DatabaseSync(dbTmp);
+      try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
       const row = db.prepare(
         "SELECT value FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
       ).get(host, `.${host}`, name);
