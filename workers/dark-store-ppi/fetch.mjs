@@ -277,12 +277,8 @@ async function autoFillCookies() {
     const cookieName = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
     const raw = await readFirefoxCookie("dashboard.prod.whitetree.ihm.a2z.com", cookieName);
     if (raw) {
-      let jwt = raw;
-      try {
-        const parts = JSON.parse(raw);
-        if (Array.isArray(parts) && parts.length === 3) jwt = parts.join(".");
-      } catch {}
-      process.env.WH_COGNITO_COOKIE = jwt;
+      // Store raw value as-is — getIdToken() tries multiple formats when calling SSO
+      process.env.WH_COGNITO_COOKIE = raw;
       console.log("  [cookie-reader] WH_COGNITO_COOKIE loaded from Firefox (Whitetree dashboard cookies)");
     }
   }
@@ -382,26 +378,28 @@ async function getIdToken(forceRefresh = false) {
   const cookie = process.env.WH_COGNITO_COOKIE;
   if (!cookie) throw new Error("WH_COGNITO_COOKIE not set — open dashboard.prod.whitetree.ihm.a2z.com in Firefox then retry");
   const COOKIE_NAME = "CognitoIdentityServiceProvider.1dr6i35r3kv86h3lpvvte7de4l.idToken";
-  // Try sending as plain JWT first, then as JSON-encoded array (how Firefox stores it)
-  const cookieVariants = [cookie];
-  if (!cookie.startsWith("[")) {
-    // Also try sending as JSON array (raw Firefox storage format)
-    const parts = cookie.split(".");
-    if (parts.length === 3) cookieVariants.push(JSON.stringify(parts));
-  }
+  // The SSO endpoint reads the raw cookie value as stored by the browser.
+  // Firefox stores it as a JSON array string: ["header","payload","sig"]
+  // We store the joined JWT in WH_COGNITO_COOKIE, so we must re-encode as array for the SSO call.
+  // Try all formats: joined JWT plain, joined JWT URL-encoded, JSON array plain, JSON array URL-encoded.
+  const jwt = cookie.startsWith("eyJ") ? cookie : null;
+  const arr = jwt ? JSON.stringify(jwt.split(".")) : (cookie.startsWith("[") ? cookie : null);
+  const variants = [...new Set([
+    jwt, arr,
+    jwt ? encodeURIComponent(jwt) : null,
+    arr ? encodeURIComponent(arr) : null,
+  ].filter(Boolean))];
   let r;
-  for (const val of cookieVariants) {
-    r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
-      headers: { "Cookie": `${COOKIE_NAME}=${encodeURIComponent(val)}` }
-    });
-    if (r.ok) break;
-    // Try without URL-encoding too
+  for (const val of variants) {
     r = await fetch("https://dashboard.prod.whitetree.ihm.a2z.com/sso", {
       headers: { "Cookie": `${COOKIE_NAME}=${val}` }
     });
     if (r.ok) break;
   }
-  if (!r.ok) throw new Error(`SSO auth failed: ${r.status}`);
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(`SSO auth failed: ${r.status}${body ? " — " + body.slice(0, 120) : ""}`);
+  }
   const token = (await r.text()).trim();
   cachedToken = token;
   // JWT exp is in payload (second segment)
