@@ -720,7 +720,11 @@ async function main() {
   });
   server.listen(PORT, () => logger.info({ port: PORT, portal: PORTAL_URL, publicUrl: PUBLIC_URL }, "report bot worker listening"));
   deliverLoop();
-  configLoop();
+  // Eagerly fetch config from the portal before starting the WhatsApp socket.
+  // messaging-history.set fires within seconds of connection; if config.groups
+  // is still empty at that point, all RECENT history messages are silently dropped.
+  // configLoop() runs first synchronously here, then every 60s afterwards.
+  await configLoop();
   const prune = () => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin").catch(() => {});
   setInterval(prune, 3600 * 1000);
   prune();
