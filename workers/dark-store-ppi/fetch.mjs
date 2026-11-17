@@ -473,7 +473,7 @@ function computePPI(auditRows, invRows) {
   for (const row of invRows) {
     const user = row.user ?? row.username ?? row.User;
     if (!user) continue;
-    const tsMs = Number(row.timestamp ?? row.Timestamp ?? 0);
+    const tsMs = Number(row.eventTimestampMs ?? row.timestamp ?? row.Timestamp ?? 0);
     const delta = Math.abs(Number(row.deltaQuantity ?? row.Quantity ?? 0));
     if (!tsMs || !delta) continue;
     if (!invByUser.has(user)) invByUser.set(user, []);
