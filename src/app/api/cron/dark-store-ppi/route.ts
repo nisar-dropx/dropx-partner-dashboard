@@ -55,9 +55,9 @@ function buildCaption(
   windowHour: number,
   prevAvgPptSeconds: number | null
 ): string {
-  const totalOrders = daily.reduce((s, r) => s + r.order_count, 0);
-  const totalPptS   = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
-  const avgPpt      = totalOrders > 0 ? totalPptS / totalOrders : null;
+  const totalUnits  = daily.reduce((s, r) => s + r.unit_count, 0);
+  const totalPptS   = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.unit_count, 0);
+  const avgPpt      = totalUnits > 0 ? totalPptS / totalUnits : null;
 
   const pad = (n: number) => String(n).padStart(2, "0");
   const timeLabel = `${pad(windowHour)}:00`;
@@ -188,7 +188,7 @@ export async function GET(request: Request) {
         const ex = pickerMap.get(r.username) ?? { orders: 0, units: 0, totalPptS: 0 };
         ex.orders    += r.order_count;
         ex.units     += r.unit_count;
-        ex.totalPptS += (r.avg_ppt_seconds ?? 0) * r.order_count;
+        ex.totalPptS += (r.avg_ppt_seconds ?? 0) * r.unit_count;
         pickerMap.set(r.username, ex);
       }
       const pickers = [...pickerMap.entries()].map(([name, v]) => ({
@@ -196,13 +196,13 @@ export async function GET(request: Request) {
         orders: v.orders,
         sumPpt: v.totalPptS,
         units:  v.units,
-        ppt:    v.orders > 0 ? v.totalPptS / v.orders : null,
+        ppt:    v.units > 0 ? v.totalPptS / v.units : null,
       }));
 
       const totalOrders = pickers.reduce((s, r) => s + r.orders, 0);
       const totalUnits  = pickers.reduce((s, r) => s + r.units,  0);
       const totalSumPpt = pickers.reduce((s, r) => s + r.sumPpt, 0);
-      const avgPpt      = totalOrders > 0 ? totalSumPpt / totalOrders : null;
+      const avgPpt      = totalUnits  > 0 ? totalSumPpt / totalUnits  : null;
       const pptText     = avgPpt != null ? `${avgPpt.toFixed(2)}s` : "No data";
       const prevPpt     = prevPptByStore.get(code) ?? null;
       const diff        = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
@@ -243,7 +243,7 @@ export async function GET(request: Request) {
 
       const hTotalOrders = recentHourly.reduce((s, h) => s + h.order_count, 0);
       const hTotalUnits  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
-      const hTotalSumPpt = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
+      const hTotalSumPpt = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.unit_count, 0);
 
       const layout = { type: "div", props: { style: { display: "flex", flexDirection: "column", width: W, background: "#f1f5f9", padding: 16, fontFamily: "Inter" }, children: [
         // ── Header banner
@@ -313,7 +313,7 @@ export async function GET(request: Request) {
           ...recentHourly.map((h, i) => tRow(i % 2 === 0 ? "#fff" : "#fffbeb", [
             { v: `${String(h.hour).padStart(2,"0")}:00`, flex: 2 },
             { v: String(h.order_count), flex: 2 },
-            { v: h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-", flex: 3 },
+            { v: h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.unit_count).toFixed(2) : "-", flex: 3 },
             { v: String(h.unit_count), flex: 2 },
             { v: h.avg_ppt_seconds != null ? `${Number(h.avg_ppt_seconds).toFixed(2)}s` : "-", flex: 2, style: { color: "#b45309", fontWeight: 700 } },
           ] as { v: string; flex: number; style?: object }[])),

@@ -340,7 +340,8 @@ async function sbGet(path) {
 
 async function sbUpsert(table, rows, onConflict) {
   if (dryRun) { console.log(`  [dry-run] upsert ${rows.length} rows → ${table}`); return; }
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+  const qs = onConflict ? `?on_conflict=${onConflict}` : "";
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
     method: "POST",
     headers: { ...SB_HEADERS, "Prefer": `resolution=merge-duplicates,return=minimal` },
     body: JSON.stringify(rows)
