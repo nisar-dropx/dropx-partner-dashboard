@@ -244,6 +244,7 @@ export async function GET(request: Request) {
       const hTotalOrders = recentHourly.reduce((s, h) => s + h.order_count, 0);
       const hTotalUnits  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
       const hTotalSumPpt = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
+      const hTotalPpt    = hTotalUnits > 0 ? hTotalSumPpt / hTotalUnits : null;
 
       const layout = { type: "div", props: { style: { display: "flex", flexDirection: "column", width: W, background: "#f1f5f9", padding: 16, fontFamily: "Inter" }, children: [
         // ── Header banner
@@ -315,14 +316,14 @@ export async function GET(request: Request) {
             { v: String(h.order_count), flex: 2 },
             { v: h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-", flex: 3 },
             { v: String(h.unit_count), flex: 2 },
-            { v: h.avg_ppt_seconds != null ? `${Number(h.avg_ppt_seconds).toFixed(2)}s` : "-", flex: 2, style: { color: "#b45309", fontWeight: 700 } },
+            { v: h.avg_ppt_seconds != null && h.unit_count > 0 ? `${(Number(h.avg_ppt_seconds) * h.order_count / h.unit_count).toFixed(2)}s` : "-", flex: 2, style: { color: "#b45309", fontWeight: 700 } },
           ] as { v: string; flex: number; style?: object }[])),
           tRow("#b45309", [
             { v: "TOTAL",                      flex: 2, style: { color: "#fff", fontWeight: 700 } },
             { v: String(hTotalOrders),          flex: 2, style: { color: "#fff", fontWeight: 700 } },
             { v: hTotalSumPpt.toFixed(2),       flex: 3, style: { color: "#fff", fontWeight: 700 } },
             { v: String(hTotalUnits),           flex: 2, style: { color: "#fff", fontWeight: 700 } },
-            { v: pptText,                       flex: 2, style: { color: "#fde68a", fontWeight: 700 } },
+            { v: hTotalPpt != null ? `${hTotalPpt.toFixed(2)}s` : pptText, flex: 2, style: { color: "#fde68a", fontWeight: 700 } },
           ], true),
         ]}}]),
         // footer
