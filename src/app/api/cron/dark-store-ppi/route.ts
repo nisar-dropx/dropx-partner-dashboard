@@ -11,8 +11,8 @@ function getFonts() {
   if (_fonts) return _fonts;
   const dir = join(process.cwd(), "src/app/api/cron/dark-store-ppi");
   _fonts = [
-    { name: "Inter", data: readFileSync(join(dir, "Inter-Regular.otf")).buffer as ArrayBuffer, weight: 400 as const, style: "normal" as const },
-    { name: "Inter", data: readFileSync(join(dir, "Inter-Bold.otf")).buffer   as ArrayBuffer, weight: 700 as const, style: "normal" as const },
+    { name: "Inter", data: readFileSync(join(dir, "Inter-Regular.ttf")).buffer as ArrayBuffer, weight: 400 as const, style: "normal" as const },
+    { name: "Inter", data: readFileSync(join(dir, "Inter-Bold.ttf")).buffer   as ArrayBuffer, weight: 700 as const, style: "normal" as const },
   ];
   return _fonts;
 }
