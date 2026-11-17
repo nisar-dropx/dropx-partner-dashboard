@@ -169,7 +169,7 @@ export async function GET(request: Request) {
   // fonts loaded via getFonts() inside buildStationImage
 
   /** Build a per-station PNG using satori (bundled font renderer — no system fonts needed) */
-  async function buildStationImage(code: string): Promise<string | null> {
+  async function buildStationImage(code: string): Promise<string | { error: string } | null> {
     try {
       const satori = (await import("satori")).default;
       const { Resvg } = await import("@resvg/resvg-js");
@@ -326,8 +326,9 @@ export async function GET(request: Request) {
       const resvg = new Resvg(svg, { fitTo: { mode: "width" as const, value: W } });
       const buf = resvg.render().asPng();
       return Buffer.from(buf).toString("base64");
-    } catch {
-      return null;
+    } catch (err) {
+      // Surface the error so it shows in the cron response instead of silently falling back to text
+      return { error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -340,7 +341,9 @@ export async function GET(request: Request) {
       hour,
       prevPptByStore.get(stationCode) ?? null,
     );
-    const imgB64 = await buildStationImage(stationCode);
+    const imgResult = await buildStationImage(stationCode);
+    const imgB64 = typeof imgResult === "string" ? imgResult : null;
+    const imgError = imgResult && typeof imgResult === "object" ? (imgResult as { error: string }).error : null;
     try {
       await workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
@@ -349,7 +352,7 @@ export async function GET(request: Request) {
           : { to: TESTING_GROUP_ID, text: caption, client_ref: `ppi-${stationCode}-${today}-${hour}` },
         timeoutMs: 30000,
       });
-      results.push({ store: stationCode, group: "Dark Store Testing", status: "sent" });
+      results.push({ store: stationCode, group: "Dark Store Testing", status: imgB64 ? "sent" : `text_only: ${imgError ?? "image_failed"}` });
     } catch (err) {
       const msg = err instanceof WorkerError ? err.message : String(err);
       results.push({ store: stationCode, group: "Dark Store Testing", status: `error: ${msg}` });
