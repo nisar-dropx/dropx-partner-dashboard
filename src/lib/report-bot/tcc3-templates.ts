@@ -28,6 +28,75 @@ export type Tcc3Template = {
 
 export const TCC3_REPORT_TEMPLATES: Tcc3Template[] = [
   {
+    slug: "cycle-count-sbc-src",
+    name: "Cycle count, SBC & SRC completion",
+    category: "dark_store_completion",
+    auto_reply_policy: "normal",
+    subtypes: [],
+    description: "Device screenshot proving Cycle Count, Simple Bin Count (SBC) and SRC task quantities are all zero.",
+    feedback_hint: "Please complete the remaining Cycle Count, SBC and SRC tasks and share a fresh device screenshot.",
+    rules: [
+      "Read the Cycle Count, SBC and SRC task quantities from the device screenshot.",
+      "Pass only when all three quantities are exactly 0.",
+      "Any positive, missing, cropped or unreadable quantity remains pending; never assume it is zero."
+    ],
+    schedule: {
+      schedule_kind: "interval", due_time: "23:59",
+      reminder_times: ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00", "23:00"],
+      stop_when_received: true, review_only: true,
+      first_reminder_template: "What is the progress on cycle count, SBC & SRC task completion? Pls share device screenshot",
+      followup_template: "What is the progress on cycle count, SBC & SRC task completion? Pls share device screenshot",
+      overdue_template: null
+    }
+  },
+  {
+    slug: "stowing-pendency",
+    name: "Stowing pendency",
+    category: "dark_store_completion",
+    auto_reply_policy: "normal", subtypes: [],
+    description: "Stowing pendency quantity, from a reply or a new text message.",
+    feedback_hint: "Please share the current stowing pendency quantity. The reminder stops only when it is 0.",
+    rules: ["Extract stowing pendency quantity from a reply or new message.", "Pass only when the quantity is exactly 0; a positive quantity remains pending."],
+    schedule: {
+      schedule_kind: "interval", due_time: "23:59",
+      reminder_times: ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"],
+      stop_when_received: true, review_only: true,
+      first_reminder_template: "*Share stowing pendency quantity*",
+      followup_template: "*Share stowing pendency quantity*",
+      overdue_template: null
+    }
+  },
+  {
+    slug: "expiry-removed",
+    name: "Expiry removed",
+    category: "dark_store_completion",
+    auto_reply_policy: "normal", subtypes: [],
+    description: "Dashboard screenshot proving no expiry rows have today or an earlier expiration date, with quantities cleared.",
+    feedback_hint: "Please remove the current/past-date expiry items and share a fresh dashboard screenshot.",
+    rules: ["Check the Expiration column against today in Asia/Kolkata.", "Check the quantity for every current or past-date row.", "Pass only when there are no current or past-date rows with quantity above 0."],
+    schedule: {
+      schedule_kind: "interval", due_time: "23:59",
+      reminder_times: ["04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"],
+      stop_when_received: true, review_only: true,
+      first_reminder_template: "*Expiry removed? Share dashboard screenshot*",
+      followup_template: "*Expiry removed? Share dashboard screenshot*",
+      overdue_template: null
+    }
+  },
+  {
+    slug: "dg-fuel-level",
+    name: "DG fuel level",
+    category: "infrastructure",
+    auto_reply_policy: "never", subtypes: [],
+    description: "Daily DG fuel level image.",
+    feedback_hint: "Please share the DG fuel level image.",
+    rules: ["A DG fuel level image is attached."],
+    schedule: {
+      schedule_kind: "timed", due_time: "16:00", reminder_times: ["16:00"], stop_when_received: true, review_only: true,
+      first_reminder_template: "Share DG fuel level image", followup_template: "Share DG fuel level image", overdue_template: null
+    }
+  },
+  {
     slug: "load-receipt",
     name: "Load receipt",
     category: "load",

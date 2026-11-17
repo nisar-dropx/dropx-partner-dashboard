@@ -23,6 +23,7 @@ export type CandidateReport = {
   subtypes?: string[] | null;
   auto_reply_policy?: "never" | "normal" | null;
   feedback_hint?: string | null;
+  requires_pass_to_close?: boolean;
 };
 
 export type AnalysisInput = {

@@ -575,7 +575,7 @@ export async function setGroupMode(form: FormData) {
   }, reportBotWorkspace(form.get("workspace")));
 }
 
-/** Install/update the 10 TCC3 War Room report types for this company (by slug). Does not touch groups. */
+/** Install/update the dark-store report types for this company (by slug). Does not touch groups. */
 export async function installTcc3Templates() {
   await mutate("reports", async ({ authorization, companyId }) => {
     const db = reportBotDb();
@@ -593,6 +593,7 @@ export async function installTcc3Templates() {
         auto_reply_policy: template.auto_reply_policy,
         subtypes: template.subtypes,
         feedback_hint: template.feedback_hint,
+        requires_pass_to_close: template.category === "dark_store_completion",
         is_active: true,
         updated_at: now
       };

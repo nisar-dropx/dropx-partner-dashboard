@@ -49,12 +49,12 @@ function must<T>(result: { data: T | null; error: { message: string } | null }, 
 async function candidatesForGroup(settings: ReportBotSettings, groupId: string, businessDate: string, workspace: ReportBotWorkspace) {
   const db = reportBotDb();
   const requests = must(await db.from("report_bot_requests")
-    .select("id,status,report_type_id, report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint)")
+    .select("id,status,report_type_id, report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", groupId)
     .eq("business_date", businessDate)
     .in("status", ["pending", "overdue", "received", "missed"]), "Load requests") as unknown as Array<{
       id: string; status: string; report_type_id: string;
-      report: CandidateReport & { is_active: boolean } | null;
+      report: CandidateReport & { is_active: boolean; requires_pass_to_close?: boolean } | null;
     }>;
   const open = requests.filter((row) => row.report?.is_active);
   if (open.length) {
@@ -68,14 +68,15 @@ async function candidatesForGroup(settings: ReportBotSettings, groupId: string, 
         category: row.report!.category,
         subtypes: row.report!.subtypes,
         auto_reply_policy: row.report!.auto_reply_policy,
-        feedback_hint: row.report!.feedback_hint
+        feedback_hint: row.report!.feedback_hint,
+        requires_pass_to_close: row.report!.requires_pass_to_close
       }])).values()] as CandidateReport[]
     };
   }
   // Event-driven reports (load receipt, incidents) may have no open daily request.
   // Prefer types linked to this group via any schedule, then all active company types.
   const scheduled = must(await db.from("report_bot_schedules")
-    .select("report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint)")
+    .select("report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", groupId), "Load group schedules") as unknown as Array<{ report: CandidateReport & { is_active: boolean } | null }>;
   const fromSchedules = scheduled.flatMap((row) => (row.report?.is_active ? [toCandidate(row.report)] : []));
   if (fromSchedules.length) return { requests: [], candidates: [...new Map(fromSchedules.map((row) => [row.id, row])).values()] };
@@ -97,7 +98,8 @@ function toCandidate(row: CandidateReport & { is_active?: boolean }): CandidateR
     category: row.category,
     subtypes: row.subtypes,
     auto_reply_policy: row.auto_reply_policy,
-    feedback_hint: row.feedback_hint
+    feedback_hint: row.feedback_hint,
+    requires_pass_to_close: row.requires_pass_to_close
   };
 }
 
@@ -321,7 +323,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     await upsertActionsFromAnalysis(settings, event.group_id, inserted.id, event.id, analysis);
     await tryLinkTicketClosure(settings, event.group_id, event.id, inserted.id, analysis, reportType?.category ?? null);
   }
-  if (request && analysis.is_report) {
+  const complete = analysis.is_report && (!reportType || reportType.requires_pass_to_close !== true || analysis.verdict === "pass");
+  if (request && complete) {
     must(await db.from("report_bot_requests").update({
       status: "received",
       ...(request.status === "received" ? {} : { received_at: event.message_at }),
