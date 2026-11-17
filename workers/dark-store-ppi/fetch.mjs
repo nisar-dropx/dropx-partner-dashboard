@@ -533,7 +533,7 @@ async function pushPPI(store, date, ppi) {
       ...base, procurement_list_id: o.procurement_list_id,
       username: o.username, completed_at: o.completed_at,
       unit_count: o.unit_count, ppt_seconds: o.ppt_seconds
-    })), "company_id,station_code,procurement_list_id");
+    })), "company_id,station_code,business_date,procurement_list_id");
   }
 
   // Daily per picker
