@@ -166,171 +166,218 @@ export async function GET(request: Request) {
     : "";
   const F = fontB64 ? "Inter,Arial,sans-serif" : "Arial,Helvetica,sans-serif";
 
-  /** Build a per-station PNG card and return base64, or null on error */
+  /** Build a per-station PNG matching the PPI Calculation Dashboard exactly */
   async function buildStationImage(code: string): Promise<string | null> {
     try {
       const sharp = (await import("sharp")).default;
       const daily  = dailyByStore.get(code)  ?? [];
       const hourly = hourlyByStore.get(code) ?? [];
 
-      // Per-picker rows sorted by PPT asc
-      const pickerMap = new Map<string, { orders: number; units: number; pptS: number }>();
+      // Aggregate per-picker (username = row key in ds_ppi_daily)
+      const pickerMap = new Map<string, { orders: number; units: number; totalPptS: number }>();
       for (const r of daily) {
-        const ex = pickerMap.get(r.username) ?? { orders: 0, units: 0, pptS: 0 };
-        ex.orders += r.order_count;
-        ex.units  += r.unit_count;
-        ex.pptS   += (r.avg_ppt_seconds ?? 0) * r.order_count;
+        const ex = pickerMap.get(r.username) ?? { orders: 0, units: 0, totalPptS: 0 };
+        ex.orders    += r.order_count;
+        ex.units     += r.unit_count;
+        ex.totalPptS += (r.avg_ppt_seconds ?? 0) * r.order_count;
         pickerMap.set(r.username, ex);
       }
-      const pickers = [...pickerMap.entries()]
-        .map(([name, v]) => ({ name, orders: v.orders, units: v.units, ppt: v.orders > 0 ? v.pptS / v.orders : null }))
-        .sort((a, b) => (a.ppt ?? 9999) - (b.ppt ?? 9999));
+      // Dashboard shows raw SUM of PPT seconds and COUNTA of orders — keep those
+      const pickers = [...pickerMap.entries()].map(([name, v]) => ({
+        name,
+        orders:   v.orders,
+        sumPpt:   v.totalPptS,                                           // SUM of PPT (seconds)
+        units:    v.units,                                               // Sum of Quantity
+        ppt:      v.orders > 0 ? v.totalPptS / v.orders : null,         // PPT (seconds) = avg
+      }));
+      // Not sorted by PPT — keep original insertion order (matches dashboard default)
 
       const totalOrders = pickers.reduce((s, r) => s + r.orders, 0);
       const totalUnits  = pickers.reduce((s, r) => s + r.units,  0);
-      const totalPptS   = pickers.reduce((s, r) => s + (r.ppt ?? 0) * r.orders, 0);
-      const avgPpt      = totalOrders > 0 ? totalPptS / totalOrders : null;
-      const prevPpt     = prevPptByStore.get(code) ?? null;
-      const diff        = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
-      const trend       = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
-      const trendColor  = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : "#dc2626";
+      const totalSumPpt = pickers.reduce((s, r) => s + r.sumPpt, 0);
+      const avgPpt      = totalOrders > 0 ? totalSumPpt / totalOrders : null;
+      const pptText     = avgPpt != null ? `${(avgPpt).toFixed(2)}s` : "No data";
 
-      // Hourly summary (last 6 hours max)
-      const recentHourly = [...hourly]
-        .filter(h => h.hour <= hour)
-        .sort((a, b) => a.hour - b.hour)
-        .slice(-6);
+      const prevPpt    = prevPptByStore.get(code) ?? null;
+      const diff       = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
+      const trend      = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
+      const trendColor = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : "#dc2626";
 
-      const W = 560;
-      const BANNER_H = 68;
-      const STAT_H   = 52;
-      const SEC_H    = 36; // section title
-      const COL_H    = 36;
-      const ROW_H    = 44;
-      const TOTAL_H  = 44;
-      const HOURLY_SEC_H = recentHourly.length > 0 ? SEC_H + COL_H + recentHourly.length * ROW_H + TOTAL_H : 0;
-      const H = BANNER_H + STAT_H + SEC_H + COL_H + (pickers.length || 1) * ROW_H + TOTAL_H + HOURLY_SEC_H + 28;
+      const uniqueUsers = pickers.length;
 
-      // helpers
-      const cx = (x: number, w: number) => x + w / 2;
-      const C = { name: 20, orders: 230, units: 320, ppt: 440, rank: 540 };
+      // Hourly rows sorted by hour
+      const recentHourly = [...hourly].filter(h => h.hour <= hour).sort((a, b) => a.hour - b.hour);
 
-      // ── Banner
-      const trendBadge = trend
-        ? `<rect x="${W-100}" y="14" width="84" height="32" rx="6" fill="${trendColor}20"/>
-           <text x="${W-58}" y="35" font-family="${F}" font-size="15" font-weight="bold" fill="${trendColor}" text-anchor="middle">${trend}</text>`
-        : "";
-      const bannerSvg = `
-        <rect x="0" y="0" width="${W}" height="${BANNER_H}" fill="#16a34a"/>
-        <text x="20" y="28" font-family="${F}" font-size="13" fill="#bbf7d0">DROPX DARK STORE PPI</text>
-        <text x="20" y="56" font-family="${F}" font-size="26" font-weight="bold" fill="#ffffff">${code}</text>
-        ${trendBadge}`;
+      // ── Layout constants (matches dashboard proportions at 640px wide)
+      const W        = 640;
+      const PAD      = 16;   // outer padding
+      const TITLE_H  = 48;   // "Total Performance" header bar
+      const CARD_H   = 80;   // stat cards row
+      const GAP      = 12;   // gap between sections
+      const SEC_H    = 44;   // "PPI Output" section title bar
+      const COL_H    = 40;   // table column header
+      const ROW_H    = 46;   // table data row
+      const TOTAL_H  = 46;   // TOTAL row
+      const HSEC_H   = recentHourly.length > 0 ? GAP + SEC_H + COL_H + recentHourly.length * ROW_H + TOTAL_H : 0;
+      const FOOT_H   = 30;
+      const H = PAD + TITLE_H + GAP + CARD_H + GAP + SEC_H + COL_H +
+                (pickers.length || 1) * ROW_H + TOTAL_H + HSEC_H + FOOT_H + PAD;
 
-      // ── Stat bar
-      const sY = BANNER_H;
-      const pptText = avgPpt != null ? fmtSeconds(avgPpt) : "No data";
-      const statSvg = `
-        <rect x="0" y="${sY}" width="${W}" height="${STAT_H}" fill="#dcfce7"/>
-        <text x="20"       y="${sY+32}" font-family="${F}" font-size="13" fill="#166534">As of ${windowLabel} | ${today}</text>
-        <text x="${W-20}"  y="${sY+20}" font-family="${F}" font-size="12" fill="#166534" text-anchor="end">Avg PPT</text>
-        <text x="${W-20}"  y="${sY+42}" font-family="${F}" font-size="20" font-weight="bold" fill="#15803d" text-anchor="end">${pptText}</text>`;
-
-      // ── Picker section title
-      const ptY = sY + STAT_H;
-      const pickerTitleSvg = `
-        <rect x="0" y="${ptY}" width="${W}" height="${SEC_H}" fill="#f0fdf4"/>
-        <text x="20" y="${ptY+23}" font-family="${F}" font-size="13" font-weight="bold" fill="#166534">Picker Breakdown  (${totalOrders} orders)</text>`;
-
-      // ── Picker col header
-      const pcY = ptY + SEC_H;
-      const pickerColSvg = `
-        <rect x="0" y="${pcY}" width="${W}" height="${COL_H}" fill="#15803d"/>
-        <text x="${C.name}"   y="${pcY+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Username</text>
-        <text x="${C.orders}" y="${pcY+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
-        <text x="${C.units}"  y="${pcY+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Units</text>
-        <text x="${C.ppt}"    y="${pcY+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">PPT (avg)</text>
-        <text x="${C.rank}"   y="${pcY+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Rank</text>`;
-
-      // ── Picker rows
-      const prY = pcY + COL_H;
-      const pickerRowsSvg = pickers.length === 0
-        ? `<rect x="0" y="${prY}" width="${W}" height="${ROW_H}" fill="#ffffff"/>
-           <text x="${W/2}" y="${prY+28}" font-family="${F}" font-size="14" fill="#9ca3af" text-anchor="middle">No picker data</text>`
-        : pickers.map((p, i) => {
-            const y  = prY + i * ROW_H;
-            const bg = i % 2 === 0 ? "#ffffff" : "#f3f4f6";
-            const pt = p.ppt != null ? fmtSeconds(p.ppt) : "-";
-            const pc = p.ppt != null ? "#15803d" : "#9ca3af";
-            return `
-              <rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
-              <line x1="0" y1="${y+ROW_H-1}" x2="${W}" y2="${y+ROW_H-1}" stroke="#e5e7eb" stroke-width="1"/>
-              <text x="${C.name}"   y="${y+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#111827">${p.name}</text>
-              <text x="${C.orders}" y="${y+28}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.orders}</text>
-              <text x="${C.units}"  y="${y+28}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.units}</text>
-              <text x="${C.ppt}"    y="${y+28}" font-family="${F}" font-size="14" font-weight="bold" fill="${pc}" text-anchor="middle">${pt}</text>
-              <text x="${C.rank}"   y="${y+28}" font-family="${F}" font-size="13" fill="#6b7280" text-anchor="middle">#${i+1}</text>`;
-          }).join("\n");
-
-      // ── Picker total row
-      const pTotalY = prY + (pickers.length || 1) * ROW_H;
-      const pickerTotalSvg = `
-        <rect x="0" y="${pTotalY}" width="${W}" height="${TOTAL_H}" fill="#15803d"/>
-        <text x="${C.name}"   y="${pTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
-        <text x="${C.orders}" y="${pTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalOrders}</text>
-        <text x="${C.units}"  y="${pTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalUnits}</text>
-        <text x="${C.ppt}"    y="${pTotalY+28}" font-family="${F}" font-size="14" font-weight="bold" fill="#bbf7d0" text-anchor="middle">${pptText}</text>`;
-
-      // ── Hourly section
-      let hourlySvg = "";
-      if (recentHourly.length > 0) {
-        const htY = pTotalY + TOTAL_H;
-        const HC = { hour: 20, orders: 180, units: 290, ppt: 430 };
-        const hourlyTitle = `
-          <rect x="0" y="${htY}" width="${W}" height="${SEC_H}" fill="#fffbeb"/>
-          <text x="20" y="${htY+23}" font-family="${F}" font-size="13" font-weight="bold" fill="#92400e">Hourly Breakdown</text>`;
-        const hourlyCol = `
-          <rect x="0" y="${htY+SEC_H}" width="${W}" height="${COL_H}" fill="#d97706"/>
-          <text x="${HC.hour}"   y="${htY+SEC_H+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Hour</text>
-          <text x="${HC.orders}" y="${htY+SEC_H+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
-          <text x="${HC.units}"  y="${htY+SEC_H+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Units</text>
-          <text x="${HC.ppt}"    y="${htY+SEC_H+23}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">PPT (avg)</text>`;
-        const hourlyRows = recentHourly.map((h, i) => {
-          const y  = htY + SEC_H + COL_H + i * ROW_H;
-          const bg = i % 2 === 0 ? "#ffffff" : "#fffbeb";
-          const ht = h.avg_ppt_seconds != null ? fmtSeconds(h.avg_ppt_seconds) : "-";
-          const hc = h.avg_ppt_seconds != null ? "#b45309" : "#9ca3af";
-          const label = `${String(h.hour).padStart(2,"0")}:00`;
-          return `
-            <rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
-            <line x1="0" y1="${y+ROW_H-1}" x2="${W}" y2="${y+ROW_H-1}" stroke="#fde68a" stroke-width="1"/>
-            <text x="${HC.hour}"   y="${y+28}" font-family="${F}" font-size="13" fill="#374151">${label}</text>
-            <text x="${HC.orders}" y="${y+28}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.order_count}</text>
-            <text x="${HC.units}"  y="${y+28}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.unit_count}</text>
-            <text x="${HC.ppt}"    y="${y+28}" font-family="${F}" font-size="14" font-weight="bold" fill="${hc}" text-anchor="middle">${ht}</text>`;
-        }).join("\n");
-        const hourlyTotalY = htY + SEC_H + COL_H + recentHourly.length * ROW_H;
-        const hTotalOrders = recentHourly.reduce((s, h) => s + h.order_count, 0);
-        const hTotalUnits  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
-        const hourlyTotal  = `
-          <rect x="0" y="${hourlyTotalY}" width="${W}" height="${TOTAL_H}" fill="#b45309"/>
-          <text x="${HC.hour}"   y="${hourlyTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
-          <text x="${HC.orders}" y="${hourlyTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${hTotalOrders}</text>
-          <text x="${HC.units}"  y="${hourlyTotalY+28}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${hTotalUnits}</text>
-          <text x="${HC.ppt}"    y="${hourlyTotalY+28}" font-family="${F}" font-size="14" font-weight="bold" fill="#fde68a" text-anchor="middle">${pptText}</text>`;
-        hourlySvg = hourlyTitle + hourlyCol + hourlyRows + hourlyTotal;
+      // ── Stat card helper (x, label, value)
+      function statCard(x: number, label: string, value: string) {
+        const CW = 112;
+        return `
+          <rect x="${x}" y="${PAD + TITLE_H + GAP}" width="${CW}" height="${CARD_H}" rx="8" fill="#ffffff" stroke="#e5e7eb" stroke-width="1"/>
+          <text x="${x+12}" y="${PAD + TITLE_H + GAP + 22}" font-family="${F}" font-size="10" fill="#6b7280">${label}</text>
+          <text x="${x+12}" y="${PAD + TITLE_H + GAP + 58}" font-family="${F}" font-size="20" font-weight="bold" fill="#111827">${value}</text>`;
       }
 
-      // ── Footer note
-      const fY = H - 28;
-      const footerSvg = trend
-        ? `<rect x="0" y="${fY}" width="${W}" height="28" fill="#f9fafb"/>
-           <text x="${W/2}" y="${fY+18}" font-family="${F}" font-size="11" fill="#9ca3af" text-anchor="middle">+Ns = improved (lower PPT)   -Ns = declined   vs previous 2h window</text>`
-        : "";
+      // 5 stat cards across full width with equal spacing
+      const cardW   = Math.floor((W - PAD * 2 - 4 * 8) / 5); // 5 cards, 4 gaps of 8px
+      function card5(i: number, label: string, value: string) {
+        const x = PAD + i * (cardW + 8);
+        return `
+          <rect x="${x}" y="${PAD + TITLE_H + GAP}" width="${cardW}" height="${CARD_H}" rx="8" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+          <text x="${x+10}" y="${PAD + TITLE_H + GAP + 20}" font-family="${F}" font-size="10" fill="#6b7280">${label}</text>
+          <text x="${x+10}" y="${PAD + TITLE_H + GAP + 62}" font-family="${F}" font-size="22" font-weight="bold" fill="#111827">${value}</text>`;
+      }
+
+      const cards = [
+        card5(0, "Site Code",      code),
+        card5(1, "Orders",         String(totalOrders)),
+        card5(2, "Total Quantity", String(totalUnits)),
+        card5(3, "PPT",            pptText),
+        card5(4, "Unique Users",   String(uniqueUsers)),
+      ].join("");
+
+      // ── PPI Output section
+      const ppiY = PAD + TITLE_H + GAP + CARD_H + GAP;
+
+      // section wrapper border (green)
+      const ppiWrapH = SEC_H + COL_H + (pickers.length || 1) * ROW_H + TOTAL_H;
+      const ppiWrap  = `<rect x="${PAD}" y="${ppiY}" width="${W - PAD*2}" height="${ppiWrapH}" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>`;
+
+      // section title bar
+      const ppiTitle = `
+        <text x="${PAD + 16}" y="${ppiY + 28}" font-family="${F}" font-size="15" font-weight="bold" fill="#111827">PPI Output</text>`;
+
+      // column header — exact names from dashboard
+      const tblX  = PAD + 4;
+      const tblW  = W - PAD * 2 - 8;
+      const colY2 = ppiY + SEC_H;
+      // Column x positions matching dashboard proportions
+      const TC = {
+        name:   tblX + 10,
+        orders: tblX + Math.floor(tblW * 0.33),
+        sumPpt: tblX + Math.floor(tblW * 0.52),
+        units:  tblX + Math.floor(tblW * 0.72),
+        ppt:    tblX + tblW - 10,
+      };
+      const colHeader2 = `
+        <rect x="${tblX}" y="${colY2}" width="${tblW}" height="${COL_H}" rx="4" fill="#16a34a"/>
+        <text x="${TC.name}"   y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Username</text>
+        <text x="${TC.orders}" y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">COUNTA of order id</text>
+        <text x="${TC.sumPpt}" y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">SUM of PPT (seconds)</text>
+        <text x="${TC.units}"  y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Sum of Quantity</text>
+        <text x="${TC.ppt}"    y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="end">PPT (seconds)</text>`;
+
+      const dataY2 = colY2 + COL_H;
+      const dataRowsSvg = pickers.length === 0
+        ? `<rect x="${tblX}" y="${dataY2}" width="${tblW}" height="${ROW_H}" fill="#ffffff"/>
+           <text x="${W/2}" y="${dataY2+30}" font-family="${F}" font-size="13" fill="#9ca3af" text-anchor="middle">No picker data</text>`
+        : pickers.map((p, i) => {
+            const y  = dataY2 + i * ROW_H;
+            const bg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
+            const pt = p.ppt != null ? `${p.ppt.toFixed(2)}s` : "-";
+            return `
+              <rect x="${tblX}" y="${y}" width="${tblW}" height="${ROW_H}" fill="${bg}"/>
+              <line x1="${tblX}" y1="${y+ROW_H}" x2="${tblX+tblW}" y2="${y+ROW_H}" stroke="#e5e7eb" stroke-width="1"/>
+              <text x="${TC.name}"   y="${y+30}" font-family="${F}" font-size="13" fill="#111827">${p.name}</text>
+              <text x="${TC.orders}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.orders}</text>
+              <text x="${TC.sumPpt}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.sumPpt.toFixed(2)}</text>
+              <text x="${TC.units}"  y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.units}</text>
+              <text x="${TC.ppt}"    y="${y+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#16a34a" text-anchor="end">${pt}</text>`;
+          }).join("\n");
+
+      const totalRowY = dataY2 + (pickers.length || 1) * ROW_H;
+      const totalRowSvg = `
+        <rect x="${tblX}" y="${totalRowY}" width="${tblW}" height="${TOTAL_H}" rx="0" fill="#15803d"/>
+        <text x="${TC.name}"   y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
+        <text x="${TC.orders}" y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalOrders}</text>
+        <text x="${TC.sumPpt}" y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalSumPpt.toFixed(2)}</text>
+        <text x="${TC.units}"  y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalUnits}</text>
+        <text x="${TC.ppt}"    y="${totalRowY+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#bbf7d0" text-anchor="end">${pptText}</text>`;
+
+      // ── Hourly section (amber theme, matches dashboard)
+      let hourlySvg = "";
+      if (recentHourly.length > 0) {
+        const htY    = totalRowY + TOTAL_H + GAP;
+        const hwrapH = SEC_H + COL_H + recentHourly.length * ROW_H + TOTAL_H;
+        const HC = {
+          hour:   tblX + 10,
+          orders: tblX + Math.floor(tblW * 0.33),
+          sumPpt: tblX + Math.floor(tblW * 0.55),
+          units:  tblX + Math.floor(tblW * 0.75),
+          ppt:    tblX + tblW - 10,
+        };
+        hourlySvg = `
+          <rect x="${PAD}" y="${htY}" width="${W-PAD*2}" height="${hwrapH}" rx="8" fill="#fffbeb" stroke="#fcd34d" stroke-width="2"/>
+          <text x="${PAD+16}" y="${htY+28}" font-family="${F}" font-size="15" font-weight="bold" fill="#111827">Hourly Breakdown</text>
+          <rect x="${tblX}" y="${htY+SEC_H}" width="${tblW}" height="${COL_H}" rx="4" fill="#d97706"/>
+          <text x="${HC.hour}"   y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Hour</text>
+          <text x="${HC.orders}" y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
+          <text x="${HC.sumPpt}" y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">SUM of PPT (seconds)</text>
+          <text x="${HC.units}"  y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Sum of Quantity</text>
+          <text x="${HC.ppt}"    y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="end">PPT (seconds)</text>
+          ${recentHourly.map((h, i) => {
+            const y   = htY + SEC_H + COL_H + i * ROW_H;
+            const bg  = i % 2 === 0 ? "#ffffff" : "#fffbeb";
+            const ht  = h.avg_ppt_seconds != null ? `${Number(h.avg_ppt_seconds).toFixed(2)}s` : "-";
+            const hsp = h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-";
+            const lbl = `${String(h.hour).padStart(2,"0")}:00`;
+            return `
+              <rect x="${tblX}" y="${y}" width="${tblW}" height="${ROW_H}" fill="${bg}"/>
+              <line x1="${tblX}" y1="${y+ROW_H}" x2="${tblX+tblW}" y2="${y+ROW_H}" stroke="#fde68a" stroke-width="1"/>
+              <text x="${HC.hour}"   y="${y+30}" font-family="${F}" font-size="13" fill="#374151">${lbl}</text>
+              <text x="${HC.orders}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.order_count}</text>
+              <text x="${HC.sumPpt}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${hsp}</text>
+              <text x="${HC.units}"  y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.unit_count}</text>
+              <text x="${HC.ppt}"    y="${y+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#b45309" text-anchor="end">${ht}</text>`;
+          }).join("\n")}
+          ${(() => {
+            const hty2 = htY + SEC_H + COL_H + recentHourly.length * ROW_H;
+            const hto  = recentHourly.reduce((s, h) => s + h.order_count, 0);
+            const htu  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
+            const htsp = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
+            return `
+              <rect x="${tblX}" y="${hty2}" width="${tblW}" height="${TOTAL_H}" fill="#b45309"/>
+              <text x="${HC.hour}"   y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
+              <text x="${HC.orders}" y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${hto}</text>
+              <text x="${HC.sumPpt}" y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${htsp.toFixed(2)}</text>
+              <text x="${HC.units}"  y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${htu}</text>
+              <text x="${HC.ppt}"    y="${hty2+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#fde68a" text-anchor="end">${pptText}</text>`;
+          })()}`;
+      }
+
+      // ── Footer
+      const footY = H - FOOT_H;
+      const trendNote = trend
+        ? `${trend} vs prev 2h window`
+        : `As of ${windowLabel} hrs  |  ${today}`;
+      const footerSvg = `
+        <rect x="0" y="${footY}" width="${W}" height="${FOOT_H}" fill="#f9fafb"/>
+        <text x="${W/2}" y="${footY+20}" font-family="${F}" font-size="11" fill="#9ca3af" text-anchor="middle">${trendNote}</text>`;
 
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
         ${fontFace}
-        <rect width="${W}" height="${H}" fill="#ffffff"/>
-        ${bannerSvg}${statSvg}${pickerTitleSvg}${pickerColSvg}${pickerRowsSvg}${pickerTotalSvg}${hourlySvg}${footerSvg}
+        <rect width="${W}" height="${H}" fill="#f1f5f9"/>
+        <rect x="${PAD}" y="${PAD}" width="${W-PAD*2}" height="${TITLE_H}" rx="8" fill="#16a34a"/>
+        <text x="${W/2}" y="${PAD+18}" font-family="${F}" font-size="12" fill="#bbf7d0" text-anchor="middle">DropX Dark Store  |  Total Performance</text>
+        <text x="${W/2}" y="${PAD+40}" font-family="${F}" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle">${code}${trend ? "   " + trend : ""}</text>
+        ${cards}
+        ${ppiWrap}${ppiTitle}${colHeader2}${dataRowsSvg}${totalRowSvg}
+        ${hourlySvg}
+        ${footerSvg}
       </svg>`;
 
       const buf = await sharp(Buffer.from(svg)).png().toBuffer();
