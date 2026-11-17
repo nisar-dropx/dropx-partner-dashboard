@@ -465,20 +465,24 @@ function computePPI(auditRows, invRows) {
     }
   }
 
-  // Build unit count per procurement list from inventory audit
-  // ReferenceIdValue in inventory = ProcurementListId in associate audit
-  // But inventory uses Amazon order IDs; ProcurementListId is the batch UUID.
-  // Units per order = abs(sum of deltaQuantity) for Outbound Pick rows with same ReferenceIdValue
-  // We need to match via the order list; for now count units from inventory by user+time proximity.
-  // Best available: count units from COMPLETE_PACKAGE rows' own iog/quantity field (not in audit).
-  // Fall back: 1 unit per order (can be enriched later via inventory audit join on timestamp).
-  const unitsByOrder = new Map();
+  // Match inventory rows to orders by username + timestamp within order window.
+  // Inventory referenceId is an Amazon order ID, not the procurement list UUID,
+  // so we join on: same username, inventory timestamp between order OFFERED and COMPLETE.
+  // Build a lookup: username → sorted array of {tsMs, delta}
+  const invByUser = new Map();
   for (const row of invRows) {
-    const ref = row.referenceIdValue ?? row.referenceId ?? row.ReferenceIdValue;
-    if (!ref) continue;
+    const user = row.user ?? row.username ?? row.User;
+    if (!user) continue;
+    const tsMs = Number(row.timestamp ?? row.Timestamp ?? 0);
     const delta = Math.abs(Number(row.deltaQuantity ?? row.Quantity ?? 0));
-    unitsByOrder.set(ref, (unitsByOrder.get(ref) ?? 0) + delta);
+    if (!tsMs || !delta) continue;
+    if (!invByUser.has(user)) invByUser.set(user, []);
+    invByUser.get(user).push({ tsMs, delta });
   }
+  // Sort each user's inventory rows by timestamp for efficient range scan
+  for (const arr of invByUser.values()) arr.sort((a, b) => a.tsMs - b.tsMs);
+
+  const unitsByOrder = new Map();
 
   const orderResults = [];
   for (const [id, o] of orders) {
@@ -488,7 +492,13 @@ function computePPI(auditRows, invRows) {
     const pptMs = o.complete.endMs - o.offered.startMs;
     if (pptMs < 0 || pptMs > 7200000) continue; // skip bogus (negative or >2h)
     const completedAt = new Date(o.complete.endMs).toISOString();
-    const unitCount = unitsByOrder.get(id) ?? 1;
+    // Sum inventory deltas for this picker within the order's time window
+    const userInv = invByUser.get(o.complete.username) ?? [];
+    let unitCount = 0;
+    for (const inv of userInv) {
+      if (inv.tsMs >= o.offered.startMs && inv.tsMs <= o.complete.endMs) unitCount += inv.delta;
+    }
+    if (unitCount === 0) unitCount = 1; // fallback
     orderResults.push({
       procurement_list_id: id,
       username: o.complete.username,
