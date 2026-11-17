@@ -39,7 +39,6 @@ function fmtSeconds(sec: number | null | undefined): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-// Testing group — PPI is only sent here until fully validated
 const TESTING_GROUP_ID = "120363429732355530@g.us";
 
 type DailyRow  = { station_code: string; username: string; order_count: number; unit_count: number; avg_ppt_seconds: number | null };
@@ -117,6 +116,13 @@ export async function GET(request: Request) {
     .in("id", locationIds);
 
   const stationCodes = [...new Set((stations ?? []).map(s => s.station_code as string))];
+
+  // Map station_code → wa_group_id (for sending to the real War Room group)
+  const groupByStation = new Map<string, { wa_group_id: string; group_name: string }>();
+  for (const g of groups) {
+    const st = (stations ?? []).find(s => s.id === g.location_id);
+    if (st) groupByStation.set(st.station_code as string, { wa_group_id: g.wa_group_id, group_name: g.group_name });
+  }
 
   // Previous window hour for trend comparison (2 hrs back)
   const prevHour = hour >= 2 ? hour - 2 : null;
@@ -337,8 +343,11 @@ export async function GET(request: Request) {
     }
   }
 
-  // Send one message per station to the testing group
+  // Send one message per station to its War Room group (falls back to testing group if not mapped)
   for (const stationCode of stationCodes.sort()) {
+    const target = groupByStation.get(stationCode);
+    const groupId   = target?.wa_group_id ?? TESTING_GROUP_ID;
+    const groupName = target?.group_name  ?? "Dark Store Testing";
     const caption = buildCaption(
       stationCode,
       dailyByStore.get(stationCode)  ?? [],
@@ -353,14 +362,14 @@ export async function GET(request: Request) {
       await workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
         body: imgB64
-          ? { to: TESTING_GROUP_ID, image_base64: imgB64, mime: "image/png", caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` }
-          : { to: TESTING_GROUP_ID, text: caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` },
+          ? { to: groupId, image_base64: imgB64, mime: "image/png", caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` }
+          : { to: groupId, text: caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` },
         timeoutMs: 30000,
       });
-      results.push({ store: stationCode, group: "Dark Store Testing", status: imgB64 ? "sent" : `text_only: ${imgError ?? "image_failed"}` });
+      results.push({ store: stationCode, group: groupName, status: imgB64 ? "sent" : `text_only: ${imgError ?? "image_failed"}` });
     } catch (err) {
       const msg = err instanceof WorkerError ? err.message : String(err);
-      results.push({ store: stationCode, group: "Dark Store Testing", status: `error: ${msg}` });
+      results.push({ store: stationCode, group: groupName, status: `error: ${msg}` });
     }
   }
 
