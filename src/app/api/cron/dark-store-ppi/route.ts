@@ -5,6 +5,18 @@ import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
 
+// Loaded once — satori needs the font buffer at call time
+let _fonts: { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[] | null = null;
+function getFonts() {
+  if (_fonts) return _fonts;
+  const dir = join(process.cwd(), "src/app/api/cron/dark-store-ppi");
+  _fonts = [
+    { name: "Inter", data: readFileSync(join(dir, "Inter-Regular.otf")).buffer as ArrayBuffer, weight: 400 as const, style: "normal" as const },
+    { name: "Inter", data: readFileSync(join(dir, "Inter-Bold.otf")).buffer   as ArrayBuffer, weight: 700 as const, style: "normal" as const },
+  ];
+  return _fonts;
+}
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
@@ -154,22 +166,13 @@ export async function GET(request: Request) {
 
   if (stationCodes.length === 0) return NextResponse.json({ ok: true, sent: 0, reason: "no stations" });
 
-  // Load Inter font once — embedded in every SVG so Vercel's Linux runtime renders text correctly
-  let fontB64 = "";
-  try {
-    const fontPath = join(process.cwd(), "src/app/api/cron/dark-store-ppi/inter.woff2");
-    fontB64 = readFileSync(fontPath).toString("base64");
-  } catch { /* font missing — SVG text will still render with system fallback */ }
+  // fonts loaded via getFonts() inside buildStationImage
 
-  const fontFace = fontB64
-    ? `<style>@font-face{font-family:'Inter';src:url('data:font/woff2;base64,${fontB64}') format('woff2');}</style>`
-    : "";
-  const F = fontB64 ? "Inter,Arial,sans-serif" : "Arial,Helvetica,sans-serif";
-
-  /** Build a per-station PNG matching the PPI Calculation Dashboard exactly */
+  /** Build a per-station PNG using satori (bundled font renderer — no system fonts needed) */
   async function buildStationImage(code: string): Promise<string | null> {
     try {
-      const sharp = (await import("sharp")).default;
+      const satori = (await import("satori")).default;
+      const { Resvg } = await import("@resvg/resvg-js");
       const daily  = dailyByStore.get(code)  ?? [];
       const hourly = hourlyByStore.get(code) ?? [];
 
@@ -182,206 +185,147 @@ export async function GET(request: Request) {
         ex.totalPptS += (r.avg_ppt_seconds ?? 0) * r.order_count;
         pickerMap.set(r.username, ex);
       }
-      // Dashboard shows raw SUM of PPT seconds and COUNTA of orders — keep those
       const pickers = [...pickerMap.entries()].map(([name, v]) => ({
         name,
-        orders:   v.orders,
-        sumPpt:   v.totalPptS,                                           // SUM of PPT (seconds)
-        units:    v.units,                                               // Sum of Quantity
-        ppt:      v.orders > 0 ? v.totalPptS / v.orders : null,         // PPT (seconds) = avg
+        orders: v.orders,
+        sumPpt: v.totalPptS,
+        units:  v.units,
+        ppt:    v.orders > 0 ? v.totalPptS / v.orders : null,
       }));
-      // Not sorted by PPT — keep original insertion order (matches dashboard default)
 
       const totalOrders = pickers.reduce((s, r) => s + r.orders, 0);
       const totalUnits  = pickers.reduce((s, r) => s + r.units,  0);
       const totalSumPpt = pickers.reduce((s, r) => s + r.sumPpt, 0);
       const avgPpt      = totalOrders > 0 ? totalSumPpt / totalOrders : null;
-      const pptText     = avgPpt != null ? `${(avgPpt).toFixed(2)}s` : "No data";
-
-      const prevPpt    = prevPptByStore.get(code) ?? null;
-      const diff       = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
-      const trend      = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
-      const trendColor = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : "#dc2626";
-
-      const uniqueUsers = pickers.length;
-
-      // Hourly rows sorted by hour
+      const pptText     = avgPpt != null ? `${avgPpt.toFixed(2)}s` : "No data";
+      const prevPpt     = prevPptByStore.get(code) ?? null;
+      const diff        = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
+      const trend       = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
+      const trendColor  = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : "#dc2626";
       const recentHourly = [...hourly].filter(h => h.hour <= hour).sort((a, b) => a.hour - b.hour);
 
-      // ── Layout constants (matches dashboard proportions at 640px wide)
-      const W        = 640;
-      const PAD      = 16;   // outer padding
-      const TITLE_H  = 48;   // "Total Performance" header bar
-      const CARD_H   = 80;   // stat cards row
-      const GAP      = 12;   // gap between sections
-      const SEC_H    = 44;   // "PPI Output" section title bar
-      const COL_H    = 40;   // table column header
-      const ROW_H    = 46;   // table data row
-      const TOTAL_H  = 46;   // TOTAL row
-      const HSEC_H   = recentHourly.length > 0 ? GAP + SEC_H + COL_H + recentHourly.length * ROW_H + TOTAL_H : 0;
-      const FOOT_H   = 30;
-      const H = PAD + TITLE_H + GAP + CARD_H + GAP + SEC_H + COL_H +
-                (pickers.length || 1) * ROW_H + TOTAL_H + HSEC_H + FOOT_H + PAD;
+      // ── Satori layout helpers
+      const W = 640;
+      const col = (flex: number, children: unknown, style?: object) => ({
+        type: "div", props: { style: { display: "flex", flex, alignItems: "center", padding: "0 8px", ...style }, children }
+      });
+      const txt = (s: string, style?: object) => ({ type: "span", props: { style: { fontFamily: "Inter", fontSize: 13, color: "#374151", ...style }, children: s } });
 
-      // ── Stat card helper (x, label, value)
-      function statCard(x: number, label: string, value: string) {
-        const CW = 112;
-        return `
-          <rect x="${x}" y="${PAD + TITLE_H + GAP}" width="${CW}" height="${CARD_H}" rx="8" fill="#ffffff" stroke="#e5e7eb" stroke-width="1"/>
-          <text x="${x+12}" y="${PAD + TITLE_H + GAP + 22}" font-family="${F}" font-size="10" fill="#6b7280">${label}</text>
-          <text x="${x+12}" y="${PAD + TITLE_H + GAP + 58}" font-family="${F}" font-size="20" font-weight="bold" fill="#111827">${value}</text>`;
+      // Table row
+      function tRow(bg: string, cells: { v: string; flex: number; style?: object }[], bold = false) {
+        return { type: "div", props: { style: { display: "flex", width: "100%", background: bg, borderBottom: "1px solid #e5e7eb", minHeight: 46 }, children:
+          cells.map(c => col(c.flex, txt(c.v, { fontWeight: bold ? 700 : 400, ...c.style })))
+        }};
       }
 
-      // 5 stat cards across full width with equal spacing
-      const cardW   = Math.floor((W - PAD * 2 - 4 * 8) / 5); // 5 cards, 4 gaps of 8px
-      function card5(i: number, label: string, value: string) {
-        const x = PAD + i * (cardW + 8);
-        return `
-          <rect x="${x}" y="${PAD + TITLE_H + GAP}" width="${cardW}" height="${CARD_H}" rx="8" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
-          <text x="${x+10}" y="${PAD + TITLE_H + GAP + 20}" font-family="${F}" font-size="10" fill="#6b7280">${label}</text>
-          <text x="${x+10}" y="${PAD + TITLE_H + GAP + 62}" font-family="${F}" font-size="22" font-weight="bold" fill="#111827">${value}</text>`;
-      }
+      // Stat card
+      const statCard = (label: string, value: string) => ({ type: "div", props: { style: {
+        display: "flex", flexDirection: "column", flex: 1, background: "#fff",
+        border: "1.5px solid #e5e7eb", borderRadius: 8, padding: "10px 12px", margin: "0 4px"
+      }, children: [
+        { type: "span", props: { style: { fontSize: 11, color: "#6b7280", fontFamily: "Inter", marginBottom: 6 }, children: label } },
+        { type: "span", props: { style: { fontSize: 22, fontWeight: 700, color: "#111827", fontFamily: "Inter" }, children: value } },
+      ]}});
 
-      const cards = [
-        card5(0, "Site Code",      code),
-        card5(1, "Orders",         String(totalOrders)),
-        card5(2, "Total Quantity", String(totalUnits)),
-        card5(3, "PPT",            pptText),
-        card5(4, "Unique Users",   String(uniqueUsers)),
-      ].join("");
+      // PPI table header row
+      const ppiColBg = "#16a34a";
+      const hcell = (v: string, flex: number) => col(flex, txt(v, { color: "#fff", fontWeight: 700, fontSize: 12 }), { background: ppiColBg, padding: "0 8px" });
 
-      // ── PPI Output section
-      const ppiY = PAD + TITLE_H + GAP + CARD_H + GAP;
+      // Hourly table header
+      const hhrColBg = "#d97706";
+      const hhcell = (v: string, flex: number) => col(flex, txt(v, { color: "#fff", fontWeight: 700, fontSize: 12 }), { background: hhrColBg, padding: "0 8px" });
 
-      // section wrapper border (green)
-      const ppiWrapH = SEC_H + COL_H + (pickers.length || 1) * ROW_H + TOTAL_H;
-      const ppiWrap  = `<rect x="${PAD}" y="${ppiY}" width="${W - PAD*2}" height="${ppiWrapH}" rx="8" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>`;
+      const hTotalOrders = recentHourly.reduce((s, h) => s + h.order_count, 0);
+      const hTotalUnits  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
+      const hTotalSumPpt = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
 
-      // section title bar
-      const ppiTitle = `
-        <text x="${PAD + 16}" y="${ppiY + 28}" font-family="${F}" font-size="15" font-weight="bold" fill="#111827">PPI Output</text>`;
+      const layout = { type: "div", props: { style: { display: "flex", flexDirection: "column", width: W, background: "#f1f5f9", padding: 16, fontFamily: "Inter" }, children: [
+        // ── Header banner
+        { type: "div", props: { style: { display: "flex", flexDirection: "column", alignItems: "center", background: "#16a34a", borderRadius: 8, padding: "12px 20px", marginBottom: 12 }, children: [
+          txt("DropX Dark Store  |  Total Performance", { color: "#bbf7d0", fontSize: 12, marginBottom: 4 }),
+          { type: "div", props: { style: { display: "flex", alignItems: "center", gap: 16 }, children: [
+            txt(code, { color: "#fff", fontWeight: 700, fontSize: 24 }),
+            ...(trend ? [{ type: "div", props: { style: { display: "flex", background: `${trendColor}30`, borderRadius: 6, padding: "2px 10px" }, children: txt(trend, { color: trendColor, fontWeight: 700, fontSize: 15 }) }}] : []),
+          ]}},
+        ]}},
+        // ── Stat cards row
+        { type: "div", props: { style: { display: "flex", flexDirection: "row", marginBottom: 12, margin: "0 -4px 12px -4px" }, children: [
+          statCard("Site Code",      code),
+          statCard("Orders",         String(totalOrders)),
+          statCard("Total Quantity", String(totalUnits)),
+          statCard("PPT",            pptText),
+          statCard("Unique Users",   String(pickers.length)),
+        ]}},
+        // ── PPI Output section
+        { type: "div", props: { style: { display: "flex", flexDirection: "column", background: "#f0fdf4", border: "2px solid #86efac", borderRadius: 8, marginBottom: 12, overflow: "hidden" }, children: [
+          { type: "div", props: { style: { display: "flex", padding: "10px 16px" }, children: txt("PPI Output", { fontWeight: 700, fontSize: 15, color: "#111827" }) }},
+          // col header
+          { type: "div", props: { style: { display: "flex", width: "100%", minHeight: 40, background: ppiColBg }, children: [
+            hcell("Username",             3),
+            hcell("COUNTA of order id",   2),
+            hcell("SUM of PPT (seconds)", 3),
+            hcell("Sum of Quantity",      2),
+            hcell("PPT (seconds)",        2),
+          ]}},
+          // data rows
+          ...(pickers.length === 0
+            ? [{ type: "div", props: { style: { display: "flex", justifyContent: "center", padding: 16 }, children: txt("No picker data", { color: "#9ca3af" }) }}]
+            : pickers.map((p, i) => tRow(i % 2 === 0 ? "#fff" : "#f9fafb", [
+                { v: p.name,                 flex: 3 },
+                { v: String(p.orders),       flex: 2, style: { color: "#374151" } },
+                { v: p.sumPpt.toFixed(2),    flex: 3, style: { color: "#374151" } },
+                { v: String(p.units),        flex: 2, style: { color: "#374151" } },
+                { v: p.ppt != null ? `${p.ppt.toFixed(2)}s` : "-", flex: 2, style: { color: "#16a34a", fontWeight: 700 } },
+              ]))
+          ),
+          // total row
+          tRow("#15803d", [
+            { v: "TOTAL",                  flex: 3, style: { color: "#fff", fontWeight: 700 } },
+            { v: String(totalOrders),      flex: 2, style: { color: "#fff", fontWeight: 700 } },
+            { v: totalSumPpt.toFixed(2),   flex: 3, style: { color: "#fff", fontWeight: 700 } },
+            { v: String(totalUnits),       flex: 2, style: { color: "#fff", fontWeight: 700 } },
+            { v: pptText,                  flex: 2, style: { color: "#bbf7d0", fontWeight: 700 } },
+          ], true),
+        ]}},
+        // ── Hourly Breakdown (if data exists)
+        ...(recentHourly.length === 0 ? [] : [{ type: "div", props: { style: { display: "flex", flexDirection: "column", background: "#fffbeb", border: "2px solid #fcd34d", borderRadius: 8, overflow: "hidden" }, children: [
+          { type: "div", props: { style: { display: "flex", padding: "10px 16px" }, children: txt("Hourly Breakdown", { fontWeight: 700, fontSize: 15, color: "#111827" }) }},
+          { type: "div", props: { style: { display: "flex", width: "100%", minHeight: 40, background: hhrColBg }, children: [
+            hhcell("Hour",                 2),
+            hhcell("Orders",               2),
+            hhcell("SUM of PPT (seconds)", 3),
+            hhcell("Sum of Quantity",      2),
+            hhcell("PPT (seconds)",        2),
+          ]}},
+          ...recentHourly.map((h, i) => tRow(i % 2 === 0 ? "#fff" : "#fffbeb", [
+            { v: `${String(h.hour).padStart(2,"0")}:00`, flex: 2 },
+            { v: String(h.order_count), flex: 2 },
+            { v: h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-", flex: 3 },
+            { v: String(h.unit_count), flex: 2 },
+            { v: h.avg_ppt_seconds != null ? `${Number(h.avg_ppt_seconds).toFixed(2)}s` : "-", flex: 2, style: { color: "#b45309", fontWeight: 700 } },
+          ] as { v: string; flex: number; style?: object }[])),
+          tRow("#b45309", [
+            { v: "TOTAL",                      flex: 2, style: { color: "#fff", fontWeight: 700 } },
+            { v: String(hTotalOrders),          flex: 2, style: { color: "#fff", fontWeight: 700 } },
+            { v: hTotalSumPpt.toFixed(2),       flex: 3, style: { color: "#fff", fontWeight: 700 } },
+            { v: String(hTotalUnits),           flex: 2, style: { color: "#fff", fontWeight: 700 } },
+            { v: pptText,                       flex: 2, style: { color: "#fde68a", fontWeight: 700 } },
+          ], true),
+        ]}}]),
+        // footer
+        { type: "div", props: { style: { display: "flex", justifyContent: "center", marginTop: 8 }, children:
+          txt(trend ? `${trend} vs previous 2h window` : `As of ${windowLabel} hrs  |  ${today}`, { fontSize: 11, color: "#9ca3af" })
+        }},
+      ]}};
 
-      // column header — exact names from dashboard
-      const tblX  = PAD + 4;
-      const tblW  = W - PAD * 2 - 8;
-      const colY2 = ppiY + SEC_H;
-      // Column x positions matching dashboard proportions
-      const TC = {
-        name:   tblX + 10,
-        orders: tblX + Math.floor(tblW * 0.33),
-        sumPpt: tblX + Math.floor(tblW * 0.52),
-        units:  tblX + Math.floor(tblW * 0.72),
-        ppt:    tblX + tblW - 10,
-      };
-      const colHeader2 = `
-        <rect x="${tblX}" y="${colY2}" width="${tblW}" height="${COL_H}" rx="4" fill="#16a34a"/>
-        <text x="${TC.name}"   y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Username</text>
-        <text x="${TC.orders}" y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">COUNTA of order id</text>
-        <text x="${TC.sumPpt}" y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">SUM of PPT (seconds)</text>
-        <text x="${TC.units}"  y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Sum of Quantity</text>
-        <text x="${TC.ppt}"    y="${colY2+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="end">PPT (seconds)</text>`;
-
-      const dataY2 = colY2 + COL_H;
-      const dataRowsSvg = pickers.length === 0
-        ? `<rect x="${tblX}" y="${dataY2}" width="${tblW}" height="${ROW_H}" fill="#ffffff"/>
-           <text x="${W/2}" y="${dataY2+30}" font-family="${F}" font-size="13" fill="#9ca3af" text-anchor="middle">No picker data</text>`
-        : pickers.map((p, i) => {
-            const y  = dataY2 + i * ROW_H;
-            const bg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
-            const pt = p.ppt != null ? `${p.ppt.toFixed(2)}s` : "-";
-            return `
-              <rect x="${tblX}" y="${y}" width="${tblW}" height="${ROW_H}" fill="${bg}"/>
-              <line x1="${tblX}" y1="${y+ROW_H}" x2="${tblX+tblW}" y2="${y+ROW_H}" stroke="#e5e7eb" stroke-width="1"/>
-              <text x="${TC.name}"   y="${y+30}" font-family="${F}" font-size="13" fill="#111827">${p.name}</text>
-              <text x="${TC.orders}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.orders}</text>
-              <text x="${TC.sumPpt}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.sumPpt.toFixed(2)}</text>
-              <text x="${TC.units}"  y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${p.units}</text>
-              <text x="${TC.ppt}"    y="${y+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#16a34a" text-anchor="end">${pt}</text>`;
-          }).join("\n");
-
-      const totalRowY = dataY2 + (pickers.length || 1) * ROW_H;
-      const totalRowSvg = `
-        <rect x="${tblX}" y="${totalRowY}" width="${tblW}" height="${TOTAL_H}" rx="0" fill="#15803d"/>
-        <text x="${TC.name}"   y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
-        <text x="${TC.orders}" y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalOrders}</text>
-        <text x="${TC.sumPpt}" y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalSumPpt.toFixed(2)}</text>
-        <text x="${TC.units}"  y="${totalRowY+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${totalUnits}</text>
-        <text x="${TC.ppt}"    y="${totalRowY+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#bbf7d0" text-anchor="end">${pptText}</text>`;
-
-      // ── Hourly section (amber theme, matches dashboard)
-      let hourlySvg = "";
-      if (recentHourly.length > 0) {
-        const htY    = totalRowY + TOTAL_H + GAP;
-        const hwrapH = SEC_H + COL_H + recentHourly.length * ROW_H + TOTAL_H;
-        const HC = {
-          hour:   tblX + 10,
-          orders: tblX + Math.floor(tblW * 0.33),
-          sumPpt: tblX + Math.floor(tblW * 0.55),
-          units:  tblX + Math.floor(tblW * 0.75),
-          ppt:    tblX + tblW - 10,
-        };
-        hourlySvg = `
-          <rect x="${PAD}" y="${htY}" width="${W-PAD*2}" height="${hwrapH}" rx="8" fill="#fffbeb" stroke="#fcd34d" stroke-width="2"/>
-          <text x="${PAD+16}" y="${htY+28}" font-family="${F}" font-size="15" font-weight="bold" fill="#111827">Hourly Breakdown</text>
-          <rect x="${tblX}" y="${htY+SEC_H}" width="${tblW}" height="${COL_H}" rx="4" fill="#d97706"/>
-          <text x="${HC.hour}"   y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff">Hour</text>
-          <text x="${HC.orders}" y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
-          <text x="${HC.sumPpt}" y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">SUM of PPT (seconds)</text>
-          <text x="${HC.units}"  y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">Sum of Quantity</text>
-          <text x="${HC.ppt}"    y="${htY+SEC_H+26}" font-family="${F}" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="end">PPT (seconds)</text>
-          ${recentHourly.map((h, i) => {
-            const y   = htY + SEC_H + COL_H + i * ROW_H;
-            const bg  = i % 2 === 0 ? "#ffffff" : "#fffbeb";
-            const ht  = h.avg_ppt_seconds != null ? `${Number(h.avg_ppt_seconds).toFixed(2)}s` : "-";
-            const hsp = h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-";
-            const lbl = `${String(h.hour).padStart(2,"0")}:00`;
-            return `
-              <rect x="${tblX}" y="${y}" width="${tblW}" height="${ROW_H}" fill="${bg}"/>
-              <line x1="${tblX}" y1="${y+ROW_H}" x2="${tblX+tblW}" y2="${y+ROW_H}" stroke="#fde68a" stroke-width="1"/>
-              <text x="${HC.hour}"   y="${y+30}" font-family="${F}" font-size="13" fill="#374151">${lbl}</text>
-              <text x="${HC.orders}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.order_count}</text>
-              <text x="${HC.sumPpt}" y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${hsp}</text>
-              <text x="${HC.units}"  y="${y+30}" font-family="${F}" font-size="13" fill="#374151" text-anchor="middle">${h.unit_count}</text>
-              <text x="${HC.ppt}"    y="${y+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#b45309" text-anchor="end">${ht}</text>`;
-          }).join("\n")}
-          ${(() => {
-            const hty2 = htY + SEC_H + COL_H + recentHourly.length * ROW_H;
-            const hto  = recentHourly.reduce((s, h) => s + h.order_count, 0);
-            const htu  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
-            const htsp = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
-            return `
-              <rect x="${tblX}" y="${hty2}" width="${tblW}" height="${TOTAL_H}" fill="#b45309"/>
-              <text x="${HC.hour}"   y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff">TOTAL</text>
-              <text x="${HC.orders}" y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${hto}</text>
-              <text x="${HC.sumPpt}" y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${htsp.toFixed(2)}</text>
-              <text x="${HC.units}"  y="${hty2+30}" font-family="${F}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${htu}</text>
-              <text x="${HC.ppt}"    y="${hty2+30}" font-family="${F}" font-size="14" font-weight="bold" fill="#fde68a" text-anchor="end">${pptText}</text>`;
-          })()}`;
-      }
-
-      // ── Footer
-      const footY = H - FOOT_H;
-      const trendNote = trend
-        ? `${trend} vs prev 2h window`
-        : `As of ${windowLabel} hrs  |  ${today}`;
-      const footerSvg = `
-        <rect x="0" y="${footY}" width="${W}" height="${FOOT_H}" fill="#f9fafb"/>
-        <text x="${W/2}" y="${footY+20}" font-family="${F}" font-size="11" fill="#9ca3af" text-anchor="middle">${trendNote}</text>`;
-
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-        ${fontFace}
-        <rect width="${W}" height="${H}" fill="#f1f5f9"/>
-        <rect x="${PAD}" y="${PAD}" width="${W-PAD*2}" height="${TITLE_H}" rx="8" fill="#16a34a"/>
-        <text x="${W/2}" y="${PAD+18}" font-family="${F}" font-size="12" fill="#bbf7d0" text-anchor="middle">DropX Dark Store  |  Total Performance</text>
-        <text x="${W/2}" y="${PAD+40}" font-family="${F}" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle">${code}${trend ? "   " + trend : ""}</text>
-        ${cards}
-        ${ppiWrap}${ppiTitle}${colHeader2}${dataRowsSvg}${totalRowSvg}
-        ${hourlySvg}
-        ${footerSvg}
-      </svg>`;
-
-      const buf = await sharp(Buffer.from(svg)).png().toBuffer();
-      return buf.toString("base64");
+      const svg = await satori(layout as Parameters<typeof satori>[0], {
+        width: W,
+        height: 9999, // satori auto-heights with flexDirection: column
+        fonts: getFonts(),
+      });
+      const resvg = new Resvg(svg, { fitTo: { mode: "width" as const, value: W } });
+      const buf = resvg.render().asPng();
+      return Buffer.from(buf).toString("base64");
     } catch {
       return null;
     }
