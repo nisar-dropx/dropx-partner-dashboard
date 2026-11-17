@@ -70,7 +70,7 @@ function buildCaption(
     else                trendNote = " (No change)";
   }
 
-  const pptDisplay = avgPpt != null ? fmtSeconds(avgPpt) : "No data";
+  const pptDisplay = avgPpt != null ? `${avgPpt.toFixed(2)}s` : "No data";
 
   return [
     `*${stationCode}*`,
