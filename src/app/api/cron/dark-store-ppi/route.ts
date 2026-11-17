@@ -158,59 +158,107 @@ export async function GET(request: Request) {
 
   const combinedText = storeLines.join("\n\n");
 
-  // Build PPI image — light theme, ASCII-only text (safe on all Android WhatsApp versions)
+  // Build PPI image — matches the PPI Calculation Dashboard design exactly
+  // White bg, green-600 header (#16a34a), alternating white/#f3f4f6 rows,
+  // PPT bold green-700 (#15803d), ASCII-only trend (safe on all Android WhatsApp)
   let imageBase64: string | undefined;
   try {
     const sharp = (await import("sharp")).default;
-    const rows = stationCodes.sort().map(code => {
+
+    const W = 600;
+    const BANNER_H  = 72;  // top green title banner
+    const SUBHEAD_H = 36;  // date/time subtitle bar
+    const COL_H     = 42;  // column header row
+    const ROW_H     = 50;  // per-store data row
+    const TOTAL_H   = 48;  // green total row
+    const FOOTER_H  = 34;  // footer note
+
+    // Build per-store data
+    const dataRows = stationCodes.sort().map(code => {
       const daily = dailyByStore.get(code) ?? [];
       const totalOrders = daily.reduce((s, r) => s + r.order_count, 0);
+      const totalUnits  = daily.reduce((s, r) => s + r.unit_count,  0);
       const totalPptS   = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
       const avgPpt = totalOrders > 0 ? totalPptS / totalOrders : null;
       const prevPpt = prevPptByStore.get(code) ?? null;
       const diff = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
-      // ASCII-only trend: + improved (lower PPT), - declined
-      const trend      = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
-      const trendColor = diff == null ? "#6b7280" : diff > 0 ? "#15803d" : diff < 0 ? "#dc2626" : "#6b7280";
-      return { code, ppt: avgPpt, orders: totalOrders, trend, trendColor };
+      const trend      = diff == null ? "-" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
+      const trendColor = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : diff < 0 ? "#dc2626" : "#6b7280";
+      return { code, orders: totalOrders, units: totalUnits, ppt: avgPpt, trend, trendColor };
     });
 
-    const W = 560, ROW_H = 54, HEADER_H = 80, COL_H = 44, FOOTER_H = 40;
-    const H = HEADER_H + COL_H + rows.length * ROW_H + FOOTER_H;
+    const grandOrders = dataRows.reduce((s, r) => s + r.orders, 0);
+    const grandUnits  = dataRows.reduce((s, r) => s + r.units,  0);
+    const grandPptS   = dataRows.reduce((s, r) => s + (r.ppt ?? 0) * r.orders, 0);
+    const grandPpt    = grandOrders > 0 ? grandPptS / grandOrders : null;
 
-    // Column header row
-    const colY = HEADER_H;
-    const colRow = `
-      <rect x="0" y="${colY}" width="${W}" height="${COL_H}" fill="#16a34a"/>
-      <text x="24" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">Station</text>
-      <text x="260" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">PPT (avg)</text>
-      <text x="420" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
-      <text x="530" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="end">Trend</text>`;
+    const H = BANNER_H + SUBHEAD_H + COL_H + dataRows.length * ROW_H + TOTAL_H + FOOTER_H;
 
-    const svgRows = rows.map((r, i) => {
-      const y = HEADER_H + COL_H + i * ROW_H;
-      const bg = i % 2 === 0 ? "#ffffff" : "#f3f4f6";
+    // Column x positions
+    const C = { station: 24, orders: 190, units: 300, ppt: 430, trend: 578 };
+
+    const font  = "Arial,Helvetica,sans-serif";
+    const mono  = "Courier New,Courier,monospace";
+
+    // ── Banner
+    const banner = `
+      <rect x="0" y="0" width="${W}" height="${BANNER_H}" fill="#16a34a"/>
+      <text x="${W/2}" y="28" font-family="${font}" font-size="14" fill="#bbf7d0" text-anchor="middle" letter-spacing="2">DROPX DARK STORE</text>
+      <text x="${W/2}" y="56" font-family="${font}" font-size="24" font-weight="bold" fill="#ffffff" text-anchor="middle">PPI Report</text>`;
+
+    // ── Sub-header (date + time)
+    const subY = BANNER_H;
+    const subHead = `
+      <rect x="0" y="${subY}" width="${W}" height="${SUBHEAD_H}" fill="#dcfce7"/>
+      <text x="${W/2}" y="${subY + 24}" font-family="${font}" font-size="14" fill="#15803d" text-anchor="middle" font-weight="bold">As of ${windowLabel} hrs  |  ${today}</text>`;
+
+    // ── Column header
+    const colY = BANNER_H + SUBHEAD_H;
+    const colHeader = `
+      <rect x="0" y="${colY}" width="${W}" height="${COL_H}" fill="#15803d"/>
+      <text x="${C.station}" y="${colY + 27}" font-family="${font}" font-size="13" font-weight="bold" fill="#ffffff">Station</text>
+      <text x="${C.orders}"  y="${colY + 27}" font-family="${font}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
+      <text x="${C.units}"   y="${colY + 27}" font-family="${font}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">Units</text>
+      <text x="${C.ppt}"     y="${colY + 27}" font-family="${font}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">PPT (avg)</text>
+      <text x="${C.trend}"   y="${colY + 27}" font-family="${font}" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="end">vs prev</text>`;
+
+    // ── Data rows
+    const dataY = BANNER_H + SUBHEAD_H + COL_H;
+    const rowsSvg = dataRows.map((r, i) => {
+      const y   = dataY + i * ROW_H;
+      const bg  = i % 2 === 0 ? "#ffffff" : "#f3f4f6";
       const pptText = r.ppt != null ? fmtSeconds(r.ppt) : "No data";
-      const pptColor = r.ppt != null ? "#15803d" : "#9ca3af";
+      const pptCol  = r.ppt != null ? "#15803d" : "#9ca3af";
       return `
         <rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
-        <line x1="0" y1="${y + ROW_H}" x2="${W}" y2="${y + ROW_H}" stroke="#e5e7eb" stroke-width="1"/>
-        <text x="24" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="#111827">${r.code}</text>
-        <text x="260" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="${pptColor}" text-anchor="middle">${pptText}</text>
-        <text x="420" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="16" fill="#374151" text-anchor="middle">${r.orders}</text>
-        <text x="530" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="bold" fill="${r.trendColor}" text-anchor="end">${r.trend}</text>`;
+        <line x1="0" y1="${y+ROW_H-1}" x2="${W}" y2="${y+ROW_H-1}" stroke="#e5e7eb" stroke-width="1"/>
+        <text x="${C.station}" y="${y+32}" font-family="${font}" font-size="17" font-weight="bold" fill="#111827">${r.code}</text>
+        <text x="${C.orders}"  y="${y+32}" font-family="${mono}" font-size="15" fill="#374151" text-anchor="middle">${r.orders}</text>
+        <text x="${C.units}"   y="${y+32}" font-family="${mono}" font-size="15" fill="#374151" text-anchor="middle">${r.units}</text>
+        <text x="${C.ppt}"     y="${y+32}" font-family="${mono}" font-size="16" font-weight="bold" fill="${pptCol}" text-anchor="middle">${pptText}</text>
+        <text x="${C.trend}"   y="${y+32}" font-family="${mono}" font-size="14" font-weight="bold" fill="${r.trendColor}" text-anchor="end">${r.trend}</text>`;
     }).join("\n");
 
-    const footerY = HEADER_H + COL_H + rows.length * ROW_H;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <rect width="${W}" height="${H}" fill="#f9fafb"/>
-      <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="#16a34a"/>
-      <text x="${W / 2}" y="32" font-family="Arial,Helvetica,sans-serif" font-size="15" fill="#bbf7d0" text-anchor="middle">DropX Dark Store</text>
-      <text x="${W / 2}" y="60" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="bold" fill="#ffffff" text-anchor="middle">PPI Report - ${windowLabel} hrs</text>
-      ${colRow}
-      ${svgRows}
+    // ── Total row
+    const totalY = dataY + dataRows.length * ROW_H;
+    const totalPptText = grandPpt != null ? fmtSeconds(grandPpt) : "-";
+    const totalRow = `
+      <rect x="0" y="${totalY}" width="${W}" height="${TOTAL_H}" fill="#15803d"/>
+      <text x="${C.station}" y="${totalY+30}" font-family="${font}" font-size="15" font-weight="bold" fill="#ffffff">TOTAL</text>
+      <text x="${C.orders}"  y="${totalY+30}" font-family="${mono}" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">${grandOrders}</text>
+      <text x="${C.units}"   y="${totalY+30}" font-family="${mono}" font-size="15" font-weight="bold" fill="#ffffff" text-anchor="middle">${grandUnits}</text>
+      <text x="${C.ppt}"     y="${totalY+30}" font-family="${mono}" font-size="16" font-weight="bold" fill="#bbf7d0" text-anchor="middle">${totalPptText}</text>
+      <text x="${C.trend}"   y="${totalY+30}" font-family="${font}" font-size="12" fill="#bbf7d0" text-anchor="end">overall avg</text>`;
+
+    // ── Footer
+    const footerY = totalY + TOTAL_H;
+    const footer = `
       <rect x="0" y="${footerY}" width="${W}" height="${FOOTER_H}" fill="#f0fdf4"/>
-      <text x="${W / 2}" y="${footerY + 26}" font-family="Arial,Helvetica,sans-serif" font-size="13" fill="#6b7280" text-anchor="middle">+Ns = improved (lower PPT)  -Ns = declined  vs prev 2h</text>
+      <text x="${W/2}" y="${footerY+22}" font-family="${font}" font-size="12" fill="#6b7280" text-anchor="middle">+Ns = improved (lower PPT)   -Ns = declined   vs previous 2-hr window</text>`;
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <rect width="${W}" height="${H}" fill="#ffffff"/>
+      ${banner}${subHead}${colHeader}${rowsSvg}${totalRow}${footer}
     </svg>`;
 
     const buf = await sharp(Buffer.from(svg)).png().toBuffer();
