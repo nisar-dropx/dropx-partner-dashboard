@@ -158,40 +158,61 @@ export async function GET(request: Request) {
 
   const combinedText = storeLines.join("\n\n");
 
-  // Build PPI image
+  // Build PPI image — light theme, ASCII-only text (safe on all Android WhatsApp versions)
   let imageBase64: string | undefined;
   try {
     const sharp = (await import("sharp")).default;
     const rows = stationCodes.sort().map(code => {
       const daily = dailyByStore.get(code) ?? [];
       const totalOrders = daily.reduce((s, r) => s + r.order_count, 0);
-      const totalPptS = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
+      const totalPptS   = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
       const avgPpt = totalOrders > 0 ? totalPptS / totalOrders : null;
       const prevPpt = prevPptByStore.get(code) ?? null;
       const diff = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
-      const trend = diff == null ? "" : diff > 0 ? `▲ ${diff}s` : diff < 0 ? `▼ ${Math.abs(diff)}s` : "—";
-      const trendColor = diff == null ? "#888" : diff > 0 ? "#22c55e" : diff < 0 ? "#ef4444" : "#888";
+      // ASCII-only trend: + improved (lower PPT), - declined
+      const trend      = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
+      const trendColor = diff == null ? "#6b7280" : diff > 0 ? "#15803d" : diff < 0 ? "#dc2626" : "#6b7280";
       return { code, ppt: avgPpt, orders: totalOrders, trend, trendColor };
     });
-    const W = 520, ROW_H = 52, HEADER_H = 72, FOOTER_H = 36;
-    const H = HEADER_H + rows.length * ROW_H + FOOTER_H;
+
+    const W = 560, ROW_H = 54, HEADER_H = 80, COL_H = 44, FOOTER_H = 40;
+    const H = HEADER_H + COL_H + rows.length * ROW_H + FOOTER_H;
+
+    // Column header row
+    const colY = HEADER_H;
+    const colRow = `
+      <rect x="0" y="${colY}" width="${W}" height="${COL_H}" fill="#16a34a"/>
+      <text x="24" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff">Station</text>
+      <text x="260" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">PPT (avg)</text>
+      <text x="420" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">Orders</text>
+      <text x="530" y="${colY + 28}" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="end">Trend</text>`;
+
     const svgRows = rows.map((r, i) => {
-      const y = HEADER_H + i * ROW_H;
-      const bg = i % 2 === 0 ? "#1e293b" : "#0f172a";
+      const y = HEADER_H + COL_H + i * ROW_H;
+      const bg = i % 2 === 0 ? "#ffffff" : "#f3f4f6";
       const pptText = r.ppt != null ? fmtSeconds(r.ppt) : "No data";
-      return `<rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
-        <text x="28" y="${y + 33}" font-family="monospace" font-size="18" font-weight="bold" fill="#f8fafc">${r.code}</text>
-        <text x="${W / 2}" y="${y + 33}" font-family="monospace" font-size="18" fill="${r.ppt != null ? "#f8fafc" : "#64748b"}" text-anchor="middle">${pptText}</text>
-        <text x="${W - 28}" y="${y + 33}" font-family="monospace" font-size="16" fill="${r.trendColor}" text-anchor="end">${r.trend}</text>`;
+      const pptColor = r.ppt != null ? "#15803d" : "#9ca3af";
+      return `
+        <rect x="0" y="${y}" width="${W}" height="${ROW_H}" fill="${bg}"/>
+        <line x1="0" y1="${y + ROW_H}" x2="${W}" y2="${y + ROW_H}" stroke="#e5e7eb" stroke-width="1"/>
+        <text x="24" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="#111827">${r.code}</text>
+        <text x="260" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="${pptColor}" text-anchor="middle">${pptText}</text>
+        <text x="420" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="16" fill="#374151" text-anchor="middle">${r.orders}</text>
+        <text x="530" y="${y + 34}" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="bold" fill="${r.trendColor}" text-anchor="end">${r.trend}</text>`;
     }).join("\n");
+
+    const footerY = HEADER_H + COL_H + rows.length * ROW_H;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <rect width="${W}" height="${H}" fill="#0f172a"/>
-      <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="#1d4ed8"/>
-      <text x="${W / 2}" y="30" font-family="monospace" font-size="16" fill="#bfdbfe" text-anchor="middle">DropX Dark Store PPI</text>
-      <text x="${W / 2}" y="56" font-family="monospace" font-size="20" font-weight="bold" fill="#ffffff" text-anchor="middle">As of ${windowLabel} hrs · ${today}</text>
-      <text x="28" y="${HEADER_H + rows.length * ROW_H + 24}" font-family="monospace" font-size="13" fill="#475569">▲ Improved  ▼ Declined  vs previous 2h window</text>
+      <rect width="${W}" height="${H}" fill="#f9fafb"/>
+      <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="#16a34a"/>
+      <text x="${W / 2}" y="32" font-family="Arial,Helvetica,sans-serif" font-size="15" fill="#bbf7d0" text-anchor="middle">DropX Dark Store</text>
+      <text x="${W / 2}" y="60" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="bold" fill="#ffffff" text-anchor="middle">PPI Report - ${windowLabel} hrs</text>
+      ${colRow}
       ${svgRows}
+      <rect x="0" y="${footerY}" width="${W}" height="${FOOTER_H}" fill="#f0fdf4"/>
+      <text x="${W / 2}" y="${footerY + 26}" font-family="Arial,Helvetica,sans-serif" font-size="13" fill="#6b7280" text-anchor="middle">+Ns = improved (lower PPT)  -Ns = declined  vs prev 2h</text>
     </svg>`;
+
     const buf = await sharp(Buffer.from(svg)).png().toBuffer();
     imageBase64 = buf.toString("base64");
   } catch { /* skip image if sharp unavailable */ }
