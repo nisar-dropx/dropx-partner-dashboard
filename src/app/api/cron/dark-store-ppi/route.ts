@@ -348,8 +348,8 @@ export async function GET(request: Request) {
       await workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
         body: imgB64
-          ? { to: TESTING_GROUP_ID, image_base64: imgB64, mime: "image/png", caption, client_ref: `ppi-${stationCode}-${today}-${hour}` }
-          : { to: TESTING_GROUP_ID, text: caption, client_ref: `ppi-${stationCode}-${today}-${hour}` },
+          ? { to: TESTING_GROUP_ID, image_base64: imgB64, mime: "image/png", caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` }
+          : { to: TESTING_GROUP_ID, text: caption, client_ref: `ppi-${stationCode}-${today}-${hour}-${Math.floor(Date.now()/60000)}` },
         timeoutMs: 30000,
       });
       results.push({ store: stationCode, group: "Dark Store Testing", status: imgB64 ? "sent" : `text_only: ${imgError ?? "image_failed"}` });
