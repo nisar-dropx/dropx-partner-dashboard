@@ -487,11 +487,12 @@ function computePPI(auditRows, invRows) {
     const pptMs = o.complete.endMs - o.offered.startMs;
     if (pptMs < 0 || pptMs > 7200000) continue; // skip bogus (negative or >2h)
     const completedAt = new Date(o.complete.endMs).toISOString();
+    const unitCount = unitsByOrder.get(id) ?? 1;
     orderResults.push({
       procurement_list_id: id,
       username: o.complete.username,
       completed_at: completedAt,
-      unit_count: 1, // default; enriched if inventory join available
+      unit_count: unitCount,
       ppt_ms: pptMs,
       ppt_seconds: pptMs / 1000
     });

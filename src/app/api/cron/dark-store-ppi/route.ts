@@ -254,6 +254,13 @@ export async function GET(request: Request) {
             ...(trend ? [{ type: "div", props: { style: { display: "flex", background: `${trendColor}30`, borderRadius: 6, padding: "2px 10px" }, children: txt(trend, { color: trendColor, fontWeight: 700, fontSize: 15 }) }}] : []),
           ]}},
         ]}},
+        // ── Summary line (always visible in image)
+        { type: "div", props: { style: { display: "flex", justifyContent: "center", alignItems: "center", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: "6px 16px", marginBottom: 10 }, children:
+          txt(
+            `PPI today as of ${windowLabel} hrs: ${pptText}` + (diff != null ? (diff > 0 ? `  ▲ Improved by ${Math.abs(diff)}s` : diff < 0 ? `  ▼ Declined by ${Math.abs(diff)}s` : "  = No change") : ""),
+            { fontWeight: 700, fontSize: 14, color: "#15803d" }
+          )
+        }},
         // ── Stat cards row
         { type: "div", props: { style: { display: "flex", flexDirection: "row", marginBottom: 12, margin: "0 -4px 12px -4px" }, children: [
           statCard("Site Code",      code),
@@ -324,10 +331,10 @@ export async function GET(request: Request) {
         }},
       ]}};
 
-      // Estimate height: header(80) + cards(100) + ppi section(50 + 44 + pickers*46 + 46) + hourly(50 + 44 + hours*46 + 46) + footer(40) + padding(60)
+      // Estimate height: header(80) + summary(40) + cards(100) + ppi section(50 + 44 + pickers*46 + 46) + hourly(50 + 44 + hours*46 + 46) + footer(40) + padding(60)
       const ppiRows   = Math.max(pickers.length, 1);
       const hourRows  = recentHourly.length;
-      const estH = 80 + 100 + 50 + 44 + ppiRows * 46 + 46 + (hourRows > 0 ? 50 + 44 + hourRows * 46 + 46 : 0) + 40 + 60;
+      const estH = 80 + 40 + 100 + 50 + 44 + ppiRows * 46 + 46 + (hourRows > 0 ? 50 + 44 + hourRows * 46 + 46 : 0) + 40 + 60;
 
       const svg = await satori(layout as Parameters<typeof satori>[0], {
         width: W,
