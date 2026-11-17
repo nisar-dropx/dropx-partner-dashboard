@@ -318,9 +318,14 @@ export async function GET(request: Request) {
         }},
       ]}};
 
+      // Estimate height: header(80) + cards(100) + ppi section(50 + 44 + pickers*46 + 46) + hourly(50 + 44 + hours*46 + 46) + footer(40) + padding(60)
+      const ppiRows   = Math.max(pickers.length, 1);
+      const hourRows  = recentHourly.length;
+      const estH = 80 + 100 + 50 + 44 + ppiRows * 46 + 46 + (hourRows > 0 ? 50 + 44 + hourRows * 46 + 46 : 0) + 40 + 60;
+
       const svg = await satori(layout as Parameters<typeof satori>[0], {
         width: W,
-        height: 9999, // satori auto-heights with flexDirection: column
+        height: estH,
         fonts: getFonts(),
       });
       const resvg = new Resvg(svg, { fitTo: { mode: "width" as const, value: W } });
