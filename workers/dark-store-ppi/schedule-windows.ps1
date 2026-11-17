@@ -4,7 +4,7 @@
 #
 # BEFORE RUNNING: set $workerDir below to the folder where you put the files.
 
-$workerDir = "C:\ppi-worker"   # ← change this if you extracted to a different folder
+$workerDir = "D:\ppi-worker"   # workspace machine (tabgafoo)
 $nodeExe   = (Get-Command node -ErrorAction Stop).Source
 $script    = Join-Path $workerDir "fetch.mjs"
 $logFile   = Join-Path $workerDir "run.log"
