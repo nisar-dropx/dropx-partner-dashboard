@@ -334,7 +334,7 @@ console.log(JSON.stringify({
   capture_mode: process.env.AMAZON_CAPTURE_MODE || "auto",
   workspaces_url: process.env.AMAZON_WORKSPACES_URL
     || "https://ap-southeast-1.webclient.amazonworkspaces.com/wsp.html",
-  whatsapp_configured: Boolean(whatsappUrl && whatsappToken && group),
+  whatsapp_configured: Boolean(whatsappUrl && whatsappToken && (fallbackGroup || Object.keys(stationGroupMap).length > 0)),
   gemini_configured: Boolean(geminiKey),
   cdp_url: process.env.AMAZON_CDP_URL || null
 }, null, 2));
