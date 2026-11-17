@@ -83,6 +83,11 @@ export async function GET(request: Request) {
 
   const db = reportBotDb();
 
+  // Run cleanup at 3am IST (hour === 3) — deletes data older than yesterday
+  if (hour === 3) {
+    await db.rpc("ds_ppi_cleanup");
+  }
+
   const { data: groups } = await db.from("report_bot_groups")
     .select("id,wa_group_id,group_name,location_id,workspace")
     .eq("company_id", COMPANY_ID)
