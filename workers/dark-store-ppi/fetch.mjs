@@ -474,9 +474,9 @@ function computePPI(auditRows, invRows) {
   // Fall back: 1 unit per order (can be enriched later via inventory audit join on timestamp).
   const unitsByOrder = new Map();
   for (const row of invRows) {
-    const ref = row.ReferenceIdValue;
+    const ref = row.referenceIdValue ?? row.referenceId ?? row.ReferenceIdValue;
     if (!ref) continue;
-    const delta = Math.abs(Number(row.Quantity ?? 0));
+    const delta = Math.abs(Number(row.deltaQuantity ?? row.Quantity ?? 0));
     unitsByOrder.set(ref, (unitsByOrder.get(ref) ?? 0) + delta);
   }
 
