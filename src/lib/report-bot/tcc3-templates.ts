@@ -61,8 +61,8 @@ export const TCC3_REPORT_TEMPLATES: Tcc3Template[] = [
       schedule_kind: "interval", due_time: "23:59",
       reminder_times: ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"],
       stop_when_received: true, review_only: true,
-      first_reminder_template: "*Share stowing pendency quantity*",
-      followup_template: "*Share stowing pendency quantity*",
+      first_reminder_template: "Share stowing pendency quantity",
+      followup_template: "Share stowing pendency quantity",
       overdue_template: null
     }
   },
