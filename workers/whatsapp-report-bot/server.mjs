@@ -607,7 +607,12 @@ async function handle(req, res) {
     return json(res, 200, { groups: await refreshGroups() });
   }
   if (req.method === "POST" && url.pathname === "/config") {
-    config = normalizeConfig(await readBody(req));
+    const incoming = normalizeConfig(await readBody(req));
+    // Reject a push that would wipe a healthy config (same guard as fetchConfig).
+    if (incoming.mode !== "off" && incoming.groups.length === 0 && config.groups.length > 0) {
+      return json(res, 422, { error: "Incoming config has 0 groups but current config is non-empty — ignoring to protect live session." });
+    }
+    config = incoming;
     for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
     await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
     return json(res, 200, { ok: true, groups: config.groups.length });
@@ -766,8 +771,8 @@ async function main() {
   if (config.groups.length === 0 && config.mode !== "off") {
     logger.error("config.groups still empty after all retries — starting socket anyway; configLoop will recover");
   }
-  // Start the 60s background refresh loop (single instance).
-  setTimeout(configLoop, 60_000);
+  // Start the config refresh loop; fire quickly on boot so any startup miss is caught fast.
+  setTimeout(configLoop, config.groups.length > 0 ? 30_000 : 5_000);
   const prune = () => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin").catch(() => {});
   setInterval(prune, 3600 * 1000);
   prune();
