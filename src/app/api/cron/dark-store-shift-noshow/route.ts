@@ -222,10 +222,8 @@ export async function GET(request: Request) {
 
       const shiftLabel = minutesToHHMM(shiftStartMin);
       const lines = [
-        `*${locationById.get(locationId)?.station_code ?? group.groupName} · ${shiftLabel} shift — ${reported} of ${shiftPeople.length} reported by ${minutesToHHMM(alertDueAt)}*`,
-        "",
-        "Not yet in:",
-        ...notReported.map((p) => `• ${p.name} (${p.code})`),
+        `In the ${shiftLabel} hrs shift, only ${reported} of ${shiftPeople.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`,
+        ...notReported.map((p) => `- ${p.name} (${p.code})`),
       ];
       const text = lines.join("\n");
 
