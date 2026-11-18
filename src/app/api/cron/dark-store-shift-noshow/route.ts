@@ -53,7 +53,6 @@ export async function GET(request: Request) {
     .select("id,wa_group_id,group_name,location_id")
     .eq("workspace", "dark_store")
     .eq("is_enabled", true)
-    .eq("mode", "live")
     .not("location_id", "is", null);
   if (groupsErr) return NextResponse.json({ error: groupsErr.message }, { status: 500 });
   if (!groups?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no dark_store groups" });
