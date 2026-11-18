@@ -199,8 +199,12 @@ export async function GET(request: Request) {
       if (shiftStartMin === null) continue;
 
       const alertDueAt = shiftStartMin + 15;
+      // Midnight wrap: a late shift (e.g. 23:30) has alertDueAt >= 1440.
+      // After midnight the cron's nowMinutes resets to 0–59, so we add 1440
+      // to bring it back into the same number line as the late-shift window.
+      const effectiveNow = alertDueAt >= 1440 && nowMinutes < 120 ? nowMinutes + 1440 : nowMinutes;
       // Only fire within a 15-min window (cron runs every 15 min, fires once per shift)
-      if (nowMinutes < alertDueAt || nowMinutes >= alertDueAt + 15) continue;
+      if (effectiveNow < alertDueAt || effectiveNow >= alertDueAt + 15) continue;
 
       const notReported = people.filter((p) => !hasPunch(p.biometricId));
       const reported = people.length - notReported.length;
