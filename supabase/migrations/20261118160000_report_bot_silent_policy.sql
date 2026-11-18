@@ -8,9 +8,15 @@ alter table report_bot_report_types
   add constraint report_bot_report_types_auto_reply_policy_check
     check (auto_reply_policy in ('normal', 'never', 'silent'));
 
--- Set DG fuel level to silent — bot acknowledges receipt internally but
--- sends no reply to the group, not even after manual approval.
+-- Set all dark store scheduled report types to silent — bot classifies
+-- submissions and stops reminders on pass, but never sends any reply
+-- to the group (no feedback message, no draft in the portal queue).
 update report_bot_report_types
 set auto_reply_policy = 'silent'
-where name = 'DG fuel level'
+where name in (
+  'DG fuel level',
+  'Stowing pendency',
+  'Cycle count, SBC & SRC completion',
+  'Expiry removed'
+)
   and company_id = '43866344-b550-4e8a-9a2d-9d23f3d8a997';
