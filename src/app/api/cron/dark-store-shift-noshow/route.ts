@@ -61,19 +61,19 @@ export async function GET(request: Request) {
 
   const locationIds = groups.map((g) => g.location_id as string);
 
-  // --- 2. Find the company_id from one of these locations ---
-  const { data: locationRows, error: locErr } = await admin
-    .from("locations")
+  // --- 2. Find company_id + station_code from stations table ---
+  const { data: stationRows, error: locErr } = await admin
+    .from("stations")
     .select("id,company_id,station_code")
     .in("id", locationIds)
     .limit(50);
   if (locErr) return NextResponse.json({ error: locErr.message }, { status: 500 });
-  if (!locationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no locations found" });
+  if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
 
-  const companyId = locationRows[0].company_id as string;
-  const locationById = new Map(locationRows.map((l) => [l.id, l]));
+  const companyId = stationRows[0].company_id as string;
+  const locationById = new Map(stationRows.map((s) => [s.id, s]));
 
-  // group_id (UUID) → wa_group_id + group_name + station_code
+  // location_id → wa_group_id + group_name
   const groupByLocation = new Map(
     groups
       .filter((g) => locationById.has(g.location_id as string))

@@ -118,7 +118,7 @@ async function analyseWithAnthropic(settings: ReportBotSettings, input: Analysis
     if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
       throw new AiError("The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.", false, true);
     }
-    if (error instanceof Anthropic.NotFoundError) throw new AiError(`Model "${settings.ai_model}" was not found. Check the model in Report Bot settings.`, false, true);
+    if (error instanceof Anthropic.NotFoundError) throw new AiError(`Model "${settings.ai_model}" was not found. Trying fallback provider.`, true);
     if (error instanceof Anthropic.BadRequestError) throw new AiError(`The AI request was rejected: ${error.message}`, false);
     if (error instanceof Anthropic.RateLimitError) throw new AiError("AI rate limit reached. It will be retried.", true);
     if (error instanceof Anthropic.APIError) throw new AiError(`AI service error (${error.status ?? "network"}). It will be retried.`, true);
@@ -158,7 +158,7 @@ async function analyseWithOpenAi(settings: ReportBotSettings, input: AnalysisInp
     });
     const payload = await response.json().catch(() => ({}));
     if (response.status === 401 || response.status === 403) throw new AiError("The OpenAI API key was rejected. Check OPENAI_API_KEY.", false, true);
-    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found. Check the model in Report Bot settings.`, false, true);
+    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found. Trying fallback provider.`, true);
     if (response.status === 400) throw new AiError(`The AI request was rejected: ${payload?.error?.message ?? "bad request"}`, false);
     if (!response.ok) throw new AiError(`AI service error (${response.status}). It will be retried.`, true);
     const text = openAiOutputText(payload);
@@ -220,7 +220,7 @@ async function analyseWithGemini(settings: ReportBotSettings, input: AnalysisInp
     const apiMessage = String(payload?.error?.message ?? "");
     if (response.status === 429) throw new AiError("Free AI quota reached for now. It will be retried automatically.", true);
     if (response.status === 401 || response.status === 403 || /api key/i.test(apiMessage)) throw new AiError("The Gemini API key was rejected. Check GEMINI_API_KEY.", false, true);
-    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found. Check the model in Report Bot settings.`, false, true);
+    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found. Trying fallback provider.`, true);
     if (response.status === 400) throw new AiError(`The AI request was rejected: ${apiMessage || "bad request"}`, false);
     if (!response.ok) throw new AiError(`AI service error (${response.status}). It will be retried.`, true);
     if (payload?.promptFeedback?.blockReason) throw new AiError("The AI declined to review this image. Review it manually.", false);
