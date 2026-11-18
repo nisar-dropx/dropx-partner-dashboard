@@ -247,11 +247,61 @@ export async function analyseReportImage(settings: ReportBotSettings, input: Ana
   return analyseOperationalReport(settings, input);
 }
 
+// Groq free tier: OpenAI-compatible API with vision support on qwen/qwen3.8-27b.
+// Images are passed as base64 data URIs in the message content.
+async function analyseWithGroq(settings: ReportBotSettings, input: AnalysisInput): Promise<unknown> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) throw new AiError("GROQ_API_KEY is not set in the deployment environment.", false, true);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+  const userContent: Array<Record<string, unknown>> = [];
+  if (input.image?.length && input.mime) {
+    userContent.push({ type: "image_url", image_url: { url: `data:${input.mime};base64,${base64(input.image)}` } });
+  }
+  userContent.push({ type: "text", text: `${userPrompt(input, settings.feedback_language)}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(analysisJsonSchema())}` });
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: settings.ai_model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userContent }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 4096,
+        temperature: 0
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) throw new AiError("The Groq API key was rejected. Check GROQ_API_KEY.", false, true);
+    if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found on Groq. Trying fallback provider.`, true);
+    if (response.status === 400) throw new AiError(`The Groq request was rejected: ${payload?.error?.message ?? "bad request"}`, false);
+    if (response.status === 429) throw new AiError("Groq rate limit reached. It will be retried.", true);
+    if (!response.ok) throw new AiError(`Groq service error (${response.status}). It will be retried.`, true);
+    const text = payload?.choices?.[0]?.message?.content ?? "";
+    if (!text.trim()) throw new AiError("Groq returned no result.", true);
+    return extractJsonText(text);
+  } catch (error) {
+    if (error instanceof AiError) throw error;
+    throw new AiError("Groq service is unreachable. It will be retried.", true);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function analyseWith(provider: ReportBotSettings["ai_provider"], settings: ReportBotSettings, input: AnalysisInput): Promise<unknown> {
   if (provider === "gemini") return analyseWithGemini(settings, input);
   if (provider === "openai") return analyseWithOpenAi(settings, input);
+  if (provider === "groq") return analyseWithGroq(settings, input);
   return analyseWithAnthropic(settings, input);
 }
+
+// Free Gemini models to try in order when the primary model fails.
+// All support vision and are on the free tier.
+const GEMINI_CASCADE = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"];
 
 /** Text-only, image, or evidence-bundle classification. Structured JSON only. */
 export async function analyseOperationalReport(settings: ReportBotSettings, input: AnalysisInput): Promise<Analysis> {
@@ -260,21 +310,48 @@ export async function analyseOperationalReport(settings: ReportBotSettings, inpu
     throw new AiError("Nothing to analyse.", false);
   }
   let raw: unknown;
-  try {
-    raw = await analyseWith(settings.ai_provider, settings, input);
-  } catch (primaryError) {
-    // On retryable errors (rate limit, transient failure) try the fallback provider if configured.
-    const hasFallback = settings.ai_fallback_provider && settings.ai_fallback_model &&
-      settings.ai_fallback_provider !== settings.ai_provider;
-    if (primaryError instanceof AiError && primaryError.retryable && hasFallback) {
-      const fallbackSettings: ReportBotSettings = {
-        ...settings,
-        ai_provider: settings.ai_fallback_provider!,
-        ai_model: settings.ai_fallback_model!
-      };
-      raw = await analyseWith(settings.ai_fallback_provider!, fallbackSettings, input);
-    } else {
-      throw primaryError;
+  let lastError: AiError | null = null;
+
+  // For Gemini primary: try the cascade of free models before giving up.
+  if (settings.ai_provider === "gemini") {
+    const startIdx = Math.max(0, GEMINI_CASCADE.indexOf(settings.ai_model));
+    const cascade = startIdx === -1 ? [settings.ai_model, ...GEMINI_CASCADE] : GEMINI_CASCADE.slice(startIdx);
+    for (const model of cascade) {
+      try {
+        raw = await analyseWithGemini({ ...settings, ai_model: model }, input);
+        lastError = null;
+        break;
+      } catch (err) {
+        if (!(err instanceof AiError) || !err.retryable) { lastError = err instanceof AiError ? err : new AiError(String(err), true); break; }
+        lastError = err;
+      }
+    }
+    if (lastError === null && raw !== undefined) {
+      // success from cascade — fall through to parse
+    } else if (lastError) {
+      // All Gemini models failed — try the configured fallback provider
+      const hasFallback = settings.ai_fallback_provider && settings.ai_fallback_model &&
+        settings.ai_fallback_provider !== settings.ai_provider;
+      if (hasFallback) {
+        const fallbackSettings: ReportBotSettings = { ...settings, ai_provider: settings.ai_fallback_provider!, ai_model: settings.ai_fallback_model! };
+        raw = await analyseWith(settings.ai_fallback_provider!, fallbackSettings, input);
+      } else {
+        throw lastError;
+      }
+    }
+  } else {
+    // Non-Gemini primary: try once, then fall back to configured fallback provider.
+    try {
+      raw = await analyseWith(settings.ai_provider, settings, input);
+    } catch (primaryError) {
+      const hasFallback = settings.ai_fallback_provider && settings.ai_fallback_model &&
+        settings.ai_fallback_provider !== settings.ai_provider;
+      if (primaryError instanceof AiError && primaryError.retryable && hasFallback) {
+        const fallbackSettings: ReportBotSettings = { ...settings, ai_provider: settings.ai_fallback_provider!, ai_model: settings.ai_fallback_model! };
+        raw = await analyseWith(settings.ai_fallback_provider!, fallbackSettings, input);
+      } else {
+        throw primaryError;
+      }
     }
   }
   try {
