@@ -95,24 +95,25 @@ export async function GET(request: Request) {
   const workingEntries = (rosterEntries ?? []).filter((e) => e.day_type === "working");
   if (!workingEntries.length) return NextResponse.json({ ok: true, sent: 0, reason: "no working roster entries today" });
 
-  // Collect unique worker_ids split by type
-  const empIds = [...new Set(workingEntries.filter((e) => e.worker_type === "employee").map((e) => e.worker_id))];
-  const ctrIds = [...new Set(workingEntries.filter((e) => e.worker_type !== "employee").map((e) => e.worker_id))];
+  // Collect ALL unique worker_ids regardless of worker_type tag —
+  // query both tables with the full set so a mis-tagged roster entry
+  // doesn't silently drop someone from the alert.
+  const allWorkerIds = [...new Set(workingEntries.map((e) => e.worker_id))];
 
-  // --- 4. Fetch worker details (name + biometric_id) ---
+  // --- 4. Fetch worker details (name + biometric_id) from both tables ---
   const [empResult, ctrResult] = await Promise.all([
-    empIds.length
+    allWorkerIds.length
       ? admin.from("employees")
           .select("id,employee_code,full_name,biometric_id")
           .eq("company_id", companyId)
-          .in("id", empIds)
+          .in("id", allWorkerIds)
           .limit(5000)
       : Promise.resolve({ data: [], error: null }),
-    ctrIds.length
+    allWorkerIds.length
       ? admin.from("contractors")
           .select("id,dropx_id,full_name,biometric_id")
           .eq("company_id", companyId)
-          .in("id", ctrIds)
+          .in("id", allWorkerIds)
           .limit(5000)
       : Promise.resolve({ data: [], error: null }),
   ]);
