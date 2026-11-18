@@ -262,7 +262,7 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     }
   }
 
-  const analysis = await analyseOperationalReport(settings, {
+  const analysisInput = {
     image,
     mime,
     text: event.text_body,
@@ -273,7 +273,18 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     workspace: group.workspace,
     stationLabel: group.station ? [group.station.station_code, group.station.station_name].filter(Boolean).join(" · ") : null,
     businessDate
-  });
+  };
+  let analysis;
+  try {
+    analysis = await analyseOperationalReport(settings, analysisInput);
+  } catch (error) {
+    // One quick retry for a transient failure (malformed reply, a 5xx). Quota limits won't
+    // clear in seconds, so skip those.
+    const transient = error instanceof AiError && error.retryable && !error.blocked && !/quota/i.test(error.message);
+    if (!transient) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    analysis = await analyseOperationalReport(settings, analysisInput);
+  }
 
   const reportType = candidates.find((candidate) => candidate.id === analysis.matched_report_type_id) ?? null;
   const request = reportType ? requests.find((row) => row.report_type_id === reportType.id) ?? null : null;
