@@ -557,7 +557,7 @@ async function mediaBytes(ref, record) {
 
 async function handle(req, res) {
   const url = new URL(req.url, "http://worker");
-  if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, state: session.state });
+  if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true, state: session.state, groups: config.groups.length, mode: config.mode });
   if (!bearerMatches(req.headers.authorization, WORKER_TOKEN)) return json(res, 401, { error: "Unauthorized" });
 
   if (req.method === "GET" && url.pathname === "/session") {
@@ -692,28 +692,37 @@ async function loadPersistedChats() {
   if (loaded) logger.info({ loaded }, "restored chat history from disk");
 }
 
-/** One config fetch: updates config and returns true on success, false on failure. */
+/** One config fetch: updates config and returns true on success, false on failure.
+ *  On failure the existing config is KEPT — groups are never cleared by a transient error. */
 async function fetchConfig() {
   try {
     const response = await portalFetch("/api/report-bot/worker/config");
     if (response.ok) {
-      config = normalizeConfig(await response.json());
-      for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
-      await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
+      const fresh = normalizeConfig(await response.json());
+      // Only update if the portal returned a non-empty group list (or mode=off).
+      // A portal restart that briefly returns [] must not wipe a healthy config.
+      if (fresh.mode === "off" || fresh.groups.length > 0 || config.groups.length === 0) {
+        config = fresh;
+        for (const id of chatLog.forget(config.groups)) { import("node:fs/promises").then(({ unlink }) => unlink(chatFile(id)).catch(() => {})); }
+        await writeJsonAtomic(CONFIG_FILE, config).catch(() => {});
+      } else {
+        logger.warn({ returned: fresh.groups.length, current: config.groups.length }, "portal returned 0 groups but current config is non-empty — keeping current");
+      }
       return true;
     } else {
-      logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed");
+      logger.warn({ status: response.status }, response.status === 401 ? "the portal rejected WORKER_TOKEN; copy it again from Report Bot setup" : "config refresh failed — keeping current config");
       return false;
     }
   } catch (error) {
-    logger.warn({ err: error.message }, "config refresh failed");
+    logger.warn({ err: error.message }, "config refresh failed — keeping current config");
     return false;
   }
 }
 
 async function configLoop() {
   await fetchConfig();
-  setTimeout(configLoop, 60_000);
+  // 30s refresh keeps the group list fresh without hammering the portal.
+  setTimeout(configLoop, 30_000);
 }
 
 /** Reconnect a saved WhatsApp login on boot, retrying while the portal is unreachable. */
@@ -746,15 +755,16 @@ async function main() {
   // Eagerly fetch config from the portal before starting the WhatsApp socket.
   // messaging-history.set fires within seconds of connection; if config.groups
   // is still empty at that point, all RECENT history messages are silently dropped.
-  // Retry up to 3 times (with backoff) if the portal is temporarily unavailable on cold start.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // Retry up to 8 times (with backoff) if the portal is temporarily unavailable on cold start.
+  for (let attempt = 0; attempt < 8; attempt++) {
     await fetchConfig();
     if (config.groups.length > 0 || config.mode === "off") break;
-    if (attempt < 2) {
-      const delay = backoffMs(attempt);
-      logger.warn({ attempt, delay }, "config.groups empty after fetch; retrying before starting socket");
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
+    const delay = backoffMs(attempt);
+    logger.warn({ attempt, delay }, "config.groups empty after fetch; retrying before starting socket");
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  if (config.groups.length === 0 && config.mode !== "off") {
+    logger.error("config.groups still empty after all retries — starting socket anyway; configLoop will recover");
   }
   // Start the 60s background refresh loop (single instance).
   setTimeout(configLoop, 60_000);
