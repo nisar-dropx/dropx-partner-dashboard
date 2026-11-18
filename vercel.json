@@ -102,6 +102,10 @@
     {
       "path": "/api/cron/dark-store-ppi",
       "schedule": "30 0,2,4,6,8,10,12,14,16,18 * * *"
+    },
+    {
+      "path": "/api/cron/dark-store-shift-noshow",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
