@@ -7,7 +7,7 @@ export type GroupMode = "observe" | "review" | "live";
 export type ReviewStatus = "observe_only" | "draft_ready" | "approved" | "sent" | "dismissed";
 export type Verdict = "pass" | "fail" | "needs_review" | "not_report";
 export type CheckStatus = "pass" | "fail" | "unclear";
-export type AutoReplyPolicy = "never" | "normal";
+export type AutoReplyPolicy = "never" | "normal" | "silent";
 
 export const GROUP_MODES = new Set<GroupMode>(["observe", "review", "live"]);
 export const REVIEW_STATUSES = new Set<ReviewStatus>(["observe_only", "draft_ready", "approved", "sent", "dismissed"]);
@@ -311,6 +311,7 @@ export function decideGroupDelivery(analysis: Analysis, settings: DeliverySettin
   if (base === "silent") return "silent";
   if (context.companyMode === "off") return "silent";
   if (context.groupMode === "observe" || context.companyMode === "listen") return "needs_approval";
+  if (context.autoReplyPolicy === "silent") return "silent";
   const highRisk = context.autoReplyPolicy === "never"
     || (context.category != null && HIGH_RISK_CATEGORIES.has(context.category))
     || context.highRiskActions === true

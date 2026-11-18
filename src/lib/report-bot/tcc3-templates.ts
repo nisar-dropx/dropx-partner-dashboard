@@ -8,7 +8,7 @@ export type Tcc3Template = {
   slug: string;
   name: string;
   category: string;
-  auto_reply_policy: "never" | "normal";
+  auto_reply_policy: "never" | "normal" | "silent";
   subtypes: string[];
   description: string;
   feedback_hint: string;

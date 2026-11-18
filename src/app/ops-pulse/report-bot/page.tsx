@@ -912,7 +912,7 @@ function ReportsTab({ workspace, groups, reportTypes, schedules, lookup, canEdit
                   <div className={s.itemSub}>
                     {report.rules.length} rules
                     {report.slug ? <Badge tone="neutral">{report.slug}</Badge> : null}
-                    {report.auto_reply_policy === "never" ? <Badge tone="warn">Review only</Badge> : null}
+                    {report.auto_reply_policy === "never" ? <Badge tone="warn">Review only</Badge> : report.auto_reply_policy === "silent" ? <Badge tone="neutral">No reply</Badge> : null}
                     {report.is_active ? null : <Badge tone="neutral">Paused</Badge>}
                   </div>
                 </div>

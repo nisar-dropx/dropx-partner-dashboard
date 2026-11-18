@@ -21,7 +21,7 @@ export type CandidateReport = {
   rules: string[];
   category?: string | null;
   subtypes?: string[] | null;
-  auto_reply_policy?: "never" | "normal" | null;
+  auto_reply_policy?: "never" | "normal" | "silent" | null;
   feedback_hint?: string | null;
   requires_pass_to_close?: boolean;
 };
