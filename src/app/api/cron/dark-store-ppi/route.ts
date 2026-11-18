@@ -46,14 +46,13 @@ type HourlyRow = { station_code: string; hour: number; order_count: number; unit
 
 /** Build the compact PPI caption:
  *  TCD4
- *  • PPI today as of 12:00 hrs: 42s (Improved by 8s)
+ *  • PPI today as of 12:00 hrs: 42s
  */
 function buildCaption(
   stationCode: string,
   daily: DailyRow[],
   hourly: HourlyRow[],
   windowHour: number,
-  prevAvgPptSeconds: number | null
 ): string {
   const totalUnits  = daily.reduce((s, r) => s + r.unit_count, 0);
   const totalPptS   = daily.reduce((s, r) => s + (r.avg_ppt_seconds ?? 0) * r.order_count, 0);
@@ -62,19 +61,11 @@ function buildCaption(
   const pad = (n: number) => String(n).padStart(2, "0");
   const timeLabel = `${pad(windowHour)}:00`;
 
-  let trendNote = "";
-  if (avgPpt != null && prevAvgPptSeconds != null) {
-    const diff = Math.round(prevAvgPptSeconds - avgPpt); // positive = improved (lower PPT)
-    if (diff > 0)       trendNote = ` (Improved by ${diff}s)`;
-    else if (diff < 0)  trendNote = ` (Declined by ${Math.abs(diff)}s)`;
-    else                trendNote = " (No change)";
-  }
-
   const pptDisplay = avgPpt != null ? `${avgPpt.toFixed(2)}s` : "No data";
 
   return [
     `*${stationCode}*`,
-    `• PPI today as of ${timeLabel} hrs: ${pptDisplay}${trendNote}`,
+    `• PPI today as of ${timeLabel} hrs: ${pptDisplay}`,
   ].join("\n");
 }
 
@@ -89,7 +80,11 @@ export async function GET(request: Request) {
 
   const ist   = nowIST();
   const hour  = ist.getUTCHours(); // IST hour (UTC+5:30 already applied in nowIST)
-  const today = todayIST();
+  // The 00:00 report fires just after midnight IST. Data was seeded at 23:55–23:58 the
+  // previous calendar day, so query yesterday's business_date for that run only.
+  const today = hour === 0
+    ? new Date(ist.getTime() - 24 * 3600 * 1000).toISOString().slice(0, 10)
+    : todayIST();
 
   const pad = (n: number) => String(n).padStart(2, "0");
   const windowLabel = `${pad(hour)}:00`;
@@ -124,10 +119,7 @@ export async function GET(request: Request) {
     if (st) groupByStation.set(st.station_code as string, { wa_group_id: g.wa_group_id, group_name: g.group_name });
   }
 
-  // Previous window hour for trend comparison (2 hrs back)
-  const prevHour = hour >= 2 ? hour - 2 : null;
-
-  const [dailyResult, hourlyResult, prevHourlyResult] = await Promise.all([
+  const [dailyResult, hourlyResult] = await Promise.all([
     db.from("ds_ppi_daily")
       .select("station_code,username,order_count,unit_count,avg_ppt_seconds")
       .eq("company_id", COMPANY_ID)
@@ -138,14 +130,6 @@ export async function GET(request: Request) {
       .eq("company_id", COMPANY_ID)
       .in("station_code", stationCodes)
       .eq("business_date", today),
-    prevHour != null
-      ? db.from("ds_ppi_hourly")
-          .select("station_code,avg_ppt_seconds,order_count")
-          .eq("company_id", COMPANY_ID)
-          .in("station_code", stationCodes)
-          .eq("business_date", today)
-          .in("hour", [prevHour - 1, prevHour].filter(h => h >= 0))
-      : Promise.resolve({ data: [] }),
   ]);
 
   const dailyByStore  = new Map<string, DailyRow[]>();
@@ -157,14 +141,6 @@ export async function GET(request: Request) {
   for (const row of (hourlyResult.data ?? []) as HourlyRow[]) {
     if (!hourlyByStore.has(row.station_code)) hourlyByStore.set(row.station_code, []);
     hourlyByStore.get(row.station_code)!.push(row);
-  }
-  // Previous window avg PPT per store (for trend arrow)
-  const prevPptByStore = new Map<string, number>();
-  for (const row of ((prevHourlyResult as { data: { station_code: string; avg_ppt_seconds: number | null; order_count: number }[] | null }).data ?? [])) {
-    if (row.avg_ppt_seconds == null) continue;
-    const prev = prevPptByStore.get(row.station_code);
-    // Weighted average
-    prevPptByStore.set(row.station_code, prev != null ? (prev + row.avg_ppt_seconds) / 2 : row.avg_ppt_seconds);
   }
 
   const settings = await loadReportBotSettings(COMPANY_ID);
@@ -204,10 +180,9 @@ export async function GET(request: Request) {
       const totalSumPpt = pickers.reduce((s, r) => s + r.sumPpt, 0);
       const avgPpt      = totalUnits  > 0 ? totalSumPpt / totalUnits  : null;
       const pptText     = avgPpt != null ? `${avgPpt.toFixed(2)}s` : "No data";
-      const prevPpt     = prevPptByStore.get(code) ?? null;
-      const diff        = avgPpt != null && prevPpt != null ? Math.round(prevPpt - avgPpt) : null;
-      const trend       = diff == null ? "" : diff > 0 ? `+${diff}s` : diff < 0 ? `-${Math.abs(diff)}s` : "=";
-      const trendColor  = diff == null ? "#9ca3af" : diff > 0 ? "#15803d" : "#dc2626";
+      const diff        = null as null; // trend comparison removed — show current values only
+      const trend       = "";
+      const trendColor  = "#9ca3af";
       const recentHourly = [...hourly].filter(h => h.hour <= hour).sort((a, b) => a.hour - b.hour);
 
       // ── Satori layout helpers
@@ -258,7 +233,7 @@ export async function GET(request: Request) {
         // ── Summary line (always visible in image)
         { type: "div", props: { style: { display: "flex", justifyContent: "center", alignItems: "center", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, padding: "6px 16px", marginBottom: 10 }, children:
           txt(
-            `PPI today as of ${windowLabel} hrs: ${pptText}` + (diff != null ? (diff > 0 ? `  ▲ Improved by ${Math.abs(diff)}s` : diff < 0 ? `  ▼ Declined by ${Math.abs(diff)}s` : "  = No change") : ""),
+            `PPI today as of ${windowLabel} hrs: ${pptText}`,
             { fontWeight: 700, fontSize: 14, color: "#15803d" }
           )
         }},
@@ -328,7 +303,7 @@ export async function GET(request: Request) {
         ]}}]),
         // footer
         { type: "div", props: { style: { display: "flex", justifyContent: "center", marginTop: 8 }, children:
-          txt(trend ? `${trend} vs previous 2h window` : `As of ${windowLabel} hrs  |  ${today}`, { fontSize: 11, color: "#9ca3af" })
+          txt(`As of ${windowLabel} hrs  |  ${today}`, { fontSize: 11, color: "#9ca3af" })
         }},
       ]}};
 
@@ -361,7 +336,6 @@ export async function GET(request: Request) {
       dailyByStore.get(stationCode)  ?? [],
       hourlyByStore.get(stationCode) ?? [],
       hour,
-      prevPptByStore.get(stationCode) ?? null,
     );
     const imgResult = await buildStationImage(stationCode);
     const imgB64 = typeof imgResult === "string" ? imgResult : null;
