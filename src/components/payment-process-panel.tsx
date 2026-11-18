@@ -589,73 +589,76 @@ export function PaymentProcessPanel({ banks, requests, canEdit, processAction, t
             </div>
           </div>
         </form> : null}
-        <div className="panel-head" style={{ borderTop: "1px solid var(--border)", marginTop: 0 }}>
-          <div>
-            <h2>Ready for processing</h2>
-            <p className="subtle">{filteredRequests.length} of {requests.length} requests shown.</p>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <ReportTable>
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    aria-label="Select all visible payment requests"
-                    checked={allVisibleSelected}
-                    disabled={!canEdit}
-                    onChange={(event) => toggleAllVisible(event.target.checked)}
-                    type="checkbox"
-                  />
-                </th>
-                <th>Request</th>
-                <th>Location</th>
-                <th>Payment Head</th>
-                <th>Payment Method</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRequests.length ? filteredRequests.map((request) => (
-                <tr key={request.id}>
-                  <td>
+        <details style={{ borderTop: "1px solid var(--border)" }}>
+          <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 20px", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--text-muted, #64748b)", userSelect: "none" }}>▶</span>
+            <div>
+              <h2 style={{ margin: 0 }}>Ready for processing</h2>
+              <p className="subtle" style={{ margin: 0 }}>{filteredRequests.length} of {requests.length} requests</p>
+            </div>
+          </summary>
+          <div className="table-wrap">
+            <ReportTable>
+              <thead>
+                <tr>
+                  <th>
                     <input
-                      aria-label={`Select payment request ${request.request_no}`}
-                      checked={selectedIds.includes(request.id)}
-                      disabled={!canEdit || !isAccountTransfer(request)}
-                      onChange={() => toggleOne(request.id)}
-                      title={isAccountTransfer(request) ? "Select payment request" : "Only account transfers are included in bank files"}
+                      aria-label="Select all visible payment requests"
+                      checked={allVisibleSelected}
+                      disabled={!canEdit}
+                      onChange={(event) => toggleAllVisible(event.target.checked)}
                       type="checkbox"
                     />
-                  </td>
-                  <td><strong>{request.request_no}</strong>{request.initial_approval_bypassed ? <div><span className="status-pill" title="Final approval completed without an earlier initial approval. Informational only.">Initial approval bypassed</span></div> : null}</td>
-                  <td>{request.location_code}</td>
-                  <td>{request.payment_head_name ?? "-"}</td>
-                  <td>{paymentMethodLabel(request)}</td>
-                  <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                    {paymentBankBalance(request).partial ? <small className="subtle" style={{ display: "block" }}>
-                      Remaining · {rupees(paymentBankBalance(request).paid)} paid of {rupees(paymentBankBalance(request).approved)}
-                    </small> : null}
-                  </td>
-                  <td><StatusPill status={statusLabel(request)} /></td>
-                  <td>{displayDate(request.created_at)}</td>
-                  <td>
-                    {canEdit ? (
-                      <button className="button secondary compact" onClick={() => openProcessRequest(request)} type="button">
-                        Action
-                      </button>
-                    ) : "View only"}
-                  </td>
+                  </th>
+                  <th>Request</th>
+                  <th>Location</th>
+                  <th>Payment Head</th>
+                  <th>Payment Method</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Action</th>
                 </tr>
-              )) : (
-                <tr><td className="empty-cell" colSpan={9}>No final approved payment requests ready for processing.</td></tr>
-              )}
-            </tbody>
-          </ReportTable>
-        </div>
+              </thead>
+              <tbody>
+                {filteredRequests.length ? filteredRequests.map((request) => (
+                  <tr key={request.id}>
+                    <td>
+                      <input
+                        aria-label={`Select payment request ${request.request_no}`}
+                        checked={selectedIds.includes(request.id)}
+                        disabled={!canEdit || !isAccountTransfer(request)}
+                        onChange={() => toggleOne(request.id)}
+                        title={isAccountTransfer(request) ? "Select payment request" : "Only account transfers are included in bank files"}
+                        type="checkbox"
+                      />
+                    </td>
+                    <td><strong>{request.request_no}</strong>{request.initial_approval_bypassed ? <div><span className="status-pill" title="Final approval completed without an earlier initial approval. Informational only.">Initial approval bypassed</span></div> : null}</td>
+                    <td>{request.location_code}</td>
+                    <td>{request.payment_head_name ?? "-"}</td>
+                    <td>{paymentMethodLabel(request)}</td>
+                    <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                      {paymentBankBalance(request).partial ? <small className="subtle" style={{ display: "block" }}>
+                        Remaining · {rupees(paymentBankBalance(request).paid)} paid of {rupees(paymentBankBalance(request).approved)}
+                      </small> : null}
+                    </td>
+                    <td><StatusPill status={statusLabel(request)} /></td>
+                    <td>{displayDate(request.created_at)}</td>
+                    <td>
+                      {canEdit ? (
+                        <button className="button secondary compact" onClick={() => openProcessRequest(request)} type="button">
+                          Action
+                        </button>
+                      ) : "View only"}
+                    </td>
+                  </tr>
+                )) : (
+                  <tr><td className="empty-cell" colSpan={9}>No final approved payment requests ready for processing.</td></tr>
+                )}
+              </tbody>
+            </ReportTable>
+          </div>
+        </details>
       </section>
 
       {finalizeOpen ? (
