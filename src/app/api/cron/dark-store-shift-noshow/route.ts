@@ -19,7 +19,7 @@ function isoDateInIst(d = new Date()): string {
   return ist.toISOString().slice(0, 10);
 }
 
-/** Parse "HH:MM" shift time → minutes since midnight */
+/** Parse "HH:MM:SS" or "HH:MM" shift time → minutes since midnight */
 function shiftTimeToMinutes(value: string | null | undefined): number | null {
   const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
@@ -31,7 +31,6 @@ function minutesToHHMM(minutes: number): string {
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
-
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -61,7 +60,7 @@ export async function GET(request: Request) {
 
   const locationIds = groups.map((g) => g.location_id as string);
 
-  // --- 2. Find company_id + station_code from stations table ---
+  // --- 2. Find company_id from stations table ---
   const { data: stationRows, error: locErr } = await admin
     .from("stations")
     .select("id,company_id,station_code")
@@ -71,94 +70,86 @@ export async function GET(request: Request) {
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
 
   const companyId = stationRows[0].company_id as string;
-  const locationById = new Map(stationRows.map((s) => [s.id, s]));
 
-  // location_id → wa_group_id + group_name
+  // location_id → { waGroupId, groupName }
   const groupByLocation = new Map(
     groups
-      .filter((g) => locationById.has(g.location_id as string))
+      .filter((g) => stationRows.some((s) => s.id === g.location_id))
       .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: g.group_name as string }])
   );
 
-  // --- 3. Load all active people at these locations ---
+  // --- 3. Load today's roster entries for dark store locations ---
+  // hr_roster_entries.location_id matches stations.id (dark store station UUIDs).
+  // Workers are assigned TO the dark store via the roster — their own employee/contractor
+  // location_id is their home hub and must NOT be used as a filter here.
+  const { data: rosterEntries, error: rosterErr } = await admin
+    .from("hr_roster_entries")
+    .select("worker_id,worker_type,day_type,location_id,hr_shifts(id,name,start_time,end_time),hr_roster_plans!inner(status,roster_kind)")
+    .eq("company_id", companyId)
+    .eq("roster_date", today)
+    .in("location_id", locationIds)
+    .eq("hr_roster_plans.status", "approved")
+    .limit(5000);
+  if (rosterErr) return NextResponse.json({ error: rosterErr.message }, { status: 500 });
+
+  const workingEntries = (rosterEntries ?? []).filter((e) => e.day_type === "working");
+  if (!workingEntries.length) return NextResponse.json({ ok: true, sent: 0, reason: "no working roster entries today" });
+
+  // Collect unique worker_ids split by type
+  const empIds = [...new Set(workingEntries.filter((e) => e.worker_type === "employee").map((e) => e.worker_id))];
+  const ctrIds = [...new Set(workingEntries.filter((e) => e.worker_type !== "employee").map((e) => e.worker_id))];
+
+  // --- 4. Fetch worker details (name + biometric_id) ---
   const [empResult, ctrResult] = await Promise.all([
-    admin.from("employees")
-      .select("id,employee_code,full_name,biometric_id,location_id")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .not("people_lifecycle_status", "in", '("offboarding","offboarded")')
-      .is("deleted_at", null)
-      .in("location_id", locationIds)
-      .limit(5000),
-    admin.from("contractors")
-      .select("id,dropx_id,full_name,biometric_id,location_id")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .not("people_lifecycle_status", "in", '("offboarding","offboarded")')
-      .is("deleted_at", null)
-      .in("location_id", locationIds)
-      .limit(5000),
+    empIds.length
+      ? admin.from("employees")
+          .select("id,employee_code,full_name,biometric_id")
+          .eq("company_id", companyId)
+          .in("id", empIds)
+          .limit(5000)
+      : Promise.resolve({ data: [], error: null }),
+    ctrIds.length
+      ? admin.from("contractors")
+          .select("id,dropx_id,full_name,biometric_id")
+          .eq("company_id", companyId)
+          .in("id", ctrIds)
+          .limit(5000)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (empResult.error) return NextResponse.json({ error: empResult.error.message }, { status: 500 });
   if (ctrResult.error) return NextResponse.json({ error: ctrResult.error.message }, { status: 500 });
 
-  type Person = { id: string; code: string; name: string; biometricId: string | null; locationId: string };
-  const people: Person[] = [
-    ...(empResult.data ?? []).map((e) => ({ id: e.id, code: e.employee_code ?? "—", name: e.full_name, biometricId: e.biometric_id, locationId: e.location_id as string })),
-    ...(ctrResult.data ?? []).map((c) => ({ id: c.id, code: c.dropx_id ?? "—", name: c.full_name, biometricId: c.biometric_id, locationId: c.location_id as string })),
-  ].filter((p) => locationIds.includes(p.locationId));
+  type Person = { id: string; code: string; name: string; biometricId: string | null };
+  const personById = new Map<string, Person>([
+    ...(empResult.data ?? []).map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name, biometricId: e.biometric_id }]),
+    ...(ctrResult.data ?? []).map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name, biometricId: c.biometric_id }]),
+  ]);
 
-  if (!people.length) return NextResponse.json({ ok: true, sent: 0, reason: "no people at dark store locations" });
-
-  const workerIds = people.map((p) => p.id);
-
-  // --- 4. Load today's dated roster entries for these workers ---
-  const { data: rosterEntries, error: rosterErr } = await admin
-    .from("hr_roster_entries")
-    .select("worker_id,worker_type,day_type,hr_shifts(id,name,start_time,end_time),hr_roster_plans!inner(status,roster_kind)")
-    .eq("company_id", companyId)
-    .eq("roster_date", today)
-    .in("worker_id", workerIds)
-    .eq("hr_roster_plans.status", "approved")
-    .eq("hr_roster_plans.roster_kind", "dated")
-    .limit(5000);
-  if (rosterErr) return NextResponse.json({ error: rosterErr.message }, { status: 500 });
-
-  // Build map: worker_id → shift { start_time, end_time, name }
-  type ShiftInfo = { startTime: string; endTime: string; name: string };
-  const shiftByWorker = new Map<string, ShiftInfo>();
-  for (const entry of rosterEntries ?? []) {
-    if (entry.day_type !== "working") continue;
-    const shift = Array.isArray(entry.hr_shifts) ? entry.hr_shifts[0] : entry.hr_shifts;
-    if (!shift?.start_time) continue;
-    shiftByWorker.set(entry.worker_id, { startTime: shift.start_time, endTime: shift.end_time ?? "", name: shift.name ?? "" });
-  }
-
-  // --- 5. Load today's attendance punches (IN punches) ---
-  function biometricVariants(value: string | null | undefined) {
+  // --- 5. Load today's attendance punches ---
+  function biometricVariants(value: string | null | undefined): string[] {
     const raw = String(value ?? "").trim();
     if (!raw) return [];
     const normalized = raw.replace(/^0+(?=\d)/, "") || "0";
     return [...new Set([raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")])];
   }
-  const enrolmentIds = [...new Set(people.flatMap((p) => biometricVariants(p.biometricId)))];
-  const punchResult = enrolmentIds.length
+
+  const allBiometricIds = [...new Set([...personById.values()].flatMap((p) => biometricVariants(p.biometricId)))];
+  const punchResult = allBiometricIds.length
     ? await admin.from("attendance_punches")
-      .select("enrolment_id,punch_time,punch_label")
-      .eq("company_id", companyId)
-      .eq("punch_date", today)
-      .eq("calculated", true)
-      .in("enrolment_id", enrolmentIds)
-      .order("punch_time", { ascending: true })
-      .limit(5000)
+        .select("enrolment_id,punch_time,punch_label")
+        .eq("company_id", companyId)
+        .eq("punch_date", today)
+        .eq("calculated", true)
+        .in("enrolment_id", allBiometricIds)
+        .order("punch_time", { ascending: true })
+        .limit(5000)
     : { data: [], error: null };
   if (punchResult.error) return NextResponse.json({ error: punchResult.error.message }, { status: 500 });
 
-  // Build set of enrolment_ids that have an IN punch
   const punchedEnrolments = new Set<string>();
   for (const punch of punchResult.data ?? []) {
     const label = (punch.punch_label ?? "").toLowerCase();
-    if (!label || label.includes("in") || label === "") {
+    if (!label || label.includes("in")) {
       punchedEnrolments.add(String(punch.enrolment_id).replace(/^0+(?=\d)/, "") || "0");
     }
   }
@@ -171,58 +162,56 @@ export async function GET(request: Request) {
     return false;
   }
 
-  // --- 6. Group people by location → shift window → check if alert is due ---
-  // Dedup is handled entirely by client_ref at the worker level (same as dark-store-ppi).
-  // The worker rejects duplicate client_refs, so each shift alert fires at most once.
+  // --- 6. Build location → shift → people map from roster entries ---
+  type ShiftGroup = { startTime: string; people: Person[] };
+  const shiftsByLocation = new Map<string, Map<string, ShiftGroup>>();
 
+  for (const entry of workingEntries) {
+    const locationId = entry.location_id as string;
+    if (!groupByLocation.has(locationId)) continue;
+
+    const shift = Array.isArray(entry.hr_shifts) ? entry.hr_shifts[0] : entry.hr_shifts;
+    if (!shift?.start_time) continue;
+
+    const person = personById.get(entry.worker_id);
+    if (!person) continue;
+
+    const shiftKey = shift.start_time.slice(0, 5); // "HH:MM"
+    if (!shiftsByLocation.has(locationId)) shiftsByLocation.set(locationId, new Map());
+    const shiftMap = shiftsByLocation.get(locationId)!;
+    if (!shiftMap.has(shiftKey)) shiftMap.set(shiftKey, { startTime: shift.start_time, people: [] });
+    shiftMap.get(shiftKey)!.people.push(person);
+  }
+
+  // --- 7. For each location → shift, check if alert is due and send ---
   const settings = await loadReportBotSettings(companyId);
-  if (!settings) return NextResponse.json({ ok: true, sent: 0, reason: "report bot not configured" });
 
   let sent = 0;
   const results: string[] = [];
 
-  // Group people by location
-  const peopleByLocation = new Map<string, Person[]>();
-  for (const person of people) {
-    if (!peopleByLocation.has(person.locationId)) peopleByLocation.set(person.locationId, []);
-    peopleByLocation.get(person.locationId)!.push(person);
-  }
-
-  for (const [locationId, locationPeople] of peopleByLocation) {
+  for (const [locationId, shiftMap] of shiftsByLocation) {
     const group = groupByLocation.get(locationId);
     if (!group) continue;
 
-    // Find unique shift windows at this location today
-    const shiftWindows = new Map<string, Person[]>(); // "HH:MM" → people
-    for (const person of locationPeople) {
-      const shift = shiftByWorker.get(person.id);
-      if (!shift) continue;
-      const key = shift.startTime.slice(0, 5); // "HH:MM"
-      if (!shiftWindows.has(key)) shiftWindows.set(key, []);
-      shiftWindows.get(key)!.push(person);
-    }
-
-    for (const [shiftStart, shiftPeople] of shiftWindows) {
-      const shiftStartMin = shiftTimeToMinutes(shiftStart);
+    for (const [shiftKey, { startTime, people }] of shiftMap) {
+      const shiftStartMin = shiftTimeToMinutes(startTime);
       if (shiftStartMin === null) continue;
 
-      // Alert is due 15 min after shift start
       const alertDueAt = shiftStartMin + 15;
-      // Only fire within a 15-min window (cron runs every 15 min)
+      // Only fire within a 15-min window (cron runs every 15 min, fires once per shift)
       if (nowMinutes < alertDueAt || nowMinutes >= alertDueAt + 15) continue;
 
-      // Check who hasn't punched in
-      const notReported = shiftPeople.filter((p) => !hasPunch(p.biometricId));
-      const reported = shiftPeople.length - notReported.length;
+      const notReported = people.filter((p) => !hasPunch(p.biometricId));
+      const reported = people.length - notReported.length;
 
       if (notReported.length === 0) {
-        results.push(`${group.groupName} ${shiftStart}: all ${shiftPeople.length} reported`);
+        results.push(`${group.groupName} ${shiftKey}: all ${people.length} reported`);
         continue;
       }
 
       const shiftLabel = minutesToHHMM(shiftStartMin);
       const lines = [
-        `In the ${shiftLabel} hrs shift, only ${reported} of ${shiftPeople.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`,
+        `In the ${shiftLabel} hrs shift, only ${reported} of ${people.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`,
         ...notReported.map((p) => `- ${p.name} (${p.code})`),
       ];
       const text = lines.join("\n");
@@ -233,14 +222,14 @@ export async function GET(request: Request) {
           body: {
             to: group.waGroupId,
             text,
-            client_ref: `shift-noshow-${locationId}-${today}-${shiftStart.replace(":", "")}`,
+            client_ref: `shift-noshow-${locationId}-${today}-${shiftKey.replace(":", "")}`,
           },
         });
         sent++;
-        results.push(`${group.groupName} ${shiftStart}: ${notReported.length} not reported — sent`);
+        results.push(`${group.groupName} ${shiftKey}: ${notReported.length} not reported — sent`);
       } catch (err) {
         const msg = err instanceof WorkerError ? err.message : String(err);
-        results.push(`${group.groupName} ${shiftStart}: send failed — ${msg}`);
+        results.push(`${group.groupName} ${shiftKey}: send failed — ${msg}`);
       }
     }
   }
