@@ -321,6 +321,9 @@ async function startSocket({ method, phone = null }) {
     // Allow 2 minutes for each init query (fetchProps etc.) on reconnect.
     // The default is 60s, which is too short when Render wakes from sleep.
     defaultQueryTimeoutMs: 120_000,
+    // Re-fire init queries on every reconnect so WhatsApp re-delivers any
+    // pending group events missed while the socket was down.
+    fireInitQueries: true,
     getMessage: async (key) => messageCache.get(key.id)?.message ?? undefined
   });
   session.sock = sock;
