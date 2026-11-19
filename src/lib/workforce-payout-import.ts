@@ -29,6 +29,7 @@ export type WorkforcePayoutImportRow = {
   effectiveDate: string;
   effectiveFrom: string;
   effectiveTo: string;
+  rateValue?: number | null;
   numericValue: number | null;
   textValue: string | null;
   attendanceBasis: WorkforcePayoutAttendanceBasis | null;
@@ -135,6 +136,7 @@ const KNOWN_HEADERS = new Set([
   "effectivedate",
   "effectiveto",
   "value",
+  "rate",
   "remark"
 ]);
 
@@ -309,7 +311,7 @@ function findColumns(header: unknown[]) {
     if (index < 0) throw new Error(`Required column “${label}” is missing.`);
     result[field] = index;
   }
-  for (const field of ["action", "location", "remark"] as const) result[field] = normalized.indexOf(field);
+  for (const field of ["action", "location", "remark", "rate"] as const) result[field] = normalized.indexOf(field);
   return { result, normalized };
 }
 
@@ -368,6 +370,11 @@ export function parseWorkforcePayoutWorkbook(
     const effectiveFrom = effectiveDate;
     const effectiveTo = spreadsheetDate(source[columns.effectiveto]);
     const rawValue = source[columns.value];
+    const rawRate = source[columns.rate];
+    const rateValue = String(rawRate ?? "").trim() ? finiteNumber(rawRate) : null;
+    if (String(rawRate ?? "").trim() && (rateValue === null || rateValue < 0 || rateValue > 999999999 || Math.abs(rateValue * 10000 - Math.round(rateValue * 10000)) > 0.000001 || inputType !== "ADDITIONAL_PAYMENT" || action === "CLEAR")) {
+      issues.push({ rowNumber, dropxId: dropxId || null, message: "RATE must be a non-negative number with up to four decimals on an additional payment UPSERT row." });
+    }
     const remark = columns.remark >= 0 ? String(formatted[columns.remark] ?? "").trim().slice(0, 500) : "";
     let numericValue: number | null = null;
     let textValue: string | null = null;
@@ -471,6 +478,7 @@ export function parseWorkforcePayoutWorkbook(
       effectiveDate,
       effectiveFrom,
       effectiveTo,
+      rateValue,
       numericValue: action === "CLEAR" ? null : numericValue,
       textValue: action === "CLEAR" ? null : textValue,
       attendanceBasis: action === "CLEAR" ? null : attendanceBasis,
@@ -595,8 +603,8 @@ export function resolveWorkforcePayoutImportRows(
       } else {
         additionalPaymentFieldId = field.id;
         additionalCalculationType = field.calculationType;
-        if (field.calculationType === "units_x_rate" && field.defaultRateValue === null) {
-          issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `${field.code} requires a default rate before input values can be uploaded.` });
+        if (field.calculationType === "units_x_rate" && row.rateValue == null && field.defaultRateValue === null) {
+          issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: `${field.code} requires RATE in the upload or a configured default rate.` });
         }
       }
     } else if (row.inputType === "DEDUCTION") {
@@ -732,9 +740,10 @@ export function buildWorkforcePayoutImportTemplate(
   const supportedInputTypes = new Set(options.supportedInputTypes ?? workforcePayoutInputTypes);
   const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK"];
   const columnWidths = [12, 24, 16, 24, 24, 18, 18, 18, 42].map((wch) => ({ wch }));
+  headers.push("RATE");
   const upload = XLSX.utils.aoa_to_sheet([headers]);
   upload["!cols"] = columnWidths;
-  upload["!autofilter"] = { ref: `A1:I1` };
+  upload["!autofilter"] = { ref: `A1:J1` };
 
   const referenceRows = [
     ["FIELD_CODE", "LABEL", "INPUT_TYPE", "CALCULATION", "VALUE MEANING"],
@@ -770,7 +779,7 @@ export function buildWorkforcePayoutImportTemplate(
   ]);
   if (supportedInputTypes.has("ADDITIONAL_PAYMENT")) instructionRows.push([
     "ADDITIONAL_PAYMENT",
-    "Use a FIELD_CODE from Field Reference. VALUE is applied once to the complete payout period selected on the worksheet page."
+    "Use a FIELD_CODE from Field Reference. For units_x_rate, VALUE is the count and RATE is the per-unit rate. Leave RATE blank to use the configured default. For manual_amount, VALUE is the amount and RATE stays blank."
   ]);
   if (supportedInputTypes.has("DEDUCTION")) instructionRows.push([
     "DEDUCTION",
@@ -808,6 +817,7 @@ export function buildWorkforcePayoutImportTemplate(
   if (deductionField) {
     exampleRows.push(["UPSERT", "REPLACE_WITH_DROPX_ID", exampleLocation, "DEDUCTION", deductionField.code, exampleDate, exampleTo, 250, `${deductionField.label} for the effective range`]);
   }
+
   const examples = XLSX.utils.aoa_to_sheet(exampleRows);
   examples["!cols"] = columnWidths;
   examples["!autofilter"] = { ref: `A2:I${exampleRows.length}` };

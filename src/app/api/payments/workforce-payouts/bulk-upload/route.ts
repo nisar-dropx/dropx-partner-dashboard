@@ -503,6 +503,7 @@ function rpcRows(rows: ResolvedWorkforcePayoutImportRow[]) {
     effective_from: row.effectiveFrom,
     effective_to: row.effectiveTo,
     numeric_value: row.numericValue,
+    rate_value: row.rateValue ?? null,
     text_value: row.inputType === "ATTENDANCE" ? null : row.textValue,
     work_minutes: row.inputType === "ATTENDANCE" ? null : row.workMinutes,
     remark: row.remark || null

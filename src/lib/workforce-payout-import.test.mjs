@@ -16,7 +16,7 @@ test("keeps mapping snapshot fields available when the live method relation is i
   assert.deepEqual(workforcePayoutSetupFieldCodes([], null), []);
 });
 
-const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK"];
+const headers = ["ACTION", "DROPX_ID", "LOCATION", "INPUT_TYPE", "FIELD_CODE", "EFFECTIVE_DATE", "EFFECTIVE_TO", "VALUE", "REMARK", "RATE"];
 
 function payoutRow({
   action = "UPSERT",
