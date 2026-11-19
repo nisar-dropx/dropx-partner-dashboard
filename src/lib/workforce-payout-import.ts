@@ -551,10 +551,12 @@ export function resolveWorkforcePayoutImportRows(
       issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "This payout input is outside your location scope." });
       return null;
     }
-    if (row.effectiveFrom && worker.dateOfJoin && row.effectiveFrom < worker.dateOfJoin) {
+    if (row.effectiveFrom && worker.dateOfJoin && row.effectiveFrom < worker.dateOfJoin
+      && !(row.inputType === "ADDITIONAL_PAYMENT" && row.effectiveTo >= worker.dateOfJoin)) {
       issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "The input starts before the Workforce joining date." });
     }
-    if (row.effectiveTo && worker.lastWorkingDate && row.effectiveTo > worker.lastWorkingDate) {
+    if (row.effectiveTo && worker.lastWorkingDate && row.effectiveTo > worker.lastWorkingDate
+      && !(row.inputType === "ADDITIONAL_PAYMENT" && row.effectiveFrom <= worker.lastWorkingDate)) {
       issues.push({ rowNumber: row.rowNumber, dropxId: row.dropxId, message: "The input ends after the Workforce last working date." });
     }
     if (!worker.isActive && !worker.lastWorkingDate) {

@@ -414,3 +414,19 @@ test("creates a dynamic workbook with plain-language guidance and safe examples"
   assert.match(instructionText, /total quantity for the effective range in VALUE/i);
   assert.match(instructionText, /Inputs not represented by an uploaded row remain unchanged/i);
 });
+
+test("monthly additional payments allow mid-month employment but reject months before joining", () => {
+  const parsed = parseWorkforcePayoutWorkbook(workbookBytes([
+    payoutRow({ inputType: "ADDITIONAL_PAYMENT", fieldCode: "BONUS", effectiveTo: "30/09/2026", value: 500 })
+  ]), options);
+  const inMonth = resolveWorkforcePayoutImportRows(parsed, {
+    ...references,
+    workers: references.workers.map(worker => ({ ...worker, dateOfJoin: "2026-09-15" }))
+  });
+  assert.equal(inMonth.issues.length, 0);
+  const nextMonth = resolveWorkforcePayoutImportRows(parsed, {
+    ...references,
+    workers: references.workers.map(worker => ({ ...worker, dateOfJoin: "2026-10-01" }))
+  });
+  assert.ok(nextMonth.issues.some(issue => /joining date/.test(issue.message)));
+});
