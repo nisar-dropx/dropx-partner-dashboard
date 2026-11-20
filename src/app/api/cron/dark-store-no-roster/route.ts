@@ -28,6 +28,7 @@ export async function GET(request: Request) {
   // ?force=1 — same as normal run but sends to real groups even when called manually
   const testMode = url.searchParams.get("test") === "1";
   const forceMode = url.searchParams.get("force") === "1";
+  const debugMode = url.searchParams.get("debug") === "1";
   const testingGroupJid = "120363429732355530@g.us";
 
   if (!supabaseAdmin)
@@ -246,5 +247,17 @@ export async function GET(request: Request) {
 
   await Promise.all(sendTasks);
 
-  return NextResponse.json({ ok: true, sent, today, nowHHMM, results });
+  const debugInfo = debugMode
+    ? Object.fromEntries(
+        [...flaggedByLocation.entries()].map(([locId, flagged]) => {
+          const station = stationRows.find((s) => s.id === locId);
+          return [
+            station?.station_code ?? locId,
+            flagged.map((f) => ({ name: f.person.name, code: f.person.code, reason: f.reason })),
+          ];
+        })
+      )
+    : undefined;
+
+  return NextResponse.json({ ok: true, sent, today, nowHHMM, results, ...(debugInfo ? { debug: debugInfo } : {}) });
 }
