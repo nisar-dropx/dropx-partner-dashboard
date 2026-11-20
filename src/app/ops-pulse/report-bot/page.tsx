@@ -107,7 +107,14 @@ function BotForm({ workspace, children, ...props }: ComponentProps<"form"> & { w
   return <form {...props}><input type="hidden" name="workspace" value={workspace} />{children}</form>;
 }
 
-export default async function ReportBotPage({ searchParams }: { searchParams?: { tab?: string; workspace?: string } }) {
+const REVIEW_PAGE_SIZE = 20;
+
+function clampPage(value: string | undefined): number {
+  const n = parseInt(value ?? "1", 10);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+export default async function ReportBotPage({ searchParams }: { searchParams?: { tab?: string; workspace?: string; rp?: string; wp?: string; ap?: string } }) {
   const workspace = reportBotWorkspace(searchParams?.workspace);
   const pageCode = reportBotPage(workspace);
   const authorization = await requirePagePermission(pageCode, "access");
@@ -118,6 +125,9 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   if (requested === "connection" || requested === "settings") redirect(reportBotSetupHref(workspace));
   if (requested === "chats") redirect(reportBotChatHref(workspace));
   const tab: Tab = TABS.find((entry) => entry.key === requested)?.key ?? "today";
+  const reviewPage = clampPage(searchParams?.rp);
+  const waitPage = clampPage(searchParams?.wp);
+  const attnPage = clampPage(searchParams?.ap);
   const db = reportBotDb();
 
   let settings: ReportBotSettings;
@@ -230,7 +240,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         </div>
 
         {tab === "today" ? await TodayTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
-        {tab === "review" ? await ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
+        {tab === "review" ? await ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit, reviewPage, waitPage, attnPage }) : null}
         {tab === "actions" ? await ActionsTab({ workspace, companyId, groupIds, lookup, settings, canEdit }) : null}
         {tab === "summary" ? await SummaryTab({ workspace, companyId, groupIds, lookup, settings }) : null}
         {tab === "groups" ? await GroupsTab({ workspace, authorization, groups, canEdit }) : null}
@@ -411,14 +421,31 @@ function CheckList({ checks }: { checks: AnalysisCheck[] }) {
   );
 }
 
-async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
+async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, canEdit, reviewPage, waitPage, attnPage }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean; reviewPage: number; waitPage: number; attnPage: number }) {
   const db = reportBotDb();
+  const PS = REVIEW_PAGE_SIZE;
+  const rFrom = (reviewPage - 1) * PS, rTo = rFrom + PS - 1;
+  const wFrom = (waitPage - 1) * PS, wTo = wFrom + PS - 1;
+  const aFrom = (attnPage - 1) * PS, aTo = aFrom + PS - 1;
   const [waiting, attention, recent, reviewItems] = groupIds.length ? await Promise.all([
-    db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).eq("status", "awaiting_approval").order("message_at").limit(50),
-    db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["failed", "blocked"]).order("message_at", { ascending: false }).limit(50),
+    db.from("report_bot_submissions").select("*", { count: "exact" }).eq("company_id", companyId).in("group_id", groupIds).eq("status", "awaiting_approval").order("message_at").range(wFrom, wTo),
+    db.from("report_bot_submissions").select("*", { count: "exact" }).eq("company_id", companyId).in("group_id", groupIds).in("status", ["failed", "blocked"]).order("message_at", { ascending: false }).range(aFrom, aTo),
     db.from("report_bot_submissions").select("*").eq("company_id", companyId).in("group_id", groupIds).in("status", ["sent", "ignored", "rejected", "skipped", "queued_to_send"]).order("message_at", { ascending: false }).limit(30),
-    db.from("report_bot_review_items").select("*").eq("company_id", companyId).in("group_id", groupIds).in("review_status", ["observe_only", "draft_ready"]).order("created_at", { ascending: false }).limit(50)
-  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [], error: null }];
+    db.from("report_bot_review_items").select("*", { count: "exact" }).eq("company_id", companyId).in("group_id", groupIds).in("review_status", ["observe_only", "draft_ready"]).order("created_at", { ascending: false }).range(rFrom, rTo)
+  ]) : [{ data: [], count: 0 }, { data: [], count: 0 }, { data: [] }, { data: [], count: 0, error: null }];
+  const reviewTotal = (reviewItems as { count?: number | null }).count ?? 0;
+  const waitTotal = (waiting as { count?: number | null }).count ?? 0;
+  const attnTotal = (attention as { count?: number | null }).count ?? 0;
+  const reviewPages = Math.max(1, Math.ceil(reviewTotal / PS));
+  const waitPages = Math.max(1, Math.ceil(waitTotal / PS));
+  const attnPages = Math.max(1, Math.ceil(attnTotal / PS));
+  function pageHref(rp: number, wp: number, ap: number) {
+    const params = new URLSearchParams({ tab: "review", workspace });
+    if (rp > 1) params.set("rp", String(rp));
+    if (wp > 1) params.set("wp", String(wp));
+    if (ap > 1) params.set("ap", String(ap));
+    return `?${params.toString()}`;
+  }
   const waitingRows = (waiting.data ?? []) as SubmissionRow[];
   const attentionRows = (attention.data ?? []) as SubmissionRow[];
   const reviewRows = (reviewItems.error ? [] : (reviewItems.data ?? [])) as Array<{
@@ -488,7 +515,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
             <div className={s.formActions}>
               {waitingRows.some((row) => row.feedback_text?.trim()) ? (
                 <BotForm workspace={workspace} action={sendAllWaiting}>
-                  <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitingRows.length} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
+                  <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitTotal} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
                 </BotForm>
               ) : null}
               {workspace === "dark_store" ? <BotForm workspace={workspace} action={setAutoReply}>
@@ -505,7 +532,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         description={settings.mode === "live"
           ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted in the group within seconds."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
-        action={waitingRows.length ? <span className={s.count}>{waitingRows.length}</span> : null}
+        action={waitTotal > 0 ? <span className={s.count}>{waitTotal}</span> : null}
       >
         {waitingRows.length ? (
           <div className={s.reviewList}>
@@ -562,8 +589,8 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         ) : <Empty icon={<CheckCircle2 size={28} aria-hidden />} title="All caught up">New report photos that need a decision will appear here.</Empty>}
       </Card>
 
-      {attentionRows.length ? (
-        <Card title="Needs attention" icon={<AlertTriangle size={18} aria-hidden />} description="Photos that couldn't be checked, or replies that couldn't be sent. Fix the cause shown, then retry." flush action={<span className={`${s.count} ${s.countMuted}`}>{attentionRows.length}</span>}>
+      {(attentionRows.length > 0 || attnTotal > 0) ? (
+        <Card title="Needs attention" icon={<AlertTriangle size={18} aria-hidden />} description="Photos that couldn't be checked, or replies that couldn't be sent. Fix the cause shown, then retry." flush action={attnTotal > 0 ? <span className={`${s.count} ${s.countMuted}`}>{attnTotal}</span> : null}>
           <div className={s.tableWrap}>
             <ReportTable className={s.table}>
               <thead><tr><th>Time</th><th>Group</th><th>Sender</th><th>Problem</th>{canEdit ? <th><span className="sr-only">Actions</span></th> : null}</tr></thead>
@@ -589,6 +616,28 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
             </ReportTable>
           </div>
         </Card>
+      ) : null}
+
+      {reviewPages > 1 ? (
+        <div className={s.formActions} style={{ justifyContent: "center", gap: 8, padding: "8px 0" }}>
+          {reviewPage > 1 ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage - 1, waitPage, attnPage)}>← Newer</Link> : null}
+          <span className={s.hint}>Review queue · page {reviewPage} of {reviewPages}</span>
+          {reviewPage < reviewPages ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage + 1, waitPage, attnPage)}>Older →</Link> : null}
+        </div>
+      ) : null}
+      {waitPages > 1 ? (
+        <div className={s.formActions} style={{ justifyContent: "center", gap: 8, padding: "8px 0" }}>
+          {waitPage > 1 ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage, waitPage - 1, attnPage)}>← Newer</Link> : null}
+          <span className={s.hint}>Waiting for review · page {waitPage} of {waitPages}</span>
+          {waitPage < waitPages ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage, waitPage + 1, attnPage)}>Older →</Link> : null}
+        </div>
+      ) : null}
+      {attnPages > 1 ? (
+        <div className={s.formActions} style={{ justifyContent: "center", gap: 8, padding: "8px 0" }}>
+          {attnPage > 1 ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage, waitPage, attnPage - 1)}>← Newer</Link> : null}
+          <span className={s.hint}>Needs attention · page {attnPage} of {attnPages}</span>
+          {attnPage < attnPages ? <Link className={`${s.button} ${s.small}`} href={pageHref(reviewPage, waitPage, attnPage + 1)}>Older →</Link> : null}
+        </div>
       ) : null}
 
       <SubmissionTable rows={(recent.data ?? []) as SubmissionRow[]} lookup={lookup} timeZone={settings.timezone} title="Recently handled" emptyText="Handled photos will be listed here." />

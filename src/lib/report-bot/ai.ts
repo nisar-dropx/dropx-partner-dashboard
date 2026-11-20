@@ -279,7 +279,7 @@ async function analyseWithGroq(settings: ReportBotSettings, input: AnalysisInput
     if (response.status === 401 || response.status === 403) throw new AiError("The Groq API key was rejected. Check GROQ_API_KEY.", false, true);
     if (response.status === 404) throw new AiError(`Model "${settings.ai_model}" was not found on Groq. Trying fallback provider.`, true);
     if (response.status === 400) throw new AiError(`The Groq request was rejected: ${payload?.error?.message ?? "bad request"}`, false);
-    if (response.status === 429) throw new AiError("Groq rate limit reached. It will be retried.", true);
+    if (response.status === 429) throw new AiError("Groq rate limit reached. Switch the AI provider to Gemini in settings.", false, true);
     if (!response.ok) throw new AiError(`Groq service error (${response.status}). It will be retried.`, true);
     const text = payload?.choices?.[0]?.message?.content ?? "";
     if (!text.trim()) throw new AiError("Groq returned no result.", true);
