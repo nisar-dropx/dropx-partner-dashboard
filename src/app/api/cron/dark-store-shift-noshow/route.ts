@@ -77,22 +77,35 @@ export async function GET(request: Request) {
       .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: g.group_name as string }])
   );
 
-  // --- 3. Load today's roster entries for dark store locations ---
-  // hr_roster_entries.location_id matches stations.id (dark store station UUIDs).
-  // Workers are assigned TO the dark store via the roster — their own employee/contractor
-  // location_id is their home hub and must NOT be used as a filter here.
+  // --- 3. Load approved roster plans covering today at dark store locations ---
+  // hr_roster_plans covers a week (period_start..period_end), not a single date.
+  // Fetch plans where today falls within the period, then filter entries by plan_id
+  // to avoid PostgREST !inner join ambiguity on hr_roster_entries.
+  const { data: approvedPlans, error: plansErr } = await admin
+    .from("hr_roster_plans")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("location_id", locationIds)
+    .eq("status", "approved")
+    .lte("period_start", today)
+    .or(`period_end.is.null,period_end.gte.${today}`);
+  if (plansErr) return NextResponse.json({ error: plansErr.message }, { status: 500 });
+
+  const approvedPlanIds = (approvedPlans ?? []).map((p) => p.id as string);
+  if (!approvedPlanIds.length) return NextResponse.json({ ok: true, sent: 0, reason: "no approved roster plans covering today", today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, locationIds });
+
   const { data: rosterEntries, error: rosterErr } = await admin
     .from("hr_roster_entries")
-    .select("worker_id,worker_type,day_type,location_id,hr_shifts(id,name,start_time,end_time),hr_roster_plans!inner(status,roster_kind)")
+    .select("worker_id,worker_type,day_type,location_id,plan_id,hr_shifts(id,name,start_time,end_time)")
     .eq("company_id", companyId)
     .eq("roster_date", today)
     .in("location_id", locationIds)
-    .eq("hr_roster_plans.status", "approved")
+    .in("plan_id", approvedPlanIds)
     .limit(5000);
   if (rosterErr) return NextResponse.json({ error: rosterErr.message }, { status: 500 });
 
   const workingEntries = (rosterEntries ?? []).filter((e) => e.day_type === "working");
-  if (!workingEntries.length) return NextResponse.json({ ok: true, sent: 0, reason: "no working roster entries today" });
+  if (!workingEntries.length) return NextResponse.json({ ok: true, sent: 0, reason: "no working roster entries today", today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, totalEntries: rosterEntries?.length ?? 0, approvedPlanIds });
 
   // Collect ALL unique worker_ids regardless of worker_type tag —
   // query both tables with the full set so a mis-tagged roster entry
