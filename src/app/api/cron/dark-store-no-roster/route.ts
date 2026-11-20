@@ -162,7 +162,7 @@ export async function GET(request: Request) {
   const punchedEnrolments = new Set<string>();
   for (const punch of punchData) {
     const label = (punch.punch_label ?? "").toLowerCase().trim();
-    const isIn = !label || label === "in" || label === "i" || label.startsWith("check-in")
+    const isIn = !label || label.startsWith("in") || label === "i" || label.startsWith("check-in")
       || label.startsWith("checkin") || label === "entry" || label === "check in";
     if (isIn) punchedEnrolments.add(normalizeBiometricEnrolmentId(punch.enrolment_id));
   }
