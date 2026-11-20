@@ -7,6 +7,6 @@ set
   ai_provider      = 'gemini',
   ai_model         = 'gemini-2.5-flash',
   ai_fallback_provider = 'groq',
-  ai_fallback_model    = 'qwen/qwen3-27b',
+  ai_fallback_model    = 'qwen/qwen3-8b',
   updated_at           = now()
 where company_id = '43866344-b550-4e8a-9a2d-9d23f3d8a997';

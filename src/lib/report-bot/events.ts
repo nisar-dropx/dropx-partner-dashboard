@@ -334,7 +334,10 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     await upsertActionsFromAnalysis(settings, event.group_id, inserted.id, event.id, analysis);
     await tryLinkTicketClosure(settings, event.group_id, event.id, inserted.id, analysis, reportType?.category ?? null);
   }
-  const complete = analysis.is_report && (!reportType || reportType.requires_pass_to_close !== true || analysis.verdict === "pass");
+  // Silent policy: no feedback is ever sent, so requires_pass_to_close would loop reminders forever.
+  // Always complete (stop reminders) when the report type won't reply anyway.
+  const isSilent = reportType?.auto_reply_policy === "silent" || decision === "silent";
+  const complete = analysis.is_report && (!reportType || isSilent || reportType.requires_pass_to_close !== true || analysis.verdict === "pass");
   if (request && complete) {
     must(await db.from("report_bot_requests").update({
       status: "received",

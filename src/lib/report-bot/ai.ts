@@ -301,7 +301,7 @@ async function analyseWith(provider: ReportBotSettings["ai_provider"], settings:
 
 // Free Gemini models to try in order when the primary model fails.
 // All support vision and are on the free tier.
-const GEMINI_CASCADE = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"];
+const GEMINI_CASCADE = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash-latest"];
 
 /** Text-only, image, or evidence-bundle classification. Structured JSON only. */
 export async function analyseOperationalReport(settings: ReportBotSettings, input: AnalysisInput): Promise<Analysis> {

@@ -143,7 +143,7 @@ const SCHEMA_PROBES: Array<{ migration: string; effect: string; probe: () => Pro
     migration: "20261021150000_report_bot_tcc3_pilot.sql",
     effect: "per-group Observe/Review/Live, text events, review queue and open actions are unavailable",
     probe: () => reportBotDb().from("report_bot_inbound_events").select("id").limit(1)
-  }
+  },
 ];
 
 export async function missingReportBotMigrations() {
