@@ -70,11 +70,11 @@ export async function GET(request: Request) {
 
   const companyId = stationRows[0].company_id as string;
 
-  // location_id → { waGroupId, groupName }
+  // location_id → { waGroupId, groupName } — skip groups with no WA group ID
   const groupByLocation = new Map(
     groups
-      .filter((g) => stationRows.some((s) => s.id === g.location_id))
-      .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: g.group_name as string }])
+      .filter((g) => stationRows.some((s) => s.id === g.location_id) && g.wa_group_id)
+      .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? g.location_id as string }])
   );
 
   // --- 3. Load approved roster plans covering today at dark store locations ---
@@ -134,8 +134,8 @@ export async function GET(request: Request) {
 
   type Person = { id: string; code: string; name: string; biometricId: string | null };
   const personById = new Map<string, Person>([
-    ...(empResult.data ?? []).map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name, biometricId: e.biometric_id }]),
-    ...(ctrResult.data ?? []).map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name, biometricId: c.biometric_id }]),
+    ...(empResult.data ?? []).map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name ?? "Unknown", biometricId: e.biometric_id }]),
+    ...(ctrResult.data ?? []).map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name ?? "Unknown", biometricId: c.biometric_id }]),
   ]);
 
   // --- 5. Load today's attendance punches ---
@@ -147,20 +147,28 @@ export async function GET(request: Request) {
   }
 
   const allBiometricIds = [...new Set([...personById.values()].flatMap((p) => biometricVariants(p.biometricId)))];
-  const punchResult = allBiometricIds.length
-    ? await admin.from("attendance_punches")
-        .select("enrolment_id,punch_time,punch_label")
-        .eq("company_id", companyId)
-        .eq("punch_date", today)
-        .eq("calculated", true)
-        .in("enrolment_id", allBiometricIds)
-        .order("punch_time", { ascending: true })
-        .limit(5000)
-    : { data: [], error: null };
-  if (punchResult.error) return NextResponse.json({ error: punchResult.error.message }, { status: 500 });
+  // Chunk to avoid PostgREST URL length limits on large .in() lists
+  const BIO_CHUNK = 150;
+  const bioChunks: string[][] = [];
+  for (let i = 0; i < allBiometricIds.length; i += BIO_CHUNK) bioChunks.push(allBiometricIds.slice(i, i + BIO_CHUNK));
+  const punchChunkResults = allBiometricIds.length
+    ? await Promise.all(bioChunks.map((chunk) =>
+        admin.from("attendance_punches")
+          .select("enrolment_id,punch_time,punch_label")
+          .eq("company_id", companyId)
+          .eq("punch_date", today)
+          .eq("calculated", true)
+          .in("enrolment_id", chunk)
+          .order("punch_time", { ascending: true })
+          .limit(5000)
+      ))
+    : [];
+  const punchError = punchChunkResults.find((r) => r.error)?.error;
+  if (punchError) return NextResponse.json({ error: punchError.message }, { status: 500 });
+  const punchData = punchChunkResults.flatMap((r) => r.data ?? []);
 
   const punchedEnrolments = new Set<string>();
-  for (const punch of punchResult.data ?? []) {
+  for (const punch of punchData) {
     const label = (punch.punch_label ?? "").toLowerCase();
     if (!label || label.includes("in")) {
       punchedEnrolments.add(String(punch.enrolment_id).replace(/^0+(?=\d)/, "") || "0");
