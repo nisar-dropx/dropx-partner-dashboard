@@ -187,6 +187,25 @@ export async function POST(request: Request) {
         },
         409,
       );
+    if (action === "submit" && input.decision === "dispute") {
+      try {
+        const note = await fileInCloak(company, month, caseKey, result.data.version, details);
+        const filed = await supabaseAdmin!.rpc("save_nl_dispute_request", {
+          p_company: company,
+          p_month: month,
+          p_case: caseKey,
+          p_version: result.data.version,
+          p_action: "file",
+          p_values: { desk_note: note },
+          p_actor: auth.userId,
+          p_name: auth.fullName || auth.email || "OpsPulse user",
+        });
+        if (filed.error) throw Error("Cloak filed the dispute, but OpsPulse could not record it. Refresh after the next sync.");
+        return reply({ request: filed.data });
+      } catch (e) {
+        return reply({ request: result.data, error: e instanceof Error ? `Saved in OpsPulse, but not filed in Cloak: ${e.message}` : "Saved in OpsPulse, but not filed in Cloak." }, 502);
+      }
+    }
     return reply({ request: result.data });
   } catch (e) {
     return reply(
