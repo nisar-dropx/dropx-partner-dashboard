@@ -114,13 +114,16 @@ export async function GET(request: Request) {
       .select("id,employee_code,full_name,biometric_id,location_id")
       .eq("company_id", companyId)
       .in("location_id", locationIds)
-      .eq("status", "Active")
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .not("people_lifecycle_status", "in", '("offboarding","offboarded")')
       .limit(5000),
     admin.from("contractors")
       .select("id,dropx_id,full_name,biometric_id,location_id")
       .eq("company_id", companyId)
       .in("location_id", locationIds)
-      .eq("status", "Active")
+      .eq("is_active", true)
+      .is("deleted_at", null)
       .limit(5000),
   ]);
   if (empResult.error) return NextResponse.json({ error: empResult.error.message }, { status: 500 });
