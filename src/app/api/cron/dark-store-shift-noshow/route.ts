@@ -209,7 +209,9 @@ export async function GET(request: Request) {
     if (!shiftsByLocation.has(locationId)) shiftsByLocation.set(locationId, new Map());
     const shiftMap = shiftsByLocation.get(locationId)!;
     if (!shiftMap.has(shiftKey)) shiftMap.set(shiftKey, { startTime: shift.start_time, people: [] });
-    shiftMap.get(shiftKey)!.people.push(person);
+    const shiftPeople = shiftMap.get(shiftKey)!.people;
+    // Deduplicate: a worker can appear multiple times if they have overlapping roster entries
+    if (!shiftPeople.some((p) => p.id === person.id)) shiftPeople.push(person);
   }
 
   // --- 7. For each location → shift, check if alert is due and send ---
@@ -266,8 +268,11 @@ export async function GET(request: Request) {
         ...notReported.map((p) => `- ${p.name} (${p.code})`),
       ];
       const text = lines.join("\n");
-      // client_ref must be unique per station+shift even in test mode to avoid dedup blocking
-      const clientRef = `shift-noshow-${locationId}-${today}-${shiftKey.replace(":", "")}${testMode ? "-test" : ""}`;
+      // client_ref: must match /^[A-Za-z0-9_-]{8,64}$/
+      // UUID location_id + date + shift would exceed 64 chars, so use last 8 chars of UUID
+      const locShort = locationId.replace(/-/g, "").slice(-8);
+      const dateShort = today.replace(/-/g, "").slice(2); // "261120"
+      const clientRef = `ssn-${locShort}-${dateShort}-${shiftKey.replace(":", "")}${testMode ? "-t" : ""}`;
       const toGroup = testMode ? testingGroupJid : group.waGroupId;
       const label = `${group.groupName} ${shiftKey}`;
 
