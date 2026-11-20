@@ -271,7 +271,16 @@ export async function GET(request: Request) {
           inWindow,
           total: people.length,
           notReported: notReported.length,
-          notReportedNames: notReported.map((p) => `${p.name} (${p.code})`),
+          people: people.map((p) => ({
+            name: p.name,
+            code: p.code,
+            biometricId: p.biometricId,
+            biometricVariants: biometricVariants(p.biometricId),
+            hasPunch: hasPunch(p.biometricId),
+            punches: punchData
+              .filter((punch) => biometricVariants(p.biometricId).includes(String(punch.enrolment_id)))
+              .map((punch) => ({ enrolment_id: punch.enrolment_id, punch_time: punch.punch_time, punch_label: punch.punch_label })),
+          })),
         });
       }
 
