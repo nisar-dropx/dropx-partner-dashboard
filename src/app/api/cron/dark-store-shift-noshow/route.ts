@@ -283,10 +283,10 @@ export async function GET(request: Request) {
 
       const reported = people.length - notReported.length;
       const shiftLabel = minutesToHHMM(shiftStartMin);
-      const lines = [
-        `In the ${shiftLabel} hrs shift, only ${reported} of ${people.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`,
-        ...notReported.map((p) => `- ${p.name} (${p.code})`),
-      ];
+      const intro = reported === 0
+        ? `In the ${shiftLabel} hrs shift, none of the ${people.length} people scheduled have reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`
+        : `In the ${shiftLabel} hrs shift, only ${reported} of ${people.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`;
+      const lines = [intro, ...notReported.map((p) => `- ${p.name} (${p.code})`)];
       const text = lines.join("\n");
       // client_ref: must match /^[A-Za-z0-9_-]{8,64}$/
       // UUID location_id + date + shift would exceed 64 chars, so use last 8 chars of UUID
