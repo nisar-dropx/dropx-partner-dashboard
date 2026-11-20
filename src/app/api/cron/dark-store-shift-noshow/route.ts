@@ -115,6 +115,7 @@ export async function GET(request: Request) {
 
   const workingEntries = (rosterEntries ?? []).filter((e) => e.day_type === "working");
   if (!workingEntries.length) return NextResponse.json({ ok: true, sent: 0, reason: "no working roster entries today", today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, totalEntries: rosterEntries?.length ?? 0, approvedPlanIds });
+  if ((rosterEntries?.length ?? 0) >= 5000) console.warn(`[shift-noshow] roster entry limit hit (5000) — some entries may be missing`);
 
   // Collect ALL unique worker_ids regardless of worker_type tag —
   // query both tables with the full set so a mis-tagged roster entry
@@ -122,29 +123,42 @@ export async function GET(request: Request) {
   const allWorkerIds = [...new Set(workingEntries.map((e) => e.worker_id))];
 
   // --- 4. Fetch worker details (name + biometric_id) from both tables ---
-  const [empResult, ctrResult] = await Promise.all([
+  // Chunk worker IDs to avoid PostgREST URL length limits on large .in() lists
+  const WORKER_CHUNK = 150;
+  const workerChunks: string[][] = [];
+  for (let i = 0; i < allWorkerIds.length; i += WORKER_CHUNK) workerChunks.push(allWorkerIds.slice(i, i + WORKER_CHUNK));
+
+  const [empChunkResults, ctrChunkResults] = await Promise.all([
     allWorkerIds.length
-      ? admin.from("employees")
-          .select("id,employee_code,full_name,biometric_id")
-          .eq("company_id", companyId)
-          .in("id", allWorkerIds)
-          .limit(5000)
-      : Promise.resolve({ data: [], error: null }),
+      ? Promise.all(workerChunks.map((chunk) =>
+          admin.from("employees")
+            .select("id,employee_code,full_name,biometric_id")
+            .eq("company_id", companyId)
+            .in("id", chunk)
+            .limit(5000)
+        ))
+      : Promise.resolve([{ data: [], error: null }]),
     allWorkerIds.length
-      ? admin.from("contractors")
-          .select("id,dropx_id,full_name,biometric_id")
-          .eq("company_id", companyId)
-          .in("id", allWorkerIds)
-          .limit(5000)
-      : Promise.resolve({ data: [], error: null }),
+      ? Promise.all(workerChunks.map((chunk) =>
+          admin.from("contractors")
+            .select("id,dropx_id,full_name,biometric_id")
+            .eq("company_id", companyId)
+            .in("id", chunk)
+            .limit(5000)
+        ))
+      : Promise.resolve([{ data: [], error: null }]),
   ]);
-  if (empResult.error) return NextResponse.json({ error: empResult.error.message }, { status: 500 });
-  if (ctrResult.error) return NextResponse.json({ error: ctrResult.error.message }, { status: 500 });
+  const empError = empChunkResults.find((r) => r.error)?.error;
+  const ctrError = ctrChunkResults.find((r) => r.error)?.error;
+  if (empError) return NextResponse.json({ error: empError.message }, { status: 500 });
+  if (ctrError) return NextResponse.json({ error: ctrError.message }, { status: 500 });
+  const empData = empChunkResults.flatMap((r) => r.data ?? []);
+  const ctrData = ctrChunkResults.flatMap((r) => r.data ?? []);
 
   type Person = { id: string; code: string; name: string; biometricId: string | null };
   const personById = new Map<string, Person>([
-    ...(empResult.data ?? []).map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name ?? "Unknown", biometricId: e.biometric_id }]),
-    ...(ctrResult.data ?? []).map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name ?? "Unknown", biometricId: c.biometric_id }]),
+    ...empData.map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name ?? "Unknown", biometricId: e.biometric_id }]),
+    ...ctrData.map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name ?? "Unknown", biometricId: c.biometric_id }]),
   ]);
 
   // --- 5. Load today's attendance punches ---
@@ -179,8 +193,12 @@ export async function GET(request: Request) {
 
   const punchedEnrolments = new Set<string>();
   for (const punch of punchData) {
-    const label = (punch.punch_label ?? "").toLowerCase();
-    if (!label || label.includes("in")) {
+    const label = (punch.punch_label ?? "").toLowerCase().trim();
+    // Accept: empty label (raw biometric tap), "in", "check-in", "checkin", "entry", "i"
+    // Reject: "out", "checkout", "exit" etc.
+    const isIn = !label || label === "in" || label === "i" || label.startsWith("check-in")
+      || label.startsWith("checkin") || label === "entry" || label === "check in";
+    if (isIn) {
       punchedEnrolments.add(String(punch.enrolment_id).replace(/^0+(?=\d)/, "") || "0");
     }
   }
