@@ -6,7 +6,14 @@
   "scripts": {
     "start": "node fetch.mjs",
     "inbound": "node fetch.mjs --inbound",
-    "dry-run": "node fetch.mjs --dry-run"
+    "dry-run": "node fetch.mjs --dry-run",
+    "monitor": "node site-summary-monitor.mjs",
+    "monitor:once": "node site-summary-monitor.mjs --once",
+    "monitor:test": "node site-summary-monitor.mjs --once --dry-run"
+  },
+  "dependencies": {
+    "satori": "^0.10.14",
+    "@resvg/resvg-js": "^2.6.2"
   },
   "engines": {
     "node": ">=20"
