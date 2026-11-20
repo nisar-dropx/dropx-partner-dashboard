@@ -97,15 +97,18 @@ export async function GET(request: Request) {
   if (entriesErr) return NextResponse.json({ error: entriesErr.message }, { status: 500 });
   if ((allEntries?.length ?? 0) >= 5000) console.warn("[no-roster] roster entry limit hit (5000)");
 
-  // worker_id → { hasApproved, hasUnapproved } per location
-  type RosterStatus = { hasApproved: boolean; hasUnapproved: boolean };
+  // worker_id → { hasApprovedWorking, hasUnapprovedWorking, hasApprovedOff } per location
+  // hasApprovedOff = weekly_off / holiday in an approved plan → legitimately not working, don't flag
+  type RosterStatus = { hasApprovedWorking: boolean; hasUnapprovedWorking: boolean; hasApprovedOff: boolean };
   const rosterByWorkerAndLocation = new Map<string, RosterStatus>();
   for (const entry of allEntries ?? []) {
-    if (entry.day_type !== "working") continue;
     const key = `${entry.worker_id}::${entry.location_id}`;
-    const cur = rosterByWorkerAndLocation.get(key) ?? { hasApproved: false, hasUnapproved: false };
-    if (approvedPlanIds.has(entry.plan_id)) cur.hasApproved = true;
-    else if (unapprovedPlanIds.has(entry.plan_id)) cur.hasUnapproved = true;
+    const cur = rosterByWorkerAndLocation.get(key) ?? { hasApprovedWorking: false, hasUnapprovedWorking: false, hasApprovedOff: false };
+    const isWorking = entry.day_type === "working";
+    const isApproved = approvedPlanIds.has(entry.plan_id);
+    if (isApproved && isWorking) cur.hasApprovedWorking = true;
+    else if (!isApproved && isWorking) cur.hasUnapprovedWorking = true;
+    else if (isApproved && !isWorking) cur.hasApprovedOff = true;
     rosterByWorkerAndLocation.set(key, cur);
   }
 
@@ -185,11 +188,14 @@ export async function GET(request: Request) {
     let reason: Flagged["reason"] | null = null;
 
     if (!roster) {
-      // No roster entry at all — flag if they punched in (unexpected presence)
-      // OR flag always (active staff with no roster)
+      // No roster entry of any kind today
       reason = "no_roster";
-    } else if (!roster.hasApproved && roster.hasUnapproved) {
-      // Has roster but plan not approved
+    } else if (roster.hasApprovedOff) {
+      // Weekly off / holiday in approved plan — legitimate, don't flag
+    } else if (roster.hasApprovedWorking) {
+      // Properly rostered for a working day — don't flag
+    } else if (roster.hasUnapprovedWorking) {
+      // Only in an unapproved plan
       reason = "unapproved_roster";
     }
 
