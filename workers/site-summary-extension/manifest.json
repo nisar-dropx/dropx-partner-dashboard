@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "name": "DropX Site Summary Monitor",
+  "version": "1.0.0",
+  "description": "Monitors acceptance time across all dark stores and sends WhatsApp alerts via Report Bot.",
+
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms",
+    "https://eu.store-management.f3.amazon.dev/*",
+    "https://dropx-report-bot.onrender.com/*"
+  ],
+
+  "background": {
+    "scripts": ["config.js", "config.local.js", "background.js"],
+    "persistent": true
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://eu.store-management.f3.amazon.dev/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/icon-off.png"
+    },
+    "default_title": "DropX Monitor"
+  },
+
+  "icons": {
+    "32": "icons/icon-off.png"
+  }
+}

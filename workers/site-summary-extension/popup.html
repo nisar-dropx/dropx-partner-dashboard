@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=340">
+<title>DropX Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, Arial, sans-serif; width: 340px; background: #f8fafc; color: #1e293b; }
+
+  .header {
+    background: #1e293b;
+    color: #fff;
+    padding: 12px 14px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.3px; }
+  .sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    background: #9ca3af;
+    transition: background 0.3s;
+  }
+  .dot.on   { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+  .dot.run  { background: #d97706; box-shadow: 0 0 0 3px #fef9c3; animation: pulse 1s infinite; }
+  .dot.pause{ background: #6366f1; box-shadow: 0 0 0 3px #ede9fe; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .status-text { font-size: 12px; color: #374151; flex: 1; }
+  .station-chip {
+    font-size: 11px; font-weight: 700;
+    background: #dbeafe; color: #1d4ed8;
+    border-radius: 4px; padding: 2px 7px;
+  }
+
+  /* ── Button rows ── */
+  .buttons-main {
+    display: flex;
+    gap: 7px;
+    padding: 10px 14px 0;
+    background: #fff;
+  }
+  .buttons-aux {
+    display: flex;
+    gap: 7px;
+    padding: 8px 14px 10px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  button {
+    flex: 1; padding: 8px 0; border: none; border-radius: 6px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover:not(:disabled) { opacity: 0.85; }
+  button:disabled { opacity: 0.35; cursor: default; }
+
+  #btn-start   { background: #16a34a; color: #fff; }
+  #btn-pause   { background: #6366f1; color: #fff; }
+  #btn-runnow  { background: #2563eb; color: #fff; }
+  #btn-refresh { background: #0891b2; color: #fff; }
+  #btn-test    { background: #d97706; color: #fff; }
+  #btn-stop    { background: #dc2626; color: #fff; flex: 0 0 72px; }
+
+  .info-row {
+    display: flex;
+    padding: 7px 14px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 11px;
+    color: #6b7280;
+  }
+  .info-row span { flex: 1; }
+  .info-row b { color: #374151; }
+
+  .log-wrap { padding: 8px 0 0; background: #f8fafc; }
+  .log-label {
+    font-size: 10px; font-weight: 700; color: #9ca3af; letter-spacing: 0.5px;
+    padding: 0 14px 4px; text-transform: uppercase;
+  }
+  .log {
+    max-height: 190px; overflow-y: auto;
+    font-size: 11px; font-family: monospace; color: #374151;
+    padding: 0 14px 10px; line-height: 1.65;
+  }
+  .log-line { border-bottom: 1px solid #f1f5f9; padding: 1px 0; }
+  .log-line.ok   { color: #16a34a; }
+  .log-line.err  { color: #dc2626; }
+  .log-line.warn { color: #d97706; }
+  .log-line.sep  { color: #9ca3af; font-style: italic; }
+
+  #toast {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: #1e293b; color: #fff; border-radius: 6px;
+    padding: 6px 14px; font-size: 12px;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="h1">DropX Site Summary Monitor</div>
+    <div class="sub">Acceptance time · all dark stores</div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <div class="status-text" id="status-text">Loading…</div>
+  <div class="station-chip" id="station-chip" style="display:none"></div>
+</div>
+
+<!-- Row 1: Start · Pause · Run Now · Stop -->
+<div class="buttons-main">
+  <button id="btn-start">▶ Start</button>
+  <button id="btn-pause">⏸ Pause</button>
+  <button id="btn-runnow">↺ Run Now</button>
+  <button id="btn-stop">■ Stop</button>
+</div>
+
+<!-- Row 2: Refresh Page · Send Test -->
+<div class="buttons-aux">
+  <button id="btn-refresh">⟳ Refresh Page</button>
+  <button id="btn-test">🔔 Send Test</button>
+</div>
+
+<div class="info-row">
+  <span>Threshold: <b>15s</b></span>
+  <span>Cooldown: <b>5 min</b></span>
+  <span>Cycle: <b>60s</b></span>
+</div>
+
+<div class="log-wrap">
+  <div class="log-label">Activity log</div>
+  <div class="log" id="log"></div>
+</div>
+
+<div id="toast"></div>
+
+<script src="popup.js"></script>
+</body>
+</html>
