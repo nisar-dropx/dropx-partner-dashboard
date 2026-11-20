@@ -29,6 +29,7 @@ import {
   casePhase,
   disputeGate,
   requestSent,
+  filedInCloak,
   windowSummary,
   WINDOW_STAGES,
   type DisputeRequest,
@@ -156,6 +157,7 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
   const requestByCase = new Map(
     (requests.data ?? []).map((r) => [r.case_key as string, r as DisputeRequest]),
   );
+  const caseByKey = new Map(all.map((c) => [c.case_key, c]));
   const redisputeByCase = new Map(
     (responseWindows.data ?? []).map((r) => [r.case_key as string, r]),
   );
@@ -293,9 +295,15 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     showRedisputeBreakdown: mayViewRedisputeBreakdown(auth),
     summary: tally(filtered),
     cases,
-    deskQueue: (requests.data ?? []).filter(
-      (r) => r.status === "submitted" && inScope.has(r.case_key),
-    ).length,
+    deskQueue: (requests.data ?? []).filter((r) => {
+      if (r.status !== "submitted" || !inScope.has(r.case_key)) return false;
+      const c = caseByKey.get(r.case_key);
+      return !c || !filedInCloak(r as DisputeRequest, {
+        case_status: c.details.case_status,
+        nl_status: c.source_status,
+        extra: c.details.extra,
+      });
+    }).length,
     checked: runResult.data?.checked_at || runResult.data?.finished_at || null,
     canDispute: !auth.readOnly && hasPermission(auth, "ops_losses", "edit"),
     // The Cloak desk files what stations send and can return a request for correction.
