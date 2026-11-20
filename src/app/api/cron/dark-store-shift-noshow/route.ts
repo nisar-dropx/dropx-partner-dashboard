@@ -38,6 +38,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
   const debug = url.searchParams.get("debug") === "1";
+  // ?test=1 bypasses the time window and routes all alerts to Dark Store Testing group
+  const testMode = url.searchParams.get("test") === "1";
+  const testingGroupJid = "120363429732355530@g.us";
   if (!supabaseAdmin)
     return NextResponse.json({ error: "Supabase service role key not configured." }, { status: 500 });
 
@@ -240,7 +243,7 @@ export async function GET(request: Request) {
         });
       }
 
-      if (!inWindow) continue;
+      if (!inWindow && !testMode) continue;
 
       const notReported = notReportedAll;
       const reported = people.length - notReported.length;
@@ -261,9 +264,9 @@ export async function GET(request: Request) {
         await workerRequest<{ id: string }>(settings, "/send", {
           method: "POST",
           body: {
-            to: group.waGroupId,
+            to: testMode ? testingGroupJid : group.waGroupId,
             text,
-            client_ref: `shift-noshow-${locationId}-${today}-${shiftKey.replace(":", "")}`,
+            client_ref: `shift-noshow-${testMode ? "test" : locationId}-${today}-${shiftKey.replace(":", "")}`,
           },
         });
         sent++;
