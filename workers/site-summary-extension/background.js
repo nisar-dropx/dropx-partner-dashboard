@@ -1,4 +1,5 @@
 // Background script — monitoring cycle with Start / Pause / Resume / Stop
+// v1.1 — fixes: async buildAlertImage, chunked base64, waitForTabLoad, sendTest uses CONFIG.TESTING_GROUP
 
 "use strict";
 
@@ -51,11 +52,24 @@ async function getSiteSummaryTab() {
   return tabs.length ? tabs[0] : null;
 }
 
+async function waitForTabLoad(tabId, timeoutMs = 15000) {
+  return new Promise(resolve => {
+    const done = () => { browser.tabs.onUpdated.removeListener(listener); resolve(); };
+    const timer = setTimeout(done, timeoutMs);
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") { clearTimeout(timer); done(); }
+    }
+    browser.tabs.onUpdated.addListener(listener);
+  });
+}
+
 async function ensureSiteSummaryTab() {
   let tab = await getSiteSummaryTab();
   if (!tab) {
     tab = await browser.tabs.create({ url: "https://eu.store-management.f3.amazon.dev/siteSummary", active: false });
-    await sleep(6000);
+    await waitForTabLoad(tab.id, 15000);
+    // Extra buffer for content script injection + React hydration
+    await sleep(2000);
   }
   return tab;
 }
@@ -81,7 +95,7 @@ async function sendToTab(tabId, msg, retries = 3) {
 }
 
 // ── Image generation (OffscreenCanvas) ────────────────────────────────────────
-function buildAlertImage(stationCode, breachingRows, thresholdS) {
+async function buildAlertImage(stationCode, breachingRows, thresholdS) {
   const W = 600, ROW_H = 42, HEADER_H = 52, BANNER_H = 44, TABLE_HEAD_H = 36, FOOTER_H = 32;
   const rows = breachingRows.slice(0, 8);
   const H = HEADER_H + BANNER_H + TABLE_HEAD_H + rows.length * ROW_H + FOOTER_H;
@@ -185,8 +199,12 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup } = {}) 
   const blob     = await buildAlertImage(stationCode, breachingRows, CONFIG.ACCEPTANCE_THRESHOLD_S);
   const arrayBuf = await blob.arrayBuffer();
   const bytes    = new Uint8Array(arrayBuf);
+  // Chunk to avoid stack overflow on large arrays
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+  }
   const imageBase64 = btoa(binary);
 
   const windowId  = Math.floor(Date.now() / (CONFIG.COOLDOWN_MINUTES * 60_000));
@@ -207,7 +225,7 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup } = {}) 
 
 // ── Send Test ──────────────────────────────────────────────────────────────────
 async function sendTest() {
-  const testingGroup = "120363429732355530@g.us";
+  const testingGroup = CONFIG.TESTING_GROUP || "120363429732355530@g.us";
   // Build a fake breaching row so there's always something to show
   const fakeRows = [{
     oid: "TEST",

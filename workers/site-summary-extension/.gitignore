@@ -1,1 +1,4 @@
 config.local.js
+keepalive/lock-alert-state.json
+keepalive/keepalive.log
+keepalive/lock-alert.log

@@ -21,3 +21,6 @@ supabase/.temp/
 */node_modules
 .next/*
 .cursor/*
+
+# Claude Code project settings
+.claude/

@@ -4,6 +4,11 @@
 (function () {
   "use strict";
 
+  if (typeof browser === "undefined") {
+    console.error("DropX Monitor: not running in Firefox — extension not loaded");
+    return;
+  }
+
   // ── DOM readers ─────────────────────────────────────────────────────────────
 
   function getStoreId() {
@@ -94,10 +99,11 @@
     const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
     if (!dd) return false;
     if (dd.getAttribute("value") === storeId) return true; // already on it
-    // kat-dropdown exposes a value property
+    // Set property first, then reflect to attribute (kat-dropdown shadow DOM reads both)
     dd.value = storeId;
     dd.setAttribute("value", storeId);
-    // Fire events that React listens to
+    // Fire all event types the component or React may listen to
+    dd.dispatchEvent(new Event("input",  { bubbles: true }));
     dd.dispatchEvent(new Event("change", { bubbles: true }));
     dd.dispatchEvent(new CustomEvent("kat-change", { bubbles: true, detail: { value: storeId } }));
     return true;
