@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
+import { biometricEnrolmentIdCandidates, normalizeBiometricEnrolmentId } from "@/lib/biometric/enrolment-resolution";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -162,14 +163,8 @@ export async function GET(request: Request) {
   ]);
 
   // --- 5. Load today's attendance punches ---
-  function biometricVariants(value: string | null | undefined): string[] {
-    const raw = String(value ?? "").trim();
-    if (!raw) return [];
-    const normalized = raw.replace(/^0+(?=\d)/, "") || "0";
-    return [...new Set([raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")])];
-  }
-
-  const allBiometricIds = [...new Set([...personById.values()].flatMap((p) => biometricVariants(p.biometricId)))];
+  // Use the same candidate generation as the attendance page (up to 20 zero-padded variants)
+  const allBiometricIds = [...new Set([...personById.values()].flatMap((p) => biometricEnrolmentIdCandidates(p.biometricId)))];
   // Chunk to avoid PostgREST URL length limits on large .in() lists
   const BIO_CHUNK = 150;
   const bioChunks: string[][] = [];
@@ -199,14 +194,13 @@ export async function GET(request: Request) {
     const isIn = !label || label === "in" || label === "i" || label.startsWith("check-in")
       || label.startsWith("checkin") || label === "entry" || label === "check in";
     if (isIn) {
-      punchedEnrolments.add(String(punch.enrolment_id).replace(/^0+(?=\d)/, "") || "0");
+      punchedEnrolments.add(normalizeBiometricEnrolmentId(punch.enrolment_id));
     }
   }
 
   function hasPunch(biometricId: string | null | undefined): boolean {
-    for (const v of biometricVariants(biometricId)) {
-      const key = v.replace(/^0+(?=\d)/, "") || "0";
-      if (punchedEnrolments.has(key)) return true;
+    for (const v of biometricEnrolmentIdCandidates(biometricId)) {
+      if (punchedEnrolments.has(normalizeBiometricEnrolmentId(v))) return true;
     }
     return false;
   }
@@ -275,10 +269,10 @@ export async function GET(request: Request) {
             name: p.name,
             code: p.code,
             biometricId: p.biometricId,
-            biometricVariants: biometricVariants(p.biometricId),
+            biometricVariants: biometricEnrolmentIdCandidates(p.biometricId),
             hasPunch: hasPunch(p.biometricId),
             punches: punchData
-              .filter((punch) => biometricVariants(p.biometricId).includes(String(punch.enrolment_id)))
+              .filter((punch) => biometricEnrolmentIdCandidates(p.biometricId).includes(normalizeBiometricEnrolmentId(punch.enrolment_id)))
               .map((punch) => ({ enrolment_id: punch.enrolment_id, punch_time: punch.punch_time, punch_label: punch.punch_label })),
           })),
         });
