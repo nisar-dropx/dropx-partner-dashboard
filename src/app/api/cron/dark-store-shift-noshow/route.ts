@@ -36,6 +36,8 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const url = new URL(request.url);
+  const debug = url.searchParams.get("debug") === "1";
   if (!supabaseAdmin)
     return NextResponse.json({ error: "Supabase service role key not configured." }, { status: 500 });
 
@@ -209,6 +211,7 @@ export async function GET(request: Request) {
 
   let sent = 0;
   const results: string[] = [];
+  const debugShifts: object[] = [];
 
   for (const [locationId, shiftMap] of shiftsByLocation) {
     const group = groupByLocation.get(locationId);
@@ -219,14 +222,27 @@ export async function GET(request: Request) {
       if (shiftStartMin === null) continue;
 
       const alertDueAt = shiftStartMin + 15;
-      // Midnight wrap: a late shift (e.g. 23:30) has alertDueAt >= 1440.
-      // After midnight the cron's nowMinutes resets to 0–59, so we add 1440
-      // to bring it back into the same number line as the late-shift window.
       const effectiveNow = alertDueAt >= 1440 && nowMinutes < 120 ? nowMinutes + 1440 : nowMinutes;
-      // Only fire within a 15-min window (cron runs every 15 min, fires once per shift)
-      if (effectiveNow < alertDueAt || effectiveNow >= alertDueAt + 15) continue;
+      const inWindow = effectiveNow >= alertDueAt && effectiveNow < alertDueAt + 15;
+      const notReportedAll = people.filter((p) => !hasPunch(p.biometricId));
 
-      const notReported = people.filter((p) => !hasPunch(p.biometricId));
+      if (debug) {
+        debugShifts.push({
+          station: group.groupName,
+          shift: shiftKey,
+          shiftStartMin,
+          alertDueAt: minutesToHHMM(alertDueAt),
+          effectiveNow: minutesToHHMM(effectiveNow),
+          inWindow,
+          total: people.length,
+          notReported: notReportedAll.length,
+          notReportedNames: notReportedAll.map((p) => `${p.name} (${p.code})`),
+        });
+      }
+
+      if (!inWindow) continue;
+
+      const notReported = notReportedAll;
       const reported = people.length - notReported.length;
 
       if (notReported.length === 0) {
@@ -259,5 +275,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, sent, today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, results });
+  return NextResponse.json({ ok: true, sent, today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, results, ...(debug ? { debugShifts } : {}) });
 }
