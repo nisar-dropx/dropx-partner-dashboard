@@ -38,9 +38,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
   const debug = url.searchParams.get("debug") === "1";
-  // ?test=1  — bypasses time window, sends to Dark Store Testing group
-  // ?shift=HH:MM — only process this shift start time (use with ?test=1 to target one shift)
+  // ?test=1   — bypasses time window, sends to Dark Store Testing group
+  // ?force=1  — bypasses time window, sends to REAL war room groups (use carefully)
+  // ?shift=HH:MM — only process this shift start time
   const testMode = url.searchParams.get("test") === "1";
+  const forceMode = url.searchParams.get("force") === "1";
   const shiftFilter = url.searchParams.get("shift") ?? null; // e.g. "15:00"
   const testingGroupJid = "120363429732355530@g.us";
   if (!supabaseAdmin)
@@ -255,7 +257,7 @@ export async function GET(request: Request) {
         });
       }
 
-      if (!inWindow && !testMode) continue;
+      if (!inWindow && !testMode && !forceMode) continue;
       if (notReported.length === 0) {
         results.push(`${group.groupName} ${shiftKey}: all ${people.length} reported`);
         continue;
@@ -272,7 +274,7 @@ export async function GET(request: Request) {
       // UUID location_id + date + shift would exceed 64 chars, so use last 8 chars of UUID
       const locShort = locationId.replace(/-/g, "").slice(-8);
       const dateShort = today.replace(/-/g, "").slice(2); // "261120"
-      const clientRef = `ssn-${locShort}-${dateShort}-${shiftKey.replace(":", "")}${testMode ? "-t" : ""}`;
+      const clientRef = `ssn-${locShort}-${dateShort}-${shiftKey.replace(":", "")}${testMode ? "-t" : forceMode ? "-f" : ""}`;
       const toGroup = testMode ? testingGroupJid : group.waGroupId;
       const label = `${group.groupName} ${shiftKey}`;
 
