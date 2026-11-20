@@ -186,21 +186,30 @@ export async function GET(request: Request) {
   if (punchError) return NextResponse.json({ error: punchError.message }, { status: 500 });
   const punchData = punchChunkResults.flatMap((r) => r.data ?? []);
 
-  const punchedEnrolments = new Set<string>();
+  // normalized enrolment_id → sorted list of check-in punch times (minutes since midnight IST)
+  const punchTimesByEnrolment = new Map<string, number[]>();
   for (const punch of punchData) {
     const label = (punch.punch_label ?? "").toLowerCase().trim();
-    // Accept: empty label (raw biometric tap), "in", "check-in", "checkin", "entry", "i"
-    // Reject: "out", "checkout", "exit" etc.
     const isIn = !label || label.startsWith("in") || label === "i" || label.startsWith("check-in")
       || label.startsWith("checkin") || label === "entry" || label === "check in";
-    if (isIn) {
-      punchedEnrolments.add(normalizeBiometricEnrolmentId(punch.enrolment_id));
-    }
+    if (!isIn) continue;
+    // punch_time is an ISO timestamp; convert to minutes-since-midnight IST
+    const pt = new Date(punch.punch_time);
+    const ptIst = new Date(pt.getTime() + IST_OFFSET_MINUTES * 60000);
+    const ptMin = ptIst.getUTCHours() * 60 + ptIst.getUTCMinutes();
+    const key = normalizeBiometricEnrolmentId(punch.enrolment_id);
+    const list = punchTimesByEnrolment.get(key) ?? [];
+    list.push(ptMin);
+    punchTimesByEnrolment.set(key, list);
   }
 
-  function hasPunch(biometricId: string | null | undefined): boolean {
+  // Returns true if the person has a check-in punch within [shiftStart - 120min, shiftStart + 15min]
+  function hasPunchForShift(biometricId: string | null | undefined, shiftStartMin: number): boolean {
+    const windowStart = shiftStartMin - 120; // allow up to 2h early (covers staggered punches)
+    const windowEnd = shiftStartMin + 15;    // alert fires at +15 min
     for (const v of biometricEnrolmentIdCandidates(biometricId)) {
-      if (punchedEnrolments.has(normalizeBiometricEnrolmentId(v))) return true;
+      const times = punchTimesByEnrolment.get(normalizeBiometricEnrolmentId(v));
+      if (times?.some((t) => t >= windowStart && t <= windowEnd)) return true;
     }
     return false;
   }
@@ -254,7 +263,7 @@ export async function GET(request: Request) {
       // after midnight nowMinutes resets to 0–59 so add 1440 to stay on the same number line.
       const effectiveNow = alertDueAt >= 1440 && nowMinutes < 120 ? nowMinutes + 1440 : nowMinutes;
       const inWindow = effectiveNow >= alertDueAt && effectiveNow < alertDueAt + 15;
-      const notReported = people.filter((p) => !hasPunch(p.biometricId));
+      const notReported = people.filter((p) => !hasPunchForShift(p.biometricId, shiftStartMin));
 
       if (debug) {
         debugShifts.push({
@@ -270,7 +279,7 @@ export async function GET(request: Request) {
             code: p.code,
             biometricId: p.biometricId,
             biometricVariants: biometricEnrolmentIdCandidates(p.biometricId),
-            hasPunch: hasPunch(p.biometricId),
+            hasPunch: hasPunchForShift(p.biometricId, shiftStartMin),
             punches: punchData
               .filter((punch) => biometricEnrolmentIdCandidates(p.biometricId).includes(normalizeBiometricEnrolmentId(punch.enrolment_id)))
               .map((punch) => ({ enrolment_id: punch.enrolment_id, punch_time: punch.punch_time, punch_label: punch.punch_label })),
