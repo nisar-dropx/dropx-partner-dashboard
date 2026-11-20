@@ -4,7 +4,7 @@ import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // IST = UTC+5:30
 const IST_OFFSET_MINUTES = 330;
@@ -38,8 +38,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(request.url);
   const debug = url.searchParams.get("debug") === "1";
-  // ?test=1 bypasses the time window and routes all alerts to Dark Store Testing group
+  // ?test=1  — bypasses time window, sends to Dark Store Testing group
+  // ?shift=HH:MM — only process this shift start time (use with ?test=1 to target one shift)
   const testMode = url.searchParams.get("test") === "1";
+  const shiftFilter = url.searchParams.get("shift") ?? null; // e.g. "15:00"
   const testingGroupJid = "120363429732355530@g.us";
   if (!supabaseAdmin)
     return NextResponse.json({ error: "Supabase service role key not configured." }, { status: 500 });
@@ -156,13 +158,14 @@ export async function GET(request: Request) {
   const BIO_CHUNK = 150;
   const bioChunks: string[][] = [];
   for (let i = 0; i < allBiometricIds.length; i += BIO_CHUNK) bioChunks.push(allBiometricIds.slice(i, i + BIO_CHUNK));
+  // Do NOT filter by calculated — real-time punches may not be calculated yet
+  // when the alert fires 15 min after shift start.
   const punchChunkResults = allBiometricIds.length
     ? await Promise.all(bioChunks.map((chunk) =>
         admin.from("attendance_punches")
           .select("enrolment_id,punch_time,punch_label")
           .eq("company_id", companyId)
           .eq("punch_date", today)
-          .eq("calculated", true)
           .in("enrolment_id", chunk)
           .order("punch_time", { ascending: true })
           .limit(5000)
@@ -216,6 +219,9 @@ export async function GET(request: Request) {
   const results: string[] = [];
   const debugShifts: object[] = [];
 
+  // Collect all send tasks and run in parallel to avoid timeout on many stations
+  const sendTasks: Promise<void>[] = [];
+
   for (const [locationId, shiftMap] of shiftsByLocation) {
     const group = groupByLocation.get(locationId);
     if (!group) continue;
@@ -224,59 +230,62 @@ export async function GET(request: Request) {
       const shiftStartMin = shiftTimeToMinutes(startTime);
       if (shiftStartMin === null) continue;
 
+      // ?shift=HH:MM — only process this exact shift start
+      if (shiftFilter && shiftKey !== shiftFilter) continue;
+
       const alertDueAt = shiftStartMin + 15;
+      // Midnight wrap: late shifts (e.g. 23:30 → alertDueAt=1425) fire after midnight;
+      // after midnight nowMinutes resets to 0–59 so add 1440 to stay on the same number line.
       const effectiveNow = alertDueAt >= 1440 && nowMinutes < 120 ? nowMinutes + 1440 : nowMinutes;
       const inWindow = effectiveNow >= alertDueAt && effectiveNow < alertDueAt + 15;
-      const notReportedAll = people.filter((p) => !hasPunch(p.biometricId));
+      const notReported = people.filter((p) => !hasPunch(p.biometricId));
 
       if (debug) {
         debugShifts.push({
           station: group.groupName,
           shift: shiftKey,
-          shiftStartMin,
           alertDueAt: minutesToHHMM(alertDueAt),
           effectiveNow: minutesToHHMM(effectiveNow),
           inWindow,
           total: people.length,
-          notReported: notReportedAll.length,
-          notReportedNames: notReportedAll.map((p) => `${p.name} (${p.code})`),
+          notReported: notReported.length,
+          notReportedNames: notReported.map((p) => `${p.name} (${p.code})`),
         });
       }
 
       if (!inWindow && !testMode) continue;
-
-      const notReported = notReportedAll;
-      const reported = people.length - notReported.length;
-
       if (notReported.length === 0) {
         results.push(`${group.groupName} ${shiftKey}: all ${people.length} reported`);
         continue;
       }
 
+      const reported = people.length - notReported.length;
       const shiftLabel = minutesToHHMM(shiftStartMin);
       const lines = [
         `In the ${shiftLabel} hrs shift, only ${reported} of ${people.length} people scheduled reported by ${minutesToHHMM(alertDueAt)} hrs. Why? Below are the people who have not reported:`,
         ...notReported.map((p) => `- ${p.name} (${p.code})`),
       ];
       const text = lines.join("\n");
+      // client_ref must be unique per station+shift even in test mode to avoid dedup blocking
+      const clientRef = `shift-noshow-${locationId}-${today}-${shiftKey.replace(":", "")}${testMode ? "-test" : ""}`;
+      const toGroup = testMode ? testingGroupJid : group.waGroupId;
+      const label = `${group.groupName} ${shiftKey}`;
 
-      try {
-        await workerRequest<{ id: string }>(settings, "/send", {
+      sendTasks.push(
+        workerRequest<{ id: string }>(settings, "/send", {
           method: "POST",
-          body: {
-            to: testMode ? testingGroupJid : group.waGroupId,
-            text,
-            client_ref: `shift-noshow-${testMode ? "test" : locationId}-${today}-${shiftKey.replace(":", "")}`,
-          },
-        });
-        sent++;
-        results.push(`${group.groupName} ${shiftKey}: ${notReported.length} not reported — sent`);
-      } catch (err) {
-        const msg = err instanceof WorkerError ? err.message : String(err);
-        results.push(`${group.groupName} ${shiftKey}: send failed — ${msg}`);
-      }
+          body: { to: toGroup, text, client_ref: clientRef },
+        })
+          .then(() => { sent++; results.push(`${label}: ${notReported.length} not reported — sent`); })
+          .catch((err) => {
+            const msg = err instanceof WorkerError ? err.message : String(err);
+            results.push(`${label}: send failed — ${msg}`);
+          })
+      );
     }
   }
+
+  await Promise.all(sendTasks);
 
   return NextResponse.json({ ok: true, sent, today, nowMinutes: `${minutesToHHMM(nowMinutes)} IST`, results, ...(debug ? { debugShifts } : {}) });
 }
