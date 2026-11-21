@@ -217,11 +217,11 @@ export async function GET(request: Request) {
     punchTimesByEnrolment.set(key, list);
   }
 
-  // Returns true if the person has a check-in punch within [shiftStart - 120min, max(shiftStart + 15, nowMinutes)]
-  // windowEnd extends to nowMinutes so a punch that arrives just before the cron fires is captured.
+  // Returns true if the person has a check-in punch within [shiftStart - 120min, shiftStart + 15min].
+  // The alert is a snapshot at shiftStart+15 — late arrivals after that correctly appear in the alert.
   function hasPunchForShift(biometricId: string | null | undefined, shiftStartMin: number): boolean {
     const windowStart = shiftStartMin - 120;
-    const windowEnd = Math.max(shiftStartMin + 15, nowMinutes);
+    const windowEnd = shiftStartMin + 15;
     for (const v of biometricEnrolmentIdCandidates(biometricId)) {
       const times = punchTimesByEnrolment.get(normalizeBiometricEnrolmentId(v));
       if (times?.some((t) => t >= windowStart && t <= windowEnd)) return true;
