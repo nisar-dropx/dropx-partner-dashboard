@@ -39,18 +39,19 @@ const CONFIG = {
   ACCEPTANCE_THRESHOLD_S: 15,
 
   // How long to wait (ms) after switching station before reading data
-  SWITCH_WAIT_MS: 6000,
+  SWITCH_WAIT_MS: 20000,
 
   // Extra wait for slow-loading stations
   SWITCH_WAIT_OVERRIDES: {
-    TFB7: 8000,
-    TTG9: 8000,
-    TCD4: 8000,
+    TFB7: 25000,
+    TTG9: 25000,
+    TCD4: 25000,
   },
 
   // Don't re-alert the same station within this window (minutes)
   COOLDOWN_MINUTES: 5,
 
   // How often to run a full cycle of all stations (seconds)
-  CYCLE_INTERVAL_S: 60,
+  // 7 stations × ~20s each = ~140s minimum; set to 180s to give breathing room
+  CYCLE_INTERVAL_S: 180,
 };

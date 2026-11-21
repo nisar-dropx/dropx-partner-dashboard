@@ -110,7 +110,7 @@ async function buildAlertImage(stationCode, breachingRows, thresholdS) {
   const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
   const timeLabel  = `${String(nowIST.getUTCHours()).padStart(2,"0")}:${String(nowIST.getUTCMinutes()).padStart(2,"0")} IST`;
   const slaClock   = fmtClock(thresholdS);
-  const worst      = rows[0];
+  const worst      = rows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, rows[0]);
   const worstClock = fmtClock(worst.elapsedS);
 
   let y = 0;
@@ -205,7 +205,7 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
   const to = overrideGroup || groupFor(stationCode);
   if (!to) { addLog(`⚠ ${stationCode}: no group JID — skipped`); return { ok: false, reason: "no_group" }; }
 
-  const worst      = breachingRows[0];
+  const worst      = breachingRows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, breachingRows[0]);
   const worstClock = fmtClock(worst.elapsedS);
   const caption = [
     stationCode,
