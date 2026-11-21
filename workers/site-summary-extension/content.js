@@ -125,14 +125,27 @@
     if (refreshBtn) refreshBtn.click();
   }
 
-  // Poll until the dropdown value matches storeId OR timeout, then report readiness
-  function waitForStoreSwitch(storeId, timeoutMs, callback) {
+  // Poll until the dropdown value matches storeId AND the table data has refreshed.
+  // "refreshed" = first OID in the table changed from the snapshot taken before the switch,
+  // OR the table is empty (store has no orders), OR timeout.
+  function waitForStoreSwitch(storeId, timeoutMs, snapshotOid, callback) {
     const start = Date.now();
     function check() {
       const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
       const current = dd ? dd.getAttribute("value") : null;
-      if (current === storeId) { callback(true); return; }
-      if (Date.now() - start > timeoutMs) { callback(false); return; }
+      if (current !== storeId) {
+        // Dropdown not updated yet
+        if (Date.now() - start > timeoutMs) { callback(false); return; }
+        setTimeout(check, 500);
+        return;
+      }
+      // Dropdown confirmed — now wait for table data to change
+      const firstOidEl = document.querySelector('table.kat-table tbody tr td.orderId a');
+      const firstOid = firstOidEl ? firstOidEl.textContent.trim() : null;
+      // Data is fresh if: OID changed, or table is empty (no orders), or we've waited long enough
+      const dataRefreshed = !firstOid || firstOid !== snapshotOid;
+      const timedOut = Date.now() - start > timeoutMs;
+      if (dataRefreshed || timedOut) { callback(dataRefreshed); return; }
       setTimeout(check, 500);
     }
     check();
@@ -151,8 +164,8 @@
       return false;
     }
     if (msg.type === "WAIT_FOR_STORE") {
-      // Polls until dropdown shows the expected storeId or times out
-      waitForStoreSwitch(msg.storeId, msg.timeoutMs || 15000, (matched) => {
+      // Polls until dropdown shows storeId AND table data has changed from snapshotOid
+      waitForStoreSwitch(msg.storeId, msg.timeoutMs || 20000, msg.snapshotOid || null, (matched) => {
         sendResponse({ matched, storeId: getStoreId() });
       });
       return true; // async

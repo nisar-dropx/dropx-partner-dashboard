@@ -294,7 +294,14 @@ async function sendTest() {
 async function checkStation(tabId, stationCode, storeId) {
   currentStation = stationCode;
 
-  addLog(`→ Switching to ${stationCode}…`);
+  // Snapshot current first OID so we can detect when data changes after switch
+  let snapshotOid = null;
+  try {
+    const snap = await sendToTab(tabId, { type: "READ_SITE_SUMMARY" });
+    snapshotOid = snap?.rows?.[0]?.oid || null;
+  } catch (_) {}
+
+  addLog(`→ Switching to ${stationCode}… (snapshot OID: ${snapshotOid || "none"})`);
   try {
     await sendToTab(tabId, { type: "SWITCH_STATION", storeId });
   } catch (e) {
@@ -302,21 +309,21 @@ async function checkStation(tabId, stationCode, storeId) {
     return;
   }
 
-  // Wait for the kat-dropdown to confirm the new store is active (up to 10s)
+  // Wait until dropdown confirms AND table data changes from snapshot (up to 25s)
+  const waitMs = switchWaitFor(stationCode);
   try {
-    const switchResult = await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: 10000 });
+    const switchResult = await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: waitMs, snapshotOid });
     if (!switchResult?.matched) {
-      addLog(`⚠ ${stationCode}: dropdown didn't confirm switch — got ${CONFIG.STORE_MAP[switchResult?.storeId] || switchResult?.storeId}`);
-      return;
+      addLog(`⚠ ${stationCode}: data didn't refresh in ${waitMs / 1000}s — reading anyway`);
+    } else {
+      addLog(`${stationCode}: data refreshed ✓`);
     }
   } catch (e) {
-    addLog(`⚠ ${stationCode}: wait-for-store failed — ${e.message}`);
-    return;
+    addLog(`⚠ ${stationCode}: wait-for-store error — ${e.message}`);
   }
 
-  // Wait for the page to fetch fresh data (page auto-refreshes every 5s)
-  addLog(`${stationCode}: switch confirmed, waiting ${switchWaitFor(stationCode) / 1000}s for data…`);
-  await sleep(switchWaitFor(stationCode));
+  // Small buffer for the page to finish rendering
+  await sleep(1500);
 
   let data;
   try {
