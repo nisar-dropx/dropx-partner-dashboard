@@ -35,12 +35,16 @@
   "browser_action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "32": "icons/icon-off.png"
+      "32": "icons/icon-off.png",
+      "48": "icons/icon-off-48.png",
+      "128": "icons/icon-off-128.png"
     },
     "default_title": "DropX Monitor"
   },
 
   "icons": {
-    "32": "icons/icon-off.png"
+    "32": "icons/icon-off.png",
+    "48": "icons/icon-off-48.png",
+    "128": "icons/icon-off-128.png"
   }
 }
