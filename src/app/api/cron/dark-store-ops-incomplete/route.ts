@@ -139,7 +139,8 @@ export async function GET(request: Request) {
 
     const locShort = locationId.replace(/-/g, "").slice(-8);
     const dateShort = yesterday.replace(/-/g, "").slice(2);
-    const clientRef = `dsoi-${locShort}-${dateShort}${testMode ? "-t" : forceMode ? "-f" : ""}`;
+    const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
+    const clientRef = `dsoi-${locShort}-${dateShort}${testSuffix}`;
     const toGroup = testMode ? testingGroupJid : group.waGroupId;
     const text = `Store operations in Ops Pulse for yesterday not completed. Why?\n(Incomplete shifts: ${incompleteSlots.join(", ")})`;
     const label = `${group.groupName}`;

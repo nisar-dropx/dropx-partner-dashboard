@@ -147,7 +147,8 @@ export async function GET(request: Request) {
 
       const locShort = locationId.replace(/-/g, "").slice(-8);
       const dateShort = shiftDate.replace(/-/g, "").slice(2);
-      const clientRef = `ssns-${locShort}-${dateShort}-${slot.replace(":", "")}${testMode ? "-t" : forceMode ? "-f" : ""}`;
+      const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
+      const clientRef = `ssns-${locShort}-${dateShort}-${slot.replace(":", "")}${testSuffix}`;
       const toGroup = testMode ? testingGroupJid : group.waGroupId;
       const text = `Shift operations in Ops Pulse for ${slot} hrs shift not yet started. Why?`;
       const label = `${group.groupName} ${slot}`;
