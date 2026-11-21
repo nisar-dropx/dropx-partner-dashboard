@@ -37,7 +37,14 @@ export async function GET(request: Request) {
   const admin = supabaseAdmin;
   const today = isoDateInIst();
   const istNow = nowInIst();
-  const nowHHMM = `${String(istNow.getUTCHours()).padStart(2, "0")}:${String(istNow.getUTCMinutes()).padStart(2, "0")} IST`;
+  const nowHour = istNow.getUTCHours();
+  const nowHHMM = `${String(nowHour).padStart(2, "0")}:${String(istNow.getUTCMinutes()).padStart(2, "0")} IST`;
+
+  // Fire only at 09:00 and 14:00 IST (within the 60-min window the cron fires in)
+  const ALERT_HOURS_IST = [9, 14];
+  if (!testMode && !forceMode && !ALERT_HOURS_IST.includes(nowHour)) {
+    return NextResponse.json({ ok: true, sent: 0, reason: "not an alert hour", nowHHMM });
+  }
 
   // --- 1. Load last_mile War Room groups + location_ids ---
   const botDb = reportBotDb();
@@ -221,9 +228,12 @@ export async function GET(request: Request) {
     const noRoster = flagged.filter((f) => f.reason === "no_roster");
     const unapproved = flagged.filter((f) => f.reason === "unapproved_roster");
 
-    const lines: string[] = ["Below people have 'no approved roster' or 'no roster'. Why?"];
+    const timeLabel = nowHHMM.split(" ")[0]; // "09:00" or "14:00"
+    const lines: string[] = [
+      `Roster check as of ${timeLabel} hrs — the following associates have no roster or unapproved roster for today (${today}). Please action:`,
+    ];
     for (const { person, reason } of flagged) {
-      const tag = reason === "unapproved_roster" ? " (roster not approved)" : "";
+      const tag = reason === "unapproved_roster" ? " (approve roster)" : " (add to roster)";
       lines.push(`- ${person.name} (${person.code})${tag}`);
     }
     const text = lines.join("\n");

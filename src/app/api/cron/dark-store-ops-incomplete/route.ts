@@ -126,9 +126,13 @@ export async function GET(request: Request) {
     for (const slot of ALL_SLOTS) {
       const status = slotStatuses.get(slot);
       if (!status) {
-        incompleteSlots.push(`${slot} (not started)`);
-      } else if (status !== "accepted") {
-        incompleteSlots.push(`${slot} (${status})`);
+        incompleteSlots.push(`${slot} hrs shift — not started`);
+      } else if (status === "open") {
+        incompleteSlots.push(`${slot} hrs shift — in progress, not submitted`);
+      } else if (status === "submitted") {
+        incompleteSlots.push(`${slot} hrs shift — submitted, not accepted`);
+      } else if (status === "rejected") {
+        incompleteSlots.push(`${slot} hrs shift — rejected`);
       }
     }
 
@@ -142,7 +146,8 @@ export async function GET(request: Request) {
     const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
     const clientRef = `dsoi-${locShort}-${dateShort}${testSuffix}`;
     const toGroup = testMode ? testingGroupJid : group.waGroupId;
-    const text = `Store operations in Ops Pulse for yesterday not completed. Why?\n(Incomplete shifts: ${incompleteSlots.join(", ")})`;
+    const slotLines = incompleteSlots.map((s) => `- ${s}`).join("\n");
+    const text = `Store operations in Ops Pulse for yesterday (${yesterday}) not completed. Why?\n\nShifts pending:\n${slotLines}`;
     const label = `${group.groupName}`;
 
     sendTasks.push(
