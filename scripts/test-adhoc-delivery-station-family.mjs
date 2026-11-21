@@ -96,4 +96,19 @@ await assert.rejects(()=>db.exec("begin; select set_config('app.payment_request_
 await db.exec('rollback');
 await db.exec("begin; select set_config('app.payment_request_bank_settlement','allowed',true); update payment_requests set status='processed',bank_paid_amount=1200 where id=3; commit");
 assert.deepEqual((await db.query('select status,bank_paid_amount::int from payment_requests where id=3')).rows,[{status:'processed',bank_paid_amount:1200}]);
-await db.close();console.log('PASS station-family migration twice, mapping-only DA roster, XPT imports, date/owner/provider isolation, frozen scope, legacy bank export, paid-XPT protection, duplicate prevention, refreshes, role grants.');
+// Actual manual settlement must also record an already completed payment,
+// including overlaps with a paid ad hoc, paid payroll and pending bank file.
+const finalizeMigration=read('20261121111428_finalize_completed_delivery_payments.sql');
+await db.exec(finalizeMigration);
+await db.exec(finalizeMigration);
+await db.exec("update payment_requests set status='processing' where id=3");
+await db.query('insert into workforce_payout_effective_paid_allocations values($1,$2,$3,$4,$5)',[company,worker,xpt,'2026-11-01','2026-11-30']);
+await db.exec("update workforce_payout_payment_items set status='processing'");
+const before=(await db.query('select count(*)::int n from revision_audit')).rows[0].n;
+await db.exec("update payment_requests set status='processed' where id=3");
+assert.equal((await db.query('select status from payment_requests where id=3')).rows[0].status,'processed');
+assert.equal((await db.query('select count(*)::int n from revision_audit')).rows[0].n,before+1);
+await db.exec("update payment_requests set status='processed' where id=3");
+assert.equal((await db.query('select count(*)::int n from revision_audit')).rows[0].n,before+1,'Retry does not duplicate payout refresh');
+await assert.rejects(()=>db.exec(`update payment_requests set delivery_performer_workforce_id='${id(99)}' where id=3`),/frozen/);
+await db.close();console.log('PASS delivery identity, station family, actual payment reconciliation with overlapping payouts, refreshes and retry.');

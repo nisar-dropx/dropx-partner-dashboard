@@ -1,5 +1,14 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Completed payment finalization — 21 November 2026
+
+Manual finalization also records actual payments without rechecking overlapping
+ad hoc, monthly payroll or pending bank-file eligibility. The delivery settlement
+hook retains allocation locking and payout dependency refresh. Frozen delivery
+identity, bank amount/UTR validation, processor access and audit remain enforced.
+Migration `20261121111428_finalize_completed_delivery_payments.sql` changes no
+payment records. Covered by `scripts/test-adhoc-delivery-station-family.mjs`.
+
 ## Inline re-dispute tracking — 7 November 2026
 
 Exceptions → Redispute tracking uses compact expandable cards instead of a wide table.
