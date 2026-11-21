@@ -146,8 +146,7 @@ export async function GET(request: Request) {
     const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
     const clientRef = `dsoi-${locShort}-${dateShort}${testSuffix}`;
     const toGroup = testMode ? testingGroupJid : group.waGroupId;
-    const slotLines = incompleteSlots.map((s) => `- ${s}`).join("\n");
-    const text = `Store operations in Ops Pulse for yesterday (${yesterday}) not completed. Why?\n\nShifts pending:\n${slotLines}`;
+    const text = `Store operations in Ops Pulse for yesterday not completed. Why?`;
     const label = `${group.groupName}`;
 
     sendTasks.push(

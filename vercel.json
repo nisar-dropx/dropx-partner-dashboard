@@ -117,7 +117,7 @@
     },
     {
       "path": "/api/cron/last-mile-no-roster",
-      "schedule": "30 3,8 * * *"
+      "schedule": "30 7 * * *"
     },
     {
       "path": "/api/cron/dark-store-shift-not-started",

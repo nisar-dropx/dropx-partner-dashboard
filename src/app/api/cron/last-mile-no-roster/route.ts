@@ -40,10 +40,9 @@ export async function GET(request: Request) {
   const nowHour = istNow.getUTCHours();
   const nowHHMM = `${String(nowHour).padStart(2, "0")}:${String(istNow.getUTCMinutes()).padStart(2, "0")} IST`;
 
-  // Fire only at 09:00 and 14:00 IST (within the 60-min window the cron fires in)
-  const ALERT_HOURS_IST = [9, 14];
-  if (!testMode && !forceMode && !ALERT_HOURS_IST.includes(nowHour)) {
-    return NextResponse.json({ ok: true, sent: 0, reason: "not an alert hour", nowHHMM });
+  // Fire only at 13:00 IST
+  if (!testMode && !forceMode && nowHour !== 13) {
+    return NextResponse.json({ ok: true, sent: 0, reason: "not alert hour (13:00 IST)", nowHHMM });
   }
 
   // --- 1. Load last_mile War Room groups + location_ids ---
@@ -61,21 +60,30 @@ export async function GET(request: Request) {
 
   const locationIds = groups.map((g) => g.location_id as string);
 
-  // --- 2. company_id ---
+  // --- 2. company_id + station details (cluster, TL) ---
   const { data: stationRows, error: locErr } = await admin
     .from("stations")
-    .select("id,company_id,station_code")
+    .select("id,company_id,station_code,cluster_manager,station_manager_email")
     .in("id", locationIds)
     .limit(50);
   if (locErr) return NextResponse.json({ error: locErr.message }, { status: 500 });
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
 
   const companyId = stationRows[0].company_id as string;
+  const stationById = new Map(stationRows.map((s) => [s.id as string, s]));
 
   const groupByLocation = new Map(
     groups
       .filter((g) => stationRows.some((s) => s.id === g.location_id) && g.wa_group_id)
-      .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? g.location_id as string }])
+      .map((g) => {
+        const st = stationById.get(g.location_id as string);
+        return [g.location_id as string, {
+          waGroupId: g.wa_group_id as string,
+          groupName: (g.group_name as string | null) ?? g.location_id as string,
+          cluster: (st?.cluster_manager as string | null) ?? null,
+          tlEmail: (st?.station_manager_email as string | null) ?? null,
+        }];
+      })
   );
 
   // --- 3. Load ALL roster plans covering today (approved + non-approved) ---
@@ -228,12 +236,14 @@ export async function GET(request: Request) {
     const noRoster = flagged.filter((f) => f.reason === "no_roster");
     const unapproved = flagged.filter((f) => f.reason === "unapproved_roster");
 
-    const timeLabel = nowHHMM.split(" ")[0]; // "09:00" or "14:00"
-    const lines: string[] = [
-      `Roster check as of ${timeLabel} hrs — the following associates have no roster or unapproved roster for today (${today}). Please action:`,
-    ];
+    const clusterLine = group.cluster ? `Cluster: ${group.cluster}` : null;
+    const tlLine = group.tlEmail ? `TL: ${group.tlEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}` : null;
+    const headerParts = ["Below people have 'no approved roster' or 'no roster'. Why?"];
+    if (clusterLine) headerParts.push(clusterLine);
+    if (tlLine) headerParts.push(tlLine);
+    const lines: string[] = [headerParts.join("\n")];
     for (const { person, reason } of flagged) {
-      const tag = reason === "unapproved_roster" ? " (approve roster)" : " (add to roster)";
+      const tag = reason === "unapproved_roster" ? " (roster not approved)" : "";
       lines.push(`- ${person.name} (${person.code})${tag}`);
     }
     const text = lines.join("\n");
