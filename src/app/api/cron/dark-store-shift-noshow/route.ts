@@ -133,7 +133,7 @@ export async function GET(request: Request) {
     allWorkerIds.length
       ? Promise.all(workerChunks.map((chunk) =>
           admin.from("employees")
-            .select("id,employee_code,full_name,biometric_id")
+            .select("id,employee_code,full_name,biometric_id,last_working_date,people_lifecycle_status")
             .eq("company_id", companyId)
             .in("id", chunk)
             .limit(5000)
@@ -142,7 +142,7 @@ export async function GET(request: Request) {
     allWorkerIds.length
       ? Promise.all(workerChunks.map((chunk) =>
           admin.from("contractors")
-            .select("id,dropx_id,full_name,biometric_id")
+            .select("id,dropx_id,full_name,biometric_id,last_working_date,lifecycle_status")
             .eq("company_id", companyId)
             .in("id", chunk)
             .limit(5000)
@@ -156,10 +156,24 @@ export async function GET(request: Request) {
   const empData = empChunkResults.flatMap((r) => r.data ?? []);
   const ctrData = ctrChunkResults.flatMap((r) => r.data ?? []);
 
+  const offboardedStatuses = new Set(["offboarding", "offboarded"]);
+
   type Person = { id: string; code: string; name: string; biometricId: string | null };
   const personById = new Map<string, Person>([
-    ...empData.map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name ?? "Unknown", biometricId: e.biometric_id }]),
-    ...ctrData.map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name ?? "Unknown", biometricId: c.biometric_id }]),
+    ...empData
+      .filter((e) => {
+        if (offboardedStatuses.has(e.people_lifecycle_status ?? "")) return false;
+        if (e.last_working_date && e.last_working_date < today) return false;
+        return true;
+      })
+      .map((e): [string, Person] => [e.id, { id: e.id, code: e.employee_code ?? "—", name: e.full_name ?? "Unknown", biometricId: e.biometric_id }]),
+    ...ctrData
+      .filter((c) => {
+        if (offboardedStatuses.has(c.lifecycle_status ?? "")) return false;
+        if (c.last_working_date && c.last_working_date < today) return false;
+        return true;
+      })
+      .map((c): [string, Person] => [c.id, { id: c.id, code: c.dropx_id ?? "—", name: c.full_name ?? "Unknown", biometricId: c.biometric_id }]),
   ]);
 
   // --- 5. Load today's attendance punches ---
@@ -203,10 +217,11 @@ export async function GET(request: Request) {
     punchTimesByEnrolment.set(key, list);
   }
 
-  // Returns true if the person has a check-in punch within [shiftStart - 120min, shiftStart + 15min]
+  // Returns true if the person has a check-in punch within [shiftStart - 120min, max(shiftStart + 15, nowMinutes)]
+  // windowEnd extends to nowMinutes so a punch that arrives just before the cron fires is captured.
   function hasPunchForShift(biometricId: string | null | undefined, shiftStartMin: number): boolean {
-    const windowStart = shiftStartMin - 120; // allow up to 2h early (covers staggered punches)
-    const windowEnd = shiftStartMin + 15;    // alert fires at +15 min
+    const windowStart = shiftStartMin - 120;
+    const windowEnd = Math.max(shiftStartMin + 15, nowMinutes);
     for (const v of biometricEnrolmentIdCandidates(biometricId)) {
       const times = punchTimesByEnrolment.get(normalizeBiometricEnrolmentId(v));
       if (times?.some((t) => t >= windowStart && t <= windowEnd)) return true;
