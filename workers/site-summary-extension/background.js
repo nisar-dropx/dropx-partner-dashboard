@@ -180,8 +180,28 @@ async function buildAlertImage(stationCode, breachingRows, thresholdS) {
   return canvas.convertToBlob({ type: "image/png" });
 }
 
+// ── Screenshot capture ─────────────────────────────────────────────────────────
+async function captureTabScreenshot(tabId) {
+  // Make tab active briefly to allow captureVisibleTab, then restore
+  const [currentTabs] = await browser.tabs.query({ active: true, currentWindow: true });
+  const prevTabId = currentTabs ? currentTabs.id : null;
+
+  await browser.tabs.update(tabId, { active: true });
+  await sleep(300); // small settle time
+
+  const dataUrl = await browser.tabs.captureVisibleTab(null, { format: "png" });
+
+  // Restore previous active tab
+  if (prevTabId && prevTabId !== tabId) {
+    await browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+  }
+
+  // Strip "data:image/png;base64," prefix
+  return dataUrl.split(",")[1];
+}
+
 // ── WhatsApp send ──────────────────────────────────────────────────────────────
-async function sendWhatsApp(stationCode, breachingRows, { overrideGroup } = {}) {
+async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId } = {}) {
   const to = overrideGroup || groupFor(stationCode);
   if (!to) { addLog(`⚠ ${stationCode}: no group JID — skipped`); return { ok: false, reason: "no_group" }; }
 
@@ -196,16 +216,27 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup } = {}) 
       : "Ask the associate to accept the order fast",
   ].join("\n");
 
-  const blob     = await buildAlertImage(stationCode, breachingRows, CONFIG.ACCEPTANCE_THRESHOLD_S);
-  const arrayBuf = await blob.arrayBuffer();
-  const bytes    = new Uint8Array(arrayBuf);
-  // Chunk to avoid stack overflow on large arrays
-  let binary = "";
-  const CHUNK = 8192;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+  // Use browser screenshot if tab is available, else fall back to generated image
+  let imageBase64;
+  if (tabId) {
+    try {
+      imageBase64 = await captureTabScreenshot(tabId);
+      addLog(`📸 ${stationCode}: screenshot captured`);
+    } catch (e) {
+      addLog(`⚠ ${stationCode}: screenshot failed (${e.message}), using generated image`);
+    }
   }
-  const imageBase64 = btoa(binary);
+  if (!imageBase64) {
+    const blob     = await buildAlertImage(stationCode, breachingRows, CONFIG.ACCEPTANCE_THRESHOLD_S);
+    const arrayBuf = await blob.arrayBuffer();
+    const bytes    = new Uint8Array(arrayBuf);
+    let binary = "";
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+    }
+    imageBase64 = btoa(binary);
+  }
 
   const windowId  = Math.floor(Date.now() / (CONFIG.COOLDOWN_MINUTES * 60_000));
   const clientRef = `ssmon_${stationCode}_${windowId}`;
@@ -246,7 +277,7 @@ async function sendTest() {
       const stationCode = CONFIG.STORE_MAP[storeId] || "TEST";
       const realRows  = (data?.rows || []).filter(r => r.elapsedS != null && r.elapsedS > 0);
       const rows = realRows.length ? realRows : fakeRows;
-      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup });
+      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id });
       addLog(`🔔 Test sent for ${stationCode}`);
       return { ok: true };
     }
@@ -298,7 +329,7 @@ async function checkStation(tabId, stationCode, storeId) {
   if (isOnCooldown(stationCode)) { addLog(`${stationCode}: cooldown — skipped`); return; }
 
   try {
-    await sendWhatsApp(stationCode, breaching);
+    await sendWhatsApp(stationCode, breaching, { tabId });
     markSent(stationCode);
   } catch (e) {
     addLog(`❌ ${stationCode}: send error — ${e.message}`);

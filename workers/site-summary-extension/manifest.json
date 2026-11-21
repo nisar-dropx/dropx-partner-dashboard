@@ -6,8 +6,10 @@
 
   "permissions": [
     "tabs",
+    "activeTab",
     "storage",
     "alarms",
+    "<all_urls>",
     "https://eu.store-management.f3.amazon.dev/*",
     "https://dropx-report-bot.onrender.com/*"
   ],
