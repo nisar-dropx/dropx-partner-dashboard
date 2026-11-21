@@ -600,13 +600,20 @@ function resolveConnectPageAccess(
   // offer a sensible template, but it must not silently remove a menu the
   // designation owner has explicitly enabled. People profiles retain the
   // existing category-and-designation intersection.
-  const workforceDesignationAccess = ["workforce", "field_executive", "vendor", "worker"].includes(profileType)
-    && Array.isArray(designationPages);
+  const isWorkforceType = ["workforce", "field_executive", "vendor", "worker"].includes(profileType);
+  const workforceDesignationAccess = isWorkforceType && Array.isArray(designationPages);
   const baselinePages = profileType === "employee" || profileType === "contractor"
     ? ["performance"]
     : [];
+  // For workforce types without a matched designation, fall back to category pages
+  // so that category-level grants (e.g. "advances" from the migration) are honoured.
+  const resolvedPages = workforceDesignationAccess
+    ? designationPages ?? []
+    : isWorkforceType && !designationPages
+      ? categoryPages
+      : intersectPageAccess(categoryPages, designationPages);
   return [...new Set([
-    ...(workforceDesignationAccess ? designationPages ?? [] : intersectPageAccess(categoryPages, designationPages)),
+    ...resolvedPages,
     ...baselinePages,
     ...requiredDropxOnePageCodes
   ])];
