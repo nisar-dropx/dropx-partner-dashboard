@@ -236,16 +236,15 @@ export async function GET(request: Request) {
     const noRoster = flagged.filter((f) => f.reason === "no_roster");
     const unapproved = flagged.filter((f) => f.reason === "unapproved_roster");
 
-    const clusterLine = group.cluster ? `Cluster: ${group.cluster}` : null;
-    const tlLine = group.tlEmail ? `TL: ${group.tlEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}` : null;
-    const headerParts = ["Below people have 'no approved roster' or 'no roster'. Why?"];
-    if (clusterLine) headerParts.push(clusterLine);
-    if (tlLine) headerParts.push(tlLine);
-    const lines: string[] = [headerParts.join("\n")];
+    const lines: string[] = ["Below people have 'no approved roster' or 'no roster'. Why?"];
     for (const { person, reason } of flagged) {
       const tag = reason === "unapproved_roster" ? " (roster not approved)" : "";
       lines.push(`- ${person.name} (${person.code})${tag}`);
     }
+    const mentions: string[] = [];
+    if (group.cluster) mentions.push(`@${group.cluster}`);
+    if (group.tlEmail) mentions.push(`@${group.tlEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}`);
+    if (mentions.length) lines.push("", mentions.join(" "));
     const text = lines.join("\n");
 
     const locShort = locationId.replace(/-/g, "").slice(-8);
