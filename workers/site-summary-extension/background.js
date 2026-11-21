@@ -302,6 +302,20 @@ async function checkStation(tabId, stationCode, storeId) {
     return;
   }
 
+  // Wait for the kat-dropdown to confirm the new store is active (up to 10s)
+  try {
+    const switchResult = await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: 10000 });
+    if (!switchResult?.matched) {
+      addLog(`⚠ ${stationCode}: dropdown didn't confirm switch — got ${CONFIG.STORE_MAP[switchResult?.storeId] || switchResult?.storeId}`);
+      return;
+    }
+  } catch (e) {
+    addLog(`⚠ ${stationCode}: wait-for-store failed — ${e.message}`);
+    return;
+  }
+
+  // Wait for the page to fetch fresh data (page auto-refreshes every 5s)
+  addLog(`${stationCode}: switch confirmed, waiting ${switchWaitFor(stationCode) / 1000}s for data…`);
   await sleep(switchWaitFor(stationCode));
 
   let data;
@@ -314,11 +328,6 @@ async function checkStation(tabId, stationCode, storeId) {
 
   if (!data?.onSiteSummary) {
     addLog(`⚠ ${stationCode}: not on Site Summary`);
-    return;
-  }
-
-  if (data.storeId && data.storeId !== storeId) {
-    addLog(`⚠ ${stationCode}: dropdown didn't switch — got ${CONFIG.STORE_MAP[data.storeId] || data.storeId}`);
     return;
   }
 

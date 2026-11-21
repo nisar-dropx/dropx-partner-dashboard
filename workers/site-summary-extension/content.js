@@ -98,15 +98,44 @@
   function switchToStore(storeId) {
     const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
     if (!dd) return false;
-    if (dd.getAttribute("value") === storeId) return true; // already on it
-    // Set property first, then reflect to attribute (kat-dropdown shadow DOM reads both)
+
+    // If already on the right store, just click refresh to get fresh data
+    if (dd.getAttribute("value") === storeId) {
+      clickRefresh();
+      return true;
+    }
+
+    // Set value on the web component
     dd.value = storeId;
     dd.setAttribute("value", storeId);
     // Fire all event types the component or React may listen to
     dd.dispatchEvent(new Event("input",  { bubbles: true }));
     dd.dispatchEvent(new Event("change", { bubbles: true }));
     dd.dispatchEvent(new CustomEvent("kat-change", { bubbles: true, detail: { value: storeId } }));
+
+    // After a short delay, also click the refresh button to force data reload
+    setTimeout(clickRefresh, 2000);
     return true;
+  }
+
+  function clickRefresh() {
+    // The refresh button is inside the kat-popover trigger slot
+    const btn = document.querySelector('button[slot="trigger"].sc-bQdRvg, .sc-iJminA button, button kat-icon[name="refresh"]');
+    const refreshBtn = btn || document.querySelector('kat-icon[name="refresh"]')?.closest('button');
+    if (refreshBtn) refreshBtn.click();
+  }
+
+  // Poll until the dropdown value matches storeId OR timeout, then report readiness
+  function waitForStoreSwitch(storeId, timeoutMs, callback) {
+    const start = Date.now();
+    function check() {
+      const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
+      const current = dd ? dd.getAttribute("value") : null;
+      if (current === storeId) { callback(true); return; }
+      if (Date.now() - start > timeoutMs) { callback(false); return; }
+      setTimeout(check, 500);
+    }
+    check();
   }
 
   // ── Message handler ──────────────────────────────────────────────────────────
@@ -120,6 +149,13 @@
       const ok = switchToStore(msg.storeId);
       sendResponse({ ok });
       return false;
+    }
+    if (msg.type === "WAIT_FOR_STORE") {
+      // Polls until dropdown shows the expected storeId or times out
+      waitForStoreSwitch(msg.storeId, msg.timeoutMs || 15000, (matched) => {
+        sendResponse({ matched, storeId: getStoreId() });
+      });
+      return true; // async
     }
     if (msg.type === "PING") {
       sendResponse({ alive: true, onSiteSummary: isOnSiteSummary() });
