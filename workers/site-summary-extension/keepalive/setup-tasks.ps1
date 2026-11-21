@@ -1,8 +1,7 @@
-# DropX WorkSpaces Scheduled Tasks Setup
-# Run once as Administrator to register both tasks.
+# DropX WorkSpaces Scheduled Tasks Setup — LOCAL MACHINE
+# No admin required. Run once in a normal PowerShell window.
 #
-# Usage:
-#   Right-click PowerShell → "Run as Administrator"
+# Usage (local laptop where WorkSpaces client runs):
 #   cd C:\keepalive
 #   Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 #   .\setup-tasks.ps1
@@ -10,19 +9,8 @@
 $scriptDir = $PSScriptRoot
 
 Write-Host ""
-Write-Host "DropX WorkSpaces Task Setup" -ForegroundColor Cyan
-Write-Host "=============================" -ForegroundColor Cyan
-
-# Check admin
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-  [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-  Write-Host ""
-  Write-Host "ERROR: Run this script as Administrator (right-click PowerShell > Run as Administrator)" -ForegroundColor Red
-  exit 1
-}
-
-Write-Host ""
+Write-Host "DropX WorkSpaces Task Setup (Local)" -ForegroundColor Cyan
+Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Script folder: $scriptDir" -ForegroundColor Gray
 Write-Host ""
 
@@ -40,55 +28,29 @@ function Register-DropXTask {
     [string]$Description
   )
 
-  # Remove old task if exists
   Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
 
   $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Script`""
+    -Argument "-WindowStyle Hidden -NonInteractive -ExecutionPolicy Bypass -File `"$Script`""
 
-  # Trigger: at logon + repeat every N minutes indefinitely
-  $trigger = New-ScheduledTaskTrigger -AtLogOn
+  # -Once -At + RepetitionInterval: works without admin, same pattern as PPI worker
+  $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
+
   $settings = New-ScheduledTaskSettingsSet `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 3) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
     -MultipleInstances IgnoreNew `
-    -StartWhenAvailable
+    -StartWhenAvailable `
+    -Hidden
 
-  $principal = New-ScheduledTaskPrincipal `
-    -UserId $env:USERNAME `
-    -LogonType Interactive `
-    -RunLevel Highest
-
-  $task = New-ScheduledTask `
+  Register-ScheduledTask `
+    -TaskName $Name `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Principal $principal `
-    -Description $Description
-
-  Register-ScheduledTask -TaskName $Name -InputObject $task -Force | Out-Null
-
-  # Set repetition via XML — most reliable in PS 5.1
-  $xml = (schtasks /query /tn $Name /xml ONE 2>$null) -join "`n"
-  if ($xml) {
-    $xmlDoc = [xml]$xml
-    $ns = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-
-    # Find the Triggers node and add repetition to existing trigger
-    $triggersNode = $xmlDoc.Task.Triggers
-    if ($triggersNode -and $triggersNode.HasChildNodes) {
-      $firstTrigger = $triggersNode.FirstChild
-      # Build Repetition element
-      $rep = $xmlDoc.CreateElement("Repetition", $ns)
-      $rep.InnerXml = "<Interval xmlns=`"$ns`">PT${IntervalMinutes}M</Interval><Duration xmlns=`"$ns`">P1D</Duration><StopAtDurationEnd xmlns=`"$ns`">false</StopAtDurationEnd>"
-      $firstTrigger.AppendChild($rep) | Out-Null
-
-      $tmpXml = Join-Path $env:TEMP "dropx_task_$Name.xml"
-      $xmlDoc.Save($tmpXml)
-      schtasks /create /tn $Name /xml $tmpXml /f 2>&1 | Out-Null
-      Remove-Item $tmpXml -ErrorAction SilentlyContinue
-    }
-  }
+    -Description $Description `
+    -Force | Out-Null
 
   Write-Host "  Registered: $Name (every ${IntervalMinutes} min)" -ForegroundColor Green
 }
@@ -99,7 +61,7 @@ Register-DropXTask `
   -Name "DropX-WorkSpaces-KeepAlive" `
   -Script $keepAliveScript `
   -IntervalMinutes 3 `
-  -Description "DropX: Keeps Amazon WorkSpaces session alive by tapping F15 every 3 minutes"
+  -Description "DropX: Keeps Amazon WorkSpaces client alive by tapping F15 every 3 minutes"
 
 Register-DropXTask `
   -Name "DropX-WorkSpaces-LockAlert" `
@@ -110,13 +72,12 @@ Register-DropXTask `
 Write-Host ""
 Write-Host "Done! Both tasks registered." -ForegroundColor Green
 Write-Host ""
-Write-Host "IMPORTANT: Before the lock alert works, edit lock-alert.ps1 and" -ForegroundColor Yellow
-Write-Host "           fill in your WA_TOKEN (same value as config.local.js)." -ForegroundColor Yellow
+Write-Host "IMPORTANT: Edit lock-alert.ps1 and fill in your WA_TOKEN." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "To verify:" -ForegroundColor Cyan
 Write-Host "  schtasks /query /tn DropX-WorkSpaces-KeepAlive"
 Write-Host "  schtasks /query /tn DropX-WorkSpaces-LockAlert"
 Write-Host ""
-Write-Host "To run immediately for testing:"
-Write-Host "  schtasks /run /tn DropX-WorkSpaces-KeepAlive"
-Write-Host "  schtasks /run /tn DropX-WorkSpaces-LockAlert"
+Write-Host "To run immediately:"
+Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
+Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-LockAlert'"
