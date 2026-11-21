@@ -63,7 +63,7 @@ export async function GET(request: Request) {
   // --- 2. company_id + station details (cluster, TL) ---
   const { data: stationRows, error: locErr } = await admin
     .from("stations")
-    .select("id,company_id,station_code,cluster_manager,station_manager_email")
+    .select("id,company_id,station_code,station_manager_email")
     .in("id", locationIds)
     .limit(50);
   if (locErr) return NextResponse.json({ error: locErr.message }, { status: 500 });
@@ -72,16 +72,27 @@ export async function GET(request: Request) {
   const companyId = stationRows[0].company_id as string;
   const stationById = new Map(stationRows.map((s) => [s.id as string, s]));
 
+  // Lookup TL phone numbers from profiles using station_manager_email
+  const tlEmails = [...new Set(stationRows.map((s) => s.station_manager_email as string | null).filter(Boolean))] as string[];
+  const { data: profileRows } = tlEmails.length
+    ? await admin.from("profiles").select("email,mobile,mobile_country_code").eq("company_id", companyId).in("email", tlEmails)
+    : { data: [] as { email: string; mobile: string | null; mobile_country_code: string | null }[] };
+  const profileByEmail = new Map((profileRows ?? []).map((p) => [p.email as string, p]));
+
   const groupByLocation = new Map(
     groups
       .filter((g) => stationRows.some((s) => s.id === g.location_id) && g.wa_group_id)
       .map((g) => {
         const st = stationById.get(g.location_id as string);
+        const tlEmail = (st?.station_manager_email as string | null) ?? null;
+        const tlProfile = tlEmail ? profileByEmail.get(tlEmail) : null;
+        const tlJid = tlProfile?.mobile && tlProfile?.mobile_country_code
+          ? `${tlProfile.mobile_country_code}${tlProfile.mobile}@s.whatsapp.net`
+          : null;
         return [g.location_id as string, {
           waGroupId: g.wa_group_id as string,
           groupName: (g.group_name as string | null) ?? g.location_id as string,
-          cluster: (st?.cluster_manager as string | null) ?? null,
-          tlEmail: (st?.station_manager_email as string | null) ?? null,
+          tlJid,
         }];
       })
   );
@@ -241,10 +252,14 @@ export async function GET(request: Request) {
       const tag = reason === "unapproved_roster" ? " (roster not approved)" : "";
       lines.push(`- ${person.name} (${person.code})${tag}`);
     }
-    const mentions: string[] = [];
-    if (group.cluster) mentions.push(`@${group.cluster}`);
-    if (group.tlEmail) mentions.push(`@${group.tlEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}`);
-    if (mentions.length) lines.push("", mentions.join(" "));
+    // Build WA @mentions using JIDs from profiles lookup
+    const mentionJids: string[] = [];
+    if (group.tlJid) mentionJids.push(group.tlJid);
+    if (mentionJids.length) {
+      // Add @{number} tags at end of message (WA renders as @Name in group)
+      const atTags = mentionJids.map((jid) => `@${jid.split("@")[0]}`).join(" ");
+      lines.push("", atTags);
+    }
     const text = lines.join("\n");
 
     const locShort = locationId.replace(/-/g, "").slice(-8);
@@ -257,7 +272,12 @@ export async function GET(request: Request) {
     sendTasks.push(
       workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
-        body: { to: toGroup, text, client_ref: clientRef },
+        body: {
+          to: toGroup,
+          text,
+          client_ref: clientRef,
+          ...(mentionJids.length ? { mentions: mentionJids } : {}),
+        },
       })
         .then(() => {
           sent++;
