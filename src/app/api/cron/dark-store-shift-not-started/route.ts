@@ -136,6 +136,9 @@ export async function GET(request: Request) {
     // Locations that have a checklist (started, any status)
     const startedLocations = new Set((checklists ?? []).map((c) => c.location_id as string));
 
+    // Deduplicate by WA group JID — multiple locations may share one group
+    const sentToGroup = new Set<string>();
+
     for (const locationId of locationIds) {
       const group = groupByLocation.get(locationId);
       if (!group) continue;
@@ -145,11 +148,19 @@ export async function GET(request: Request) {
         continue;
       }
 
-      const locShort = locationId.replace(/-/g, "").slice(-8);
-      const dateShort = shiftDate.replace(/-/g, "").slice(2);
-      const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
-      const clientRef = `ssns-${locShort}-${dateShort}-${slot.replace(":", "")}${testSuffix}`;
       const toGroup = testMode ? testingGroupJid : group.waGroupId;
+
+      // If another location already queued an alert to this group for this slot, skip
+      if (sentToGroup.has(toGroup)) {
+        results.push(`${group.groupName} ${slot}: skipped (same group already queued)`);
+        continue;
+      }
+      sentToGroup.add(toGroup);
+
+      const dateShort = shiftDate.replace(/-/g, "").slice(2);
+      const groupShort = toGroup.replace(/[^a-z0-9]/gi, "").slice(-8);
+      const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
+      const clientRef = `ssns-${groupShort}-${dateShort}-${slot.replace(":", "")}${testSuffix}`;
       const text = `Shift operations in Ops Pulse for ${slot} hrs shift not yet started. Why?`;
       const label = `${group.groupName} ${slot}`;
 

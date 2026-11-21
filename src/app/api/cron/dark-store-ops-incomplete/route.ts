@@ -116,9 +116,18 @@ export async function GET(request: Request) {
   const results: string[] = [];
   const sendTasks: Promise<void>[] = [];
 
+  // Deduplicate by WA group JID — multiple locations may share one group
+  const sentToGroup = new Set<string>();
+
   for (const locationId of locationIds) {
     const group = groupByLocation.get(locationId);
     if (!group) continue;
+
+    const toGroupCheck = testMode ? testingGroupJid : group.waGroupId;
+    if (sentToGroup.has(toGroupCheck)) {
+      results.push(`${group.groupName}: skipped (same group already queued)`);
+      continue;
+    }
 
     const slotStatuses = statusMap.get(locationId) ?? new Map<string, string>();
     // Find slots that are missing or not accepted
@@ -141,11 +150,12 @@ export async function GET(request: Request) {
       continue;
     }
 
-    const locShort = locationId.replace(/-/g, "").slice(-8);
     const dateShort = yesterday.replace(/-/g, "").slice(2);
     const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
-    const clientRef = `dsoi-${locShort}-${dateShort}${testSuffix}`;
-    const toGroup = testMode ? testingGroupJid : group.waGroupId;
+    const toGroup = toGroupCheck;
+    const groupShort = toGroup.replace(/[^a-z0-9]/gi, "").slice(-8);
+    const clientRef = `dsoi-${groupShort}-${dateShort}${testSuffix}`;
+    sentToGroup.add(toGroup);
     const text = `Store operations in Ops Pulse for yesterday not completed. Why?`;
     const label = `${group.groupName}`;
 
