@@ -1,5 +1,6 @@
 // Background script — monitoring cycle with Start / Pause / Resume / Stop
-// v1.1 — fixes: async buildAlertImage, chunked base64, waitForTabLoad, sendTest uses CONFIG.TESTING_GROUP
+// v1.4 — screenshot scaled to 900px via createImageBitmap (no DOM APIs in bg script),
+//         cycleRunning reset on tab error, sendTest uses CONFIG.STATIONS[0]
 
 "use strict";
 
@@ -52,7 +53,7 @@ async function getSiteSummaryTab() {
   return tabs.length ? tabs[0] : null;
 }
 
-async function waitForTabLoad(tabId, timeoutMs = 15000) {
+async function waitForTabLoad(tabId, timeoutMs = 20000) {
   return new Promise(resolve => {
     const done = () => { browser.tabs.onUpdated.removeListener(listener); resolve(); };
     const timer = setTimeout(done, timeoutMs);
@@ -67,9 +68,9 @@ async function ensureSiteSummaryTab() {
   let tab = await getSiteSummaryTab();
   if (!tab) {
     tab = await browser.tabs.create({ url: "https://eu.store-management.f3.amazon.dev/siteSummary", active: false });
-    await waitForTabLoad(tab.id, 15000);
+    await waitForTabLoad(tab.id, 20000);
     // Extra buffer for content script injection + React hydration
-    await sleep(2000);
+    await sleep(5000);
   }
   return tab;
 }
@@ -94,7 +95,7 @@ async function sendToTab(tabId, msg, retries = 3) {
   }
 }
 
-// ── Image generation (OffscreenCanvas) ────────────────────────────────────────
+// ── Image generation (OffscreenCanvas) — fallback when screenshot fails ───────
 async function buildAlertImage(stationCode, breachingRows, thresholdS) {
   const W = 600, ROW_H = 42, HEADER_H = 52, BANNER_H = 44, TABLE_HEAD_H = 36, FOOTER_H = 32;
   const rows = breachingRows.slice(0, 8);
@@ -181,22 +182,40 @@ async function buildAlertImage(stationCode, breachingRows, thresholdS) {
 }
 
 // ── Screenshot capture ─────────────────────────────────────────────────────────
-// Tab is already active when this is called (made active at start of checkStation).
-// prevTabId is passed in so we can restore it after the screenshot.
-async function captureTabScreenshot(tabId, prevTabId) {
-  const dataUrl = await browser.tabs.captureVisibleTab(null, { format: "png" });
+// Tab must already be active and in foreground when called.
+// windowId is passed to captureVisibleTab so it works even if tab is in a non-current window.
+async function captureTabScreenshot(tabId) {
+  const tabInfo = await browser.tabs.get(tabId).catch(() => null);
+  const windowId = tabInfo?.windowId ?? null;
+  const dataUrl = await browser.tabs.captureVisibleTab(windowId, { format: "png" });
 
-  // Restore previous active tab now that screenshot is done
-  if (prevTabId && prevTabId !== tabId) {
-    await browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+  // Scale to fixed 900px wide so WhatsApp renders it at a readable size
+  // without distortion regardless of the browser viewport width.
+  // Use createImageBitmap + OffscreenCanvas — Image and FileReader are not
+  // available in background scripts (no DOM).
+  const TARGET_W = 900;
+  const resp = await fetch(dataUrl);
+  const srcBlob = await resp.blob();
+  const bitmap = await createImageBitmap(srcBlob);
+  const scale = TARGET_W / bitmap.width;
+  const h = Math.round(bitmap.height * scale);
+  const canvas = new OffscreenCanvas(TARGET_W, h);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, TARGET_W, h);
+  bitmap.close();
+  const outBlob = await canvas.convertToBlob({ type: "image/png" });
+  const arrayBuf = await outBlob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
   }
-
-  // Strip "data:image/png;base64," prefix
-  return dataUrl.split(",")[1];
+  return btoa(binary);
 }
 
 // ── WhatsApp send ──────────────────────────────────────────────────────────────
-async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId, prevTabId } = {}) {
+async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId } = {}) {
   const to = overrideGroup || groupFor(stationCode);
   if (!to) { addLog(`⚠ ${stationCode}: no group JID — skipped`); return { ok: false, reason: "no_group" }; }
 
@@ -215,7 +234,7 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId, 
   let imageBase64;
   if (tabId) {
     try {
-      imageBase64 = await captureTabScreenshot(tabId, prevTabId);
+      imageBase64 = await captureTabScreenshot(tabId);
       addLog(`📸 ${stationCode}: screenshot captured`);
     } catch (e) {
       addLog(`⚠ ${stationCode}: screenshot failed (${e.message}), using generated image`);
@@ -252,35 +271,29 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId, 
 // ── Send Test ──────────────────────────────────────────────────────────────────
 async function sendTest() {
   const testingGroup = CONFIG.TESTING_GROUP || "120363429732355530@g.us";
-  // Build a fake breaching row so there's always something to show
   const fakeRows = [{
-    oid: "TEST",
-    items: "3",
-    associate: "testuser",
-    elapsedText: "00:26",
-    elapsedS: 26,
-    slaText: "00:15",
-    slaS: 15,
-    red: true,
+    oid: "TEST", items: "3", associate: "testuser",
+    elapsedText: "00:26", elapsedS: 26, slaText: "00:15", slaS: 15, red: true,
   }];
-  // Try to read the real current station first
   try {
     const tab = await getSiteSummaryTab();
     if (tab) {
+      // Make tab active so captureVisibleTab works
+      await browser.tabs.update(tab.id, { active: true }).catch(() => {});
+      await sleep(300);
       const data = await sendToTab(tab.id, { type: "READ_SITE_SUMMARY" });
-      const storeId   = data?.storeId;
+      const storeId     = data?.storeId;
       const stationCode = CONFIG.STORE_MAP[storeId] || "TEST";
-      const realRows  = (data?.rows || []).filter(r => r.elapsedS != null && r.elapsedS > 0);
-      const rows = realRows.length ? realRows : fakeRows;
-      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id, prevTabId: null });
+      const realRows    = (data?.rows || []).filter(r => r.elapsedS != null && r.elapsedS > 0);
+      const rows        = realRows.length ? realRows : fakeRows;
+      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id });
       addLog(`🔔 Test sent for ${stationCode}`);
       return { ok: true };
     }
   } catch (e) {
     addLog(`⚠ Test: falling back to fake data (${e.message})`);
   }
-  // Fallback: send fake data as TTG9
-  await sendWhatsApp("TTG9", fakeRows, { overrideGroup: testingGroup });
+  await sendWhatsApp(CONFIG.STATIONS[0] || "TEST", fakeRows, { overrideGroup: testingGroup });
   addLog("🔔 Test sent (fake data — no Site Summary tab open)");
   return { ok: true };
 }
@@ -289,77 +302,97 @@ async function sendTest() {
 async function checkStation(tabId, stationCode, storeId) {
   currentStation = stationCode;
 
+  // Remember which tab was active so we can restore it on every exit path
+  const prevTabs = await browser.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const prevTabId = prevTabs[0]?.id ?? null;
+
+  async function restorePrevTab() {
+    if (prevTabId && prevTabId !== tabId) {
+      await browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+    }
+  }
+
   addLog(`→ Switching to ${stationCode}…`);
 
-  // Bring tab to foreground so it renders properly during the wait
-  const [activeBefore] = await browser.tabs.query({ active: true, currentWindow: true }).catch(() => [null]);
+  // Bring tab to foreground — shadow DOM needs to be visible for kat-dropdown
+  // options to render, and captureVisibleTab needs the tab active for screenshot.
   await browser.tabs.update(tabId, { active: true }).catch(() => {});
 
+  // Send SWITCH_STATION: content.js polls until the shadow <select> is ready,
+  // sets its value, and waits for React to confirm via the attribute.
   try {
-    await sendToTab(tabId, { type: "SWITCH_STATION", storeId });
+    const switchResult = await sendToTab(tabId, { type: "SWITCH_STATION", storeId });
+    if (!switchResult?.ok) addLog(`⚠ ${stationCode}: switch not confirmed (${switchResult?.reason ?? "timeout"})`);
   } catch (e) {
-    addLog(`⚠ ${stationCode}: switch msg failed — ${e.message}`);
-    if (activeBefore) browser.tabs.update(activeBefore.id, { active: true }).catch(() => {});
+    addLog(`⚠ ${stationCode}: switch failed — ${e.message}`);
+    await restorePrevTab();
     return;
   }
 
-  // Wait for dropdown to confirm switch
-  try {
-    await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: 10000, snapshotOid: null });
-  } catch (_) {}
-
-  // Sleep 20s in foreground so page fetches and renders fresh data
+  // Wait for data fetch to complete
   const waitMs = switchWaitFor(stationCode);
-  addLog(`${stationCode}: waiting ${waitMs / 1000}s for data…`);
+  addLog(`${stationCode}: waiting ${waitMs / 1000}s for data to load…`);
   await sleep(waitMs);
+
+  // Guard: if stopped or paused while sleeping, bail
+  if (!monitoring || paused) {
+    await restorePrevTab();
+    return;
+  }
 
   let data;
   try {
     data = await sendToTab(tabId, { type: "READ_SITE_SUMMARY" });
   } catch (e) {
     addLog(`⚠ ${stationCode}: read failed — ${e.message}`);
+    await restorePrevTab();
     return;
   }
 
   if (!data?.onSiteSummary) {
     addLog(`⚠ ${stationCode}: not on Site Summary`);
+    await restorePrevTab();
     return;
   }
 
   const breaching = (data.rows || []).filter(r => r.elapsedS != null && r.elapsedS >= CONFIG.ACCEPTANCE_THRESHOLD_S);
   addLog(`${stationCode}: ${(data.rows||[]).length} orders, ${breaching.length} breaching`);
 
-  const prevTabId = activeBefore?.id ?? null;
-
   if (breaching.length === 0) {
-    // Restore previous tab — no screenshot needed
-    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+    await restorePrevTab();
     return;
   }
+
   if (isOnCooldown(stationCode)) {
     addLog(`${stationCode}: cooldown — skipped`);
-    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+    await restorePrevTab();
     return;
   }
 
+  // Tab is already in foreground — screenshot + send, then restore
   try {
-    // prevTabId passed so captureTabScreenshot restores the tab after screenshotting
-    await sendWhatsApp(stationCode, breaching, { tabId, prevTabId });
+    await sendWhatsApp(stationCode, breaching, { tabId });
     markSent(stationCode);
   } catch (e) {
     addLog(`❌ ${stationCode}: send error — ${e.message}`);
-    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
   }
+
+  await restorePrevTab();
 }
 
 // ── Full cycle ─────────────────────────────────────────────────────────────────
+let cycleRunning = false;
+
 async function runCycle() {
   if (!monitoring || paused) return;
+  if (cycleRunning) { addLog("⚠ cycle already running — skipped"); return; }
+  cycleRunning = true;
   statusMsg = "Running cycle…";
   addLog("── cycle start ──");
 
-  const tab = await ensureSiteSummaryTab();
-  if (!tab) { addLog("❌ No Site Summary tab"); statusMsg = "Error — no tab"; scheduleNext(); return; }
+  let tab;
+  try { tab = await ensureSiteSummaryTab(); } catch (e) { addLog(`❌ Tab error: ${e.message}`); statusMsg = "Error — no tab"; cycleRunning = false; scheduleNext(); return; }
+  if (!tab) { addLog("❌ No Site Summary tab"); statusMsg = "Error — no tab"; cycleRunning = false; scheduleNext(); return; }
 
   const codeToStore = {};
   for (const [id, code] of Object.entries(CONFIG.STORE_MAP)) codeToStore[code] = id;
@@ -375,6 +408,7 @@ async function runCycle() {
 
   currentStation = null;
   lastCycleAt    = Date.now();
+  cycleRunning   = false;
   statusMsg      = paused ? "Paused" : "Watching…";
   addLog("── cycle done ──");
   updateBadge();
@@ -452,11 +486,11 @@ browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === "REFRESH_TAB") {
     refreshSiteSummaryTab().then(r => sendResponse(r));
-    return true; // async
+    return true;
   }
   if (msg.type === "SEND_TEST") {
     sendTest().then(r => sendResponse(r)).catch(e => sendResponse({ ok: false, error: e.message }));
-    return true; // async
+    return true;
   }
 });
 

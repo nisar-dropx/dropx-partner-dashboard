@@ -38,7 +38,7 @@ const CONFIG = {
   // Alert threshold
   ACCEPTANCE_THRESHOLD_S: 15,
 
-  // How long to wait (ms) after switching station before reading data
+  // How long to wait (ms) after React confirms the store switch before reading data.
   SWITCH_WAIT_MS: 20000,
 
   // Extra wait for slow-loading stations

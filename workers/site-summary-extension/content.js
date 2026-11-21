@@ -92,63 +92,73 @@
   }
 
   // ── Station switcher ─────────────────────────────────────────────────────────
-  // The kat-dropdown is a custom web component. We set its value and dispatch a
-  // change event to trigger the React state update.
+  // kat-option elements live inside kat-dropdown's shadow DOM. Content scripts
+  // cannot pierce shadow roots with querySelector, but can access the listbox
+  // slot's assignedElements() to get the actual kat-option nodes, then click them.
 
-  function switchToStore(storeId) {
+  function findKatOption(storeId) {
     const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
-    if (!dd) return false;
-
-    // If already on the right store, just click refresh to get fresh data
-    if (dd.getAttribute("value") === storeId) {
-      clickRefresh();
-      return true;
+    if (!dd || !dd.shadowRoot) return null;
+    // The listbox slot inside the shadow root holds all kat-option elements
+    const slot = dd.shadowRoot.querySelector('slot[role="listbox"]');
+    if (!slot) return null;
+    const nodes = slot.assignedElements ? slot.assignedElements({ flatten: true }) : slot.assignedNodes({ flatten: true });
+    for (const node of nodes) {
+      if (node.nodeType !== 1) continue; // skip text nodes
+      if (node.getAttribute("value") === storeId) return node;
+      // Options may be wrapped in a container — check children too
+      const child = node.querySelector && node.querySelector(`[value="${storeId}"]`);
+      if (child) return child;
     }
-
-    // Set value on the web component
-    dd.value = storeId;
-    dd.setAttribute("value", storeId);
-    // Fire all event types the component or React may listen to
-    dd.dispatchEvent(new Event("input",  { bubbles: true }));
-    dd.dispatchEvent(new Event("change", { bubbles: true }));
-    dd.dispatchEvent(new CustomEvent("kat-change", { bubbles: true, detail: { value: storeId } }));
-
-    // After a short delay, also click the refresh button to force data reload
-    setTimeout(clickRefresh, 2000);
-    return true;
+    return null;
   }
 
-  function clickRefresh() {
-    // The refresh button is inside the kat-popover trigger slot
-    const btn = document.querySelector('button[slot="trigger"].sc-bQdRvg, .sc-iJminA button, button kat-icon[name="refresh"]');
-    const refreshBtn = btn || document.querySelector('kat-icon[name="refresh"]')?.closest('button');
-    if (refreshBtn) refreshBtn.click();
-  }
-
-  // Poll until the dropdown value matches storeId AND the table data has refreshed.
-  // "refreshed" = first OID in the table changed from the snapshot taken before the switch,
-  // OR the table is empty (store has no orders), OR timeout.
-  function waitForStoreSwitch(storeId, timeoutMs, snapshotOid, callback) {
+  function switchStation(storeId, timeoutMs, callback) {
     const start = Date.now();
-    function check() {
+
+    function attempt() {
       const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
-      const current = dd ? dd.getAttribute("value") : null;
-      if (current !== storeId) {
-        // Dropdown not updated yet
-        if (Date.now() - start > timeoutMs) { callback(false); return; }
-        setTimeout(check, 500);
+      if (!dd) {
+        if (Date.now() - start > timeoutMs) { callback({ ok: false, reason: "no_dropdown" }); return; }
+        setTimeout(attempt, 300);
         return;
       }
-      // Dropdown confirmed — now wait for table data to change
-      const firstOidEl = document.querySelector('table.kat-table tbody tr td.orderId a');
-      const firstOid = firstOidEl ? firstOidEl.textContent.trim() : null;
-      // Data is fresh if: OID changed, or table is empty (no orders), or we've waited long enough
-      const dataRefreshed = !firstOid || firstOid !== snapshotOid;
-      const timedOut = Date.now() - start > timeoutMs;
-      if (dataRefreshed || timedOut) { callback(dataRefreshed); return; }
-      setTimeout(check, 500);
+      if (dd.getAttribute("value") === storeId) { callback({ ok: true }); return; }
+
+      const option = findKatOption(storeId);
+      if (!option) {
+        if (Date.now() - start > timeoutMs) { callback({ ok: false, reason: "no_option" }); return; }
+        setTimeout(attempt, 300);
+        return;
+      }
+
+      // Click the kat-option — Katal's handler fires → React onChange → store switches
+      option.click();
+      pollConfirm();
     }
-    check();
+
+    function pollConfirm() {
+      const dd = document.querySelector('kat-dropdown[data-testid="site-selection"]');
+      const current = dd ? dd.getAttribute("value") : null;
+      if (current === storeId) { callback({ ok: true }); return; }
+      if (Date.now() - start > timeoutMs) {
+        // One final retry before giving up
+        const opt = findKatOption(storeId);
+        if (opt) opt.click();
+        setTimeout(() => {
+          const cur = document.querySelector('kat-dropdown[data-testid="site-selection"]')?.getAttribute("value");
+          callback(cur === storeId ? { ok: true } : { ok: false, reason: "timeout" });
+        }, 500);
+        return;
+      }
+      setTimeout(pollConfirm, 300);
+    }
+
+    attempt();
+  }
+
+  function waitForStoreSwitch(storeId, timeoutMs, _snapshotOid, callback) {
+    switchStation(storeId, timeoutMs, (r) => callback(r.ok));
   }
 
   // ── Message handler ──────────────────────────────────────────────────────────
@@ -159,12 +169,10 @@
       return false;
     }
     if (msg.type === "SWITCH_STATION") {
-      const ok = switchToStore(msg.storeId);
-      sendResponse({ ok });
-      return false;
+      switchStation(msg.storeId, 15000, (r) => sendResponse(r));
+      return true; // async
     }
     if (msg.type === "WAIT_FOR_STORE") {
-      // Polls until dropdown shows storeId AND table data has changed from snapshotOid
       waitForStoreSwitch(msg.storeId, msg.timeoutMs || 20000, msg.snapshotOid || null, (matched) => {
         sendResponse({ matched, storeId: getStoreId() });
       });
