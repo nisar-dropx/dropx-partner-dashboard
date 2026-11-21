@@ -294,14 +294,7 @@ async function sendTest() {
 async function checkStation(tabId, stationCode, storeId) {
   currentStation = stationCode;
 
-  // Snapshot current first OID so we can detect when data changes after switch
-  let snapshotOid = null;
-  try {
-    const snap = await sendToTab(tabId, { type: "READ_SITE_SUMMARY" });
-    snapshotOid = snap?.rows?.[0]?.oid || null;
-  } catch (_) {}
-
-  addLog(`→ Switching to ${stationCode}… (snapshot OID: ${snapshotOid || "none"})`);
+  addLog(`→ Switching to ${stationCode}…`);
   try {
     await sendToTab(tabId, { type: "SWITCH_STATION", storeId });
   } catch (e) {
@@ -309,21 +302,14 @@ async function checkStation(tabId, stationCode, storeId) {
     return;
   }
 
-  // Wait until dropdown confirms AND table data changes from snapshot (up to 25s)
-  const waitMs = switchWaitFor(stationCode);
+  // Wait for dropdown to confirm, then sleep fixed 20s for data to load
   try {
-    const switchResult = await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: waitMs, snapshotOid });
-    if (!switchResult?.matched) {
-      addLog(`⚠ ${stationCode}: data didn't refresh in ${waitMs / 1000}s — reading anyway`);
-    } else {
-      addLog(`${stationCode}: data refreshed ✓`);
-    }
-  } catch (e) {
-    addLog(`⚠ ${stationCode}: wait-for-store error — ${e.message}`);
-  }
+    await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: 10000, snapshotOid: null });
+  } catch (_) {}
 
-  // Small buffer for the page to finish rendering
-  await sleep(1500);
+  const waitMs = switchWaitFor(stationCode);
+  addLog(`${stationCode}: waiting ${waitMs / 1000}s for data…`);
+  await sleep(waitMs);
 
   let data;
   try {
