@@ -221,15 +221,16 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
 
   const worst      = breachingRows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, breachingRows[0]);
   const worstClock = fmtClock(worst.elapsedS);
+  const unassigned = breachingRows.filter(r => !r.associate || r.associate === "Unassigned");
+  const allAssigned = unassigned.length === 0;
   const orderWord = breachingRows.length === 1 ? "order" : "orders";
-  const caption = [
-    stationCode,
-    `* ${breachingRows.length} ${orderWord} pending acceptance (Worst ${worstClock})`,
-    "",
-    breachingRows.length > 1
-      ? "Move more people to picking or ask people to accept fast"
-      : "Ask the associate to accept the order fast",
-  ].join("\n");
+  const bullet = allAssigned
+    ? `Acceptance time over ${CONFIG.ACCEPTANCE_THRESHOLD_S}s SLA (Worst ${worstClock})`
+    : `${breachingRows.length} ${orderWord} pending acceptance (Worst ${worstClock})`;
+  const action = allAssigned
+    ? "Ask people to accept fast"
+    : "Move more people to picking or ask people to accept fast";
+  const caption = [stationCode, `* ${bullet}`, "", action].join("\n");
 
   // Use browser screenshot if tab is available, else fall back to generated image
   let imageBase64;
