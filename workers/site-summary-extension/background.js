@@ -181,17 +181,12 @@ async function buildAlertImage(stationCode, breachingRows, thresholdS) {
 }
 
 // ── Screenshot capture ─────────────────────────────────────────────────────────
-async function captureTabScreenshot(tabId) {
-  // Make tab active briefly to allow captureVisibleTab, then restore
-  const [currentTabs] = await browser.tabs.query({ active: true, currentWindow: true });
-  const prevTabId = currentTabs ? currentTabs.id : null;
-
-  await browser.tabs.update(tabId, { active: true });
-  await sleep(300); // small settle time
-
+// Tab is already active when this is called (made active at start of checkStation).
+// prevTabId is passed in so we can restore it after the screenshot.
+async function captureTabScreenshot(tabId, prevTabId) {
   const dataUrl = await browser.tabs.captureVisibleTab(null, { format: "png" });
 
-  // Restore previous active tab
+  // Restore previous active tab now that screenshot is done
   if (prevTabId && prevTabId !== tabId) {
     await browser.tabs.update(prevTabId, { active: true }).catch(() => {});
   }
@@ -201,7 +196,7 @@ async function captureTabScreenshot(tabId) {
 }
 
 // ── WhatsApp send ──────────────────────────────────────────────────────────────
-async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId } = {}) {
+async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId, prevTabId } = {}) {
   const to = overrideGroup || groupFor(stationCode);
   if (!to) { addLog(`⚠ ${stationCode}: no group JID — skipped`); return { ok: false, reason: "no_group" }; }
 
@@ -220,7 +215,7 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
   let imageBase64;
   if (tabId) {
     try {
-      imageBase64 = await captureTabScreenshot(tabId);
+      imageBase64 = await captureTabScreenshot(tabId, prevTabId);
       addLog(`📸 ${stationCode}: screenshot captured`);
     } catch (e) {
       addLog(`⚠ ${stationCode}: screenshot failed (${e.message}), using generated image`);
@@ -277,7 +272,7 @@ async function sendTest() {
       const stationCode = CONFIG.STORE_MAP[storeId] || "TEST";
       const realRows  = (data?.rows || []).filter(r => r.elapsedS != null && r.elapsedS > 0);
       const rows = realRows.length ? realRows : fakeRows;
-      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id });
+      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id, prevTabId: null });
       addLog(`🔔 Test sent for ${stationCode}`);
       return { ok: true };
     }
@@ -295,18 +290,25 @@ async function checkStation(tabId, stationCode, storeId) {
   currentStation = stationCode;
 
   addLog(`→ Switching to ${stationCode}…`);
+
+  // Bring tab to foreground so it renders properly during the wait
+  const [activeBefore] = await browser.tabs.query({ active: true, currentWindow: true }).catch(() => [null]);
+  await browser.tabs.update(tabId, { active: true }).catch(() => {});
+
   try {
     await sendToTab(tabId, { type: "SWITCH_STATION", storeId });
   } catch (e) {
     addLog(`⚠ ${stationCode}: switch msg failed — ${e.message}`);
+    if (activeBefore) browser.tabs.update(activeBefore.id, { active: true }).catch(() => {});
     return;
   }
 
-  // Wait for dropdown to confirm, then sleep fixed 20s for data to load
+  // Wait for dropdown to confirm switch
   try {
     await sendToTab(tabId, { type: "WAIT_FOR_STORE", storeId, timeoutMs: 10000, snapshotOid: null });
   } catch (_) {}
 
+  // Sleep 20s in foreground so page fetches and renders fresh data
   const waitMs = switchWaitFor(stationCode);
   addLog(`${stationCode}: waiting ${waitMs / 1000}s for data…`);
   await sleep(waitMs);
@@ -327,14 +329,26 @@ async function checkStation(tabId, stationCode, storeId) {
   const breaching = (data.rows || []).filter(r => r.elapsedS != null && r.elapsedS >= CONFIG.ACCEPTANCE_THRESHOLD_S);
   addLog(`${stationCode}: ${(data.rows||[]).length} orders, ${breaching.length} breaching`);
 
-  if (breaching.length === 0) return;
-  if (isOnCooldown(stationCode)) { addLog(`${stationCode}: cooldown — skipped`); return; }
+  const prevTabId = activeBefore?.id ?? null;
+
+  if (breaching.length === 0) {
+    // Restore previous tab — no screenshot needed
+    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+    return;
+  }
+  if (isOnCooldown(stationCode)) {
+    addLog(`${stationCode}: cooldown — skipped`);
+    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
+    return;
+  }
 
   try {
-    await sendWhatsApp(stationCode, breaching, { tabId });
+    // prevTabId passed so captureTabScreenshot restores the tab after screenshotting
+    await sendWhatsApp(stationCode, breaching, { tabId, prevTabId });
     markSent(stationCode);
   } catch (e) {
     addLog(`❌ ${stationCode}: send error — ${e.message}`);
+    if (prevTabId) browser.tabs.update(prevTabId, { active: true }).catch(() => {});
   }
 }
 
