@@ -221,9 +221,10 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
 
   const worst      = breachingRows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, breachingRows[0]);
   const worstClock = fmtClock(worst.elapsedS);
+  const orderWord = breachingRows.length === 1 ? "order" : "orders";
   const caption = [
     stationCode,
-    `* Acceptance time over ${CONFIG.ACCEPTANCE_THRESHOLD_S}s SLA (Worst ${worstClock})`,
+    `* ${breachingRows.length} ${orderWord} pending acceptance (Worst ${worstClock})`,
     "",
     breachingRows.length > 1
       ? "Move more people to picking or ask people to accept fast"
