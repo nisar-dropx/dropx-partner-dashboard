@@ -49,7 +49,7 @@ const CONFIG = {
   },
 
   // Don't re-alert the same station within this window (minutes)
-  COOLDOWN_MINUTES: 5,
+  COOLDOWN_MINUTES: 0.33,  // ~20 seconds
 
   // How often to run a full cycle of all stations (seconds)
   // 7 stations × ~20s each = ~140s minimum; set to 180s to give breathing room
