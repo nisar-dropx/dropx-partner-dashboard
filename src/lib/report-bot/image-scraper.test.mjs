@@ -1,0 +1,204 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import {
+  analyseCycleCount,
+  analyseDgFuel,
+  analyseExpiryRemoved,
+  analyseStowingPendency,
+  analyseWithImageScraper,
+  matchScrapable,
+  parseExpiryDates,
+  parseStowingQuantity,
+  quantityNearLabel
+} from "./image-scraper.ts";
+
+const cycle = {
+  id: "cycle-1",
+  name: "Cycle count, SBC & SRC completion",
+  slug: "cycle-count-sbc-src",
+  rules: [
+    "Read the Cycle Count, SBC and SRC task quantities from the device screenshot.",
+    "Pass only when all three quantities are exactly 0.",
+    "Any positive, missing, cropped or unreadable quantity remains pending; never assume it is zero."
+  ],
+  feedback_hint: "Please complete the remaining Cycle Count, SBC and SRC tasks and share a fresh device screenshot."
+};
+
+const expiry = {
+  id: "expiry-1",
+  name: "Expiry removed",
+  slug: "expiry-removed",
+  rules: [
+    "Check the Expiration column against today in Asia/Kolkata.",
+    "Check the quantity for every current or past-date row.",
+    "Pass only when there are no current or past-date rows with quantity above 0."
+  ]
+};
+
+const stowing = {
+  id: "stow-1",
+  name: "Stowing pendency",
+  slug: "stowing-pendency",
+  rules: [
+    "Extract stowing pendency quantity from a reply or new message.",
+    "Pass only when the quantity is exactly 0; a positive quantity remains pending."
+  ]
+};
+
+const dg = {
+  id: "dg-1",
+  name: "DG fuel level",
+  slug: "dg-fuel-level",
+  rules: ["A DG fuel level image is attached."],
+  auto_reply_policy: "never"
+};
+
+describe("cycle count scraper", () => {
+  test("reads BOH Guided, SBC and Ad Hoc and fails when not zero", () => {
+    const ocr = `
+      Unified Cycle Count
+      BOH Guided 96
+      Simple Bin Count 298
+      Ad Hoc 12
+      User chmuthul
+      Device ID DU-AA-45
+    `;
+    const result = analyseCycleCount(cycle, ocr);
+    assert.equal(result.verdict, "fail");
+    assert.equal(result.extracted_fields.find((f) => f.label === "BOH Guided")?.value, "96");
+    assert.equal(result.extracted_fields.find((f) => f.label === "Simple Bin Count")?.value, "298");
+    assert.equal(result.extracted_fields.find((f) => f.label === "Ad Hoc / SRC")?.value, "12");
+  });
+
+  test("passes only when all three quantities are zero", () => {
+    const ocr = "Unified Cycle Count\nBOH Guided 0\nSimple Bin Count 0\nAd Hoc 0";
+    const result = analyseCycleCount(cycle, ocr);
+    assert.equal(result.verdict, "pass");
+  });
+
+  test("does not assume missing Ad Hoc is zero", () => {
+    const ocr = "Unified Cycle Count\nBOH Guided 0\nSimple Bin Count 0";
+    const result = analyseCycleCount(cycle, ocr);
+    assert.equal(result.verdict, "needs_review");
+  });
+
+  test("rejects wrong menu (Expiry Awareness)", () => {
+    const ocr = "Expiry Awareness\nAudit FOH\nAudit BOH\nBin Check";
+    const result = analyseCycleCount(cycle, ocr);
+    assert.equal(result.verdict, "needs_review");
+    assert.match(result.extracted_summary, /not a Cycle Count/i);
+  });
+});
+
+describe("expiry scraper", () => {
+  test("parses mixed date formats", () => {
+    assert.deepEqual(parseExpiryDates("Expiration 2026-11-21 23:59 and 11/22/2026"), [
+      "2026-11-21",
+      "2026-11-22"
+    ]);
+  });
+
+  test("passes when all visible dates are after business date", () => {
+    const ocr = "Expiry Dashboard\nExpiration 2026-11-21\nQuantity 12\nExpiration 11/22/2026 4";
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20");
+    assert.equal(result.verdict, "pass");
+  });
+
+  test("fails when a current/past date still has quantity", () => {
+    const ocr = "Expiry Dashboard Expiration 2026-11-19 Quantity 5 ASIN B00";
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20");
+    assert.equal(result.verdict, "fail");
+  });
+});
+
+describe("stowing scraper", () => {
+  test("reads quantity from common phrasings", () => {
+    assert.equal(parseStowingQuantity("Stowing pendency: 0"), 0);
+    assert.equal(parseStowingQuantity("pendency 14"), 14);
+    assert.equal(parseStowingQuantity("0"), 0);
+  });
+
+  test("passes at zero and fails when positive", () => {
+    assert.equal(analyseStowingPendency(stowing, "stowing pendency 0").verdict, "pass");
+    assert.equal(analyseStowingPendency(stowing, "stowing pendency 9").verdict, "fail");
+  });
+});
+
+describe("dg fuel scraper", () => {
+  test("passes when an image is attached", () => {
+    const result = analyseDgFuel(dg, { hasImage: true, ocrText: "DG Fuel 62%", messageText: "fuel level" });
+    assert.equal(result.verdict, "pass");
+  });
+
+  test("fails without an image", () => {
+    const result = analyseDgFuel(dg, { hasImage: false, ocrText: "", messageText: "DG fuel" });
+    assert.equal(result.verdict, "fail");
+  });
+});
+
+describe("match + orchestrate", () => {
+  test("matches cycle count from OCR signatures among open requests", () => {
+    const matched = matchScrapable({
+      candidates: [cycle, expiry, stowing, dg],
+      businessDate: "2026-11-20",
+      hasImage: true,
+      ocrText: "Unified Cycle Count BOH Guided 1 Simple Bin Count 2 Ad Hoc 0"
+    });
+    assert.equal(matched?.slug, "cycle-count-sbc-src");
+  });
+
+  test("matches bare number reply to stowing when that request is open", () => {
+    const result = analyseWithImageScraper({
+      candidates: [stowing],
+      businessDate: "2026-11-20",
+      text: "0",
+      hasImage: false
+    });
+    assert.equal(result?.verdict, "pass");
+    assert.equal(result?.matched_report_type_id, "stow-1");
+  });
+
+  test("quantityNearLabel tolerates OCR gaps and O/0 confusion", () => {
+    assert.equal(quantityNearLabel("BOH Guided\n96 tasks", [/boh\s*guided/i]), 96);
+    assert.equal(quantityNearLabel("Simple Bin Count O", [/\bsbc\b/i, /simple\s*bin\s*count/i]), 0);
+  });
+
+  test("bulk mix: prefers waiting expiry over already-received cycle when OCR says expiry", () => {
+    const matched = matchScrapable({
+      candidates: [
+        { ...cycle, requestStatus: "received" },
+        { ...expiry, requestStatus: "pending" },
+        { ...stowing, requestStatus: "pending" },
+        { ...dg, requestStatus: "pending" }
+      ],
+      businessDate: "2026-11-20",
+      hasImage: true,
+      ocrText: "Expiry Dashboard Expiration 2026-11-25 Quantity 0"
+    });
+    assert.equal(matched?.slug, "expiry-removed");
+  });
+
+  test("bulk mix: image without stowing words does not steal a bare-number stowing slot", () => {
+    const matched = matchScrapable({
+      candidates: [
+        { ...cycle, requestStatus: "pending" },
+        { ...stowing, requestStatus: "pending" }
+      ],
+      businessDate: "2026-11-20",
+      hasImage: true,
+      caption: "done",
+      ocrText: "Unified Cycle Count BOH Guided 0 Simple Bin Count 0 Ad Hoc 0"
+    });
+    assert.equal(matched?.slug, "cycle-count-sbc-src");
+  });
+
+  test("dg fuel passes with image even when OCR is weak", () => {
+    const result = analyseWithImageScraper({
+      candidates: [{ ...dg, requestStatus: "pending" }],
+      businessDate: "2026-11-20",
+      hasImage: true,
+      ocrText: ""
+    });
+    assert.equal(result?.verdict, "pass");
+  });
+});

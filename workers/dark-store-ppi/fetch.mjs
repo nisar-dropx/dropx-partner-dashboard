@@ -388,7 +388,7 @@ async function fetchInventoryAudit(store, fromMs, toMs) {
     storeIds: [store.amazon_store_id],
     businessTags: [store.store_family],
     pageSize: 10001,
-    filter: { processes: ["Outbound Pick"] },
+    filter: { processes: ["Outbound Pick", "Outbound Pick INF"] },
     retrieve: {
       user: true, asin: true, fcsku: true, fnsku: true, productTitle: true,
       locationId: true, deltaQuantity: true, newTotalQuantity: true,

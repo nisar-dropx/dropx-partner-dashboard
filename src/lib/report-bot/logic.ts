@@ -35,6 +35,8 @@ export type Analysis = {
   feedback: string;
   /** Open follow-ups the model extracted; portal may create action rows from these. */
   open_actions: OpenActionDraft[];
+  /** Set by deterministic scrapers; absent on AI analyses. */
+  source?: "scraper" | "ai";
 };
 
 export type LocalClock = { date: string; minutes: number; weekday: number };
@@ -319,6 +321,21 @@ export function decideGroupDelivery(analysis: Analysis, settings: DeliverySettin
   if (highRisk) return "needs_approval";
   if (context.groupMode !== "live" || context.companyMode !== "live") return "needs_approval";
   return base;
+}
+
+/**
+ * Whether today's request should become `received` (stop reminders).
+ * Silent auto-reply only suppresses feedback — it must not close pass-to-close
+ * reports on a fail/unclear verdict.
+ */
+export function shouldCompleteRequest(
+  analysis: Pick<Analysis, "is_report" | "verdict">,
+  reportType: { requires_pass_to_close?: boolean } | null | undefined
+) {
+  if (!analysis.is_report) return false;
+  if (!reportType) return true;
+  if (reportType.requires_pass_to_close === true) return analysis.verdict === "pass";
+  return true;
 }
 
 /** Review queue status from modes and whether a draft exists. */

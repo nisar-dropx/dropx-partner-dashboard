@@ -22,5 +22,9 @@ supabase/.temp/
 .next/*
 .cursor/*
 
+# Tesseract language data downloaded locally by tesseract.js
+eng.traineddata
+*.traineddata
+
 # Claude Code project settings
 .claude/

@@ -2,6 +2,8 @@ import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { analysisJsonSchema, extractJsonText, parseAnalysis, type Analysis } from "@/lib/report-bot/logic";
+import { extractReportImageText } from "@/lib/report-bot/image-ocr";
+import { analyseWithImageScraper, scrapableCandidates } from "@/lib/report-bot/image-scraper";
 import type { ReportBotSettings } from "@/lib/report-bot/settings";
 
 /** retryable: try again later. blocked: nothing will work until settings change. */
@@ -9,6 +11,15 @@ export class AiError extends Error {
   constructor(message: string, readonly retryable: boolean, readonly blocked = false) {
     super(message);
   }
+}
+
+function asAiError(error: unknown): AiError {
+  if (error instanceof AiError) return error;
+  if (error && typeof error === "object" && "retryable" in error && error instanceof Error) {
+    const typed = error as Error & { retryable: boolean; blocked?: boolean };
+    return new AiError(typed.message, Boolean(typed.retryable), Boolean(typed.blocked));
+  }
+  return new AiError(error instanceof Error ? error.message : String(error), true);
 }
 
 /** One AI call must fit inside a cron run (maxDuration 300s) with room to save the result. */
@@ -19,11 +30,14 @@ export type CandidateReport = {
   name: string;
   description: string | null;
   rules: string[];
+  slug?: string | null;
   category?: string | null;
   subtypes?: string[] | null;
   auto_reply_policy?: "never" | "normal" | "silent" | null;
   feedback_hint?: string | null;
   requires_pass_to_close?: boolean;
+  /** Today's request status when known — scrapers prefer waiting over received. */
+  requestStatus?: string | null;
 };
 
 export type AnalysisInput = {
@@ -309,6 +323,66 @@ export async function analyseOperationalReport(settings: ReportBotSettings, inpu
   if (!input.image?.length && !String(input.text ?? input.caption ?? "").trim() && !(input.bundleTexts ?? []).some((part) => String(part ?? "").trim())) {
     throw new AiError("Nothing to analyse.", false);
   }
+
+  // Dark Store completion reports: local OCR + deterministic rules only.
+  // Never fall through to Gemini/Groq for these — free-tier quotas are exhausted.
+  const scrapable = scrapableCandidates(input.candidates);
+  if (scrapable.length) {
+    let ocrText = "";
+    let ocrErrorMessage: string | null = null;
+    if (input.image?.length && input.mime) {
+      try {
+        ocrText = await extractReportImageText(settings, input.image, input.mime);
+      } catch (error) {
+        ocrErrorMessage = error instanceof Error ? error.message : "OCR failed";
+      }
+    }
+    const scraped = analyseWithImageScraper({
+      candidates: scrapable,
+      businessDate: input.businessDate,
+      caption: input.caption,
+      text: input.text,
+      bundleTexts: input.bundleTexts,
+      hasImage: Boolean(input.image?.length),
+      ocrText
+    });
+    if (scraped) return scraped;
+    if (scrapable.length === input.candidates.length) {
+      // Image present but OCR/scraper could not classify — stay on scraper path.
+      if (input.image?.length && ocrErrorMessage) {
+        const first = scrapable[0];
+        return {
+          is_report: true,
+          matched_report_type_id: first.id,
+          verdict: "needs_review",
+          confidence: 0.4,
+          checks: (first.rules ?? []).slice(0, 3).map((rule) => ({
+            rule,
+            status: "unclear" as const,
+            note: ocrErrorMessage!
+          })),
+          extracted_summary: `Local OCR could not read this screenshot (${ocrErrorMessage}).`,
+          extracted_fields: [],
+          feedback: first.feedback_hint || "Please resend a clearer screenshot.",
+          open_actions: [],
+          source: "scraper"
+        };
+      }
+      return {
+        is_report: false,
+        matched_report_type_id: null,
+        verdict: "not_report",
+        confidence: 0.8,
+        checks: [],
+        extracted_summary: "Not one of the scheduled completion reports (cycle count, expiry, stowing, DG fuel).",
+        extracted_fields: [],
+        feedback: "",
+        open_actions: [],
+        source: "scraper"
+      };
+    }
+  }
+
   let raw: unknown;
   let lastError: AiError | null = null;
 
@@ -329,10 +403,12 @@ export async function analyseOperationalReport(settings: ReportBotSettings, inpu
     if (lastError === null && raw !== undefined) {
       // success from cascade — fall through to parse
     } else if (lastError) {
-      // All Gemini models failed — try the configured fallback provider
-      const hasFallback = settings.ai_fallback_provider && settings.ai_fallback_model &&
-        settings.ai_fallback_provider !== settings.ai_provider;
-      if (hasFallback) {
+      // All Gemini models failed — try the configured fallback provider.
+      // Skip known-broken Groq qwen3-8b ids that flooded Needs attention.
+      const fallbackOk = settings.ai_fallback_provider && settings.ai_fallback_model &&
+        settings.ai_fallback_provider !== settings.ai_provider &&
+        !(settings.ai_fallback_provider === "groq" && /qwen3-8b/i.test(settings.ai_fallback_model));
+      if (fallbackOk) {
         const fallbackSettings: ReportBotSettings = { ...settings, ai_provider: settings.ai_fallback_provider!, ai_model: settings.ai_fallback_model! };
         raw = await analyseWith(settings.ai_fallback_provider!, fallbackSettings, input);
       } else {

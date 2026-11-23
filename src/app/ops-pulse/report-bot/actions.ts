@@ -527,6 +527,70 @@ export async function rejectFeedback(form: FormData) {
   }, reportBotWorkspace(form.get("workspace")));
 }
 
+/**
+ * One-shot cleanup for the Review tab: close Waiting items and dismiss Groq/AI
+ * fallout in Needs attention so the new image scraper can take over cleanly.
+ */
+export async function closeStuckReviewQueue(form: FormData) {
+  await mutate("review", async ({ authorization, companyId }) => {
+    const workspace = reportBotWorkspace(form.get("workspace"));
+    const db = reportBotDb();
+    const groups = check(await db.from("report_bot_groups").select("id,location_id,workspace").eq("company_id", companyId).eq("workspace", workspace), "Load groups") as Array<{ id: string; location_id: string | null; workspace: ReportBotWorkspace }>;
+    const groupIds = groups.filter((row) => canSeeGroup(authorization, row)).map((row) => row.id);
+    if (!groupIds.length) return { notice: "No groups in scope." };
+    const now = new Date().toISOString();
+
+    const waiting = check(await db.from("report_bot_submissions").update({
+      status: "rejected",
+      status_reason: "Closed in bulk — switching to image scraper checks.",
+      reviewed_by: authorization.userId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", companyId).in("group_id", groupIds).eq("status", "awaiting_approval").select("id"), "Close waiting") as Array<{ id: string }>;
+
+    if (waiting.length) {
+      await db.from("report_bot_outbox").update({
+        status: "cancelled",
+        status_reason: "Waiting queue closed in bulk.",
+        updated_at: now
+      }).in("submission_id", waiting.map((row) => row.id)).eq("status", "pending");
+      await db.from("report_bot_review_items").update({
+        review_status: "dismissed",
+        status_reason: "Closed in bulk — switching to image scraper checks.",
+        reviewed_by: authorization.userId,
+        reviewed_at: now,
+        updated_at: now
+      }).eq("company_id", companyId).in("group_id", groupIds).in("review_status", ["draft_ready", "observe_only", "approved"]);
+    }
+
+    const failed = check(await db.from("report_bot_submissions").update({
+      status: "rejected",
+      status_reason: "Dismissed AI provider failure — image scraper is now primary for completion reports.",
+      reviewed_by: authorization.userId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", companyId).in("group_id", groupIds).in("status", ["failed", "blocked"]).select("id"), "Dismiss failed") as Array<{ id: string }>;
+
+    // Drop broken Groq fallback so cascade does not keep writing Needs attention rows.
+    const settings = check(await db.from("report_bot_settings").select("ai_fallback_provider,ai_fallback_model").eq("company_id", companyId).maybeSingle(), "Load AI settings") as {
+      ai_fallback_provider: string | null;
+      ai_fallback_model: string | null;
+    } | null;
+    if (settings?.ai_fallback_provider === "groq" || /qwen/i.test(String(settings?.ai_fallback_model ?? ""))) {
+      check(await db.from("report_bot_settings").update({
+        ai_fallback_provider: null,
+        ai_fallback_model: null,
+        updated_by: authorization.userId,
+        updated_at: now
+      }).eq("company_id", companyId), "Clear Groq fallback");
+    }
+
+    return {
+      notice: `Closed ${waiting.length} waiting and dismissed ${failed.length} failed checks. New completion photos use the image scraper; reminders stop on pass.`
+    };
+  }, reportBotWorkspace(form.get("workspace")));
+}
+
 export async function reanalyseSubmission(form: FormData) {
   await mutate("review", async ({ authorization, companyId }) => {
     const submission = await scopedSubmission(authorization, companyId, field(form, "id"));

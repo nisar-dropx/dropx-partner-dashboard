@@ -1,6 +1,8 @@
 import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import { AI_TIMEOUT_MS, AiError, analyseOperationalReport, type CandidateReport } from "@/lib/report-bot/ai";
+import { OCR_BUDGET_MS } from "@/lib/report-bot/image-ocr";
+import { scrapableCandidates } from "@/lib/report-bot/image-scraper";
 import { fetchReportImage } from "@/lib/report-bot/image";
 import {
   canAutoSendToGroup,
@@ -14,10 +16,13 @@ import {
   randomDelaySeconds,
   reviewStatusFor,
   senderLabel,
+  shouldCompleteRequest,
   sniffImageType,
   type GroupMode
 } from "@/lib/report-bot/logic";
 import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+
+const TERMINAL_REVIEW = new Set(["dismissed", "sent", "approved", "rejected", "cancelled"]);
 
 type InboundRow = {
   id: string;
@@ -49,7 +54,7 @@ function must<T>(result: { data: T | null; error: { message: string } | null }, 
 async function candidatesForGroup(settings: ReportBotSettings, groupId: string, businessDate: string, workspace: ReportBotWorkspace) {
   const db = reportBotDb();
   const requests = must(await db.from("report_bot_requests")
-    .select("id,status,report_type_id, report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
+    .select("id,status,report_type_id, report:report_bot_report_types(id,name,description,rules,slug,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", groupId)
     .eq("business_date", businessDate)
     .in("status", ["pending", "overdue", "received", "missed"]), "Load requests") as unknown as Array<{
@@ -57,49 +62,43 @@ async function candidatesForGroup(settings: ReportBotSettings, groupId: string, 
       report: CandidateReport & { is_active: boolean; requires_pass_to_close?: boolean } | null;
     }>;
   const open = requests.filter((row) => row.report?.is_active);
+  // Prefer waiting requests when the same report type appears more than once.
+  open.sort((a, b) => Number(a.status === "received") - Number(b.status === "received"));
   if (open.length) {
     return {
       requests: open,
-      candidates: [...new Map(open.map((row) => [row.report!.id, {
-        id: row.report!.id,
-        name: row.report!.name,
-        description: row.report!.description,
-        rules: row.report!.rules ?? [],
-        category: row.report!.category,
-        subtypes: row.report!.subtypes,
-        auto_reply_policy: row.report!.auto_reply_policy,
-        feedback_hint: row.report!.feedback_hint,
-        requires_pass_to_close: row.report!.requires_pass_to_close
-      }])).values()] as CandidateReport[]
+      candidates: [...new Map(open.map((row) => [row.report!.id, toCandidate(row.report!, row.status)])).values()] as CandidateReport[]
     };
   }
   // Event-driven reports (load receipt, incidents) may have no open daily request.
   // Prefer types linked to this group via any schedule, then all active company types.
   const scheduled = must(await db.from("report_bot_schedules")
-    .select("report:report_bot_report_types(id,name,description,rules,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
+    .select("report:report_bot_report_types(id,name,description,rules,slug,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", groupId), "Load group schedules") as unknown as Array<{ report: CandidateReport & { is_active: boolean } | null }>;
   const fromSchedules = scheduled.flatMap((row) => (row.report?.is_active ? [toCandidate(row.report)] : []));
   if (fromSchedules.length) return { requests: [], candidates: [...new Map(fromSchedules.map((row) => [row.id, row])).values()] };
   // Classification uses the company catalog even when no schedule exists yet (event-driven reports).
   const types = must(await db.from("report_bot_report_types")
-    .select("id,name,description,rules,category,subtypes,auto_reply_policy,feedback_hint,is_active")
+    .select("id,name,description,rules,slug,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close,is_active")
     .eq("company_id", settings.company_id)
     .eq("workspace", workspace)
     .eq("is_active", true), "Load report types") as Array<CandidateReport & { is_active: boolean }>;
-  return { requests: [], candidates: types.map(toCandidate) };
+  return { requests: [], candidates: types.map((row) => toCandidate(row)) };
 }
 
-function toCandidate(row: CandidateReport & { is_active?: boolean }): CandidateReport {
+function toCandidate(row: CandidateReport & { is_active?: boolean }, requestStatus?: string | null): CandidateReport {
   return {
     id: row.id,
     name: row.name,
     description: row.description,
     rules: row.rules ?? [],
+    slug: row.slug,
     category: row.category,
     subtypes: row.subtypes,
     auto_reply_policy: row.auto_reply_policy,
     feedback_hint: row.feedback_hint,
-    requires_pass_to_close: row.requires_pass_to_close
+    requires_pass_to_close: row.requires_pass_to_close,
+    requestStatus: requestStatus ?? null
   };
 }
 
@@ -188,7 +187,6 @@ function truncateTitle(value: string) {
 /** Correlate + classify a newly stored inbound event (text or image metadata). */
 export async function processInboundEvent(settings: ReportBotSettings, eventId: string, deadline: number) {
   if (settings.mode === "off") return;
-  if (Date.now() >= deadline - AI_TIMEOUT_MS - 20_000) return;
   const db = reportBotDb();
   const event = must(await db.from("report_bot_inbound_events").select("*").eq("id", eventId).maybeSingle(), "Load inbound event") as InboundRow | null;
   if (!event) return;
@@ -203,32 +201,42 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
   const storedMode: GroupMode = group.mode === "review" || group.mode === "live" ? group.mode : "observe";
   const groupMode = effectiveGroupModeForReview(storedMode, group.group_name, group.workspace);
 
+  const businessDate = localClock(new Date(event.message_at), settings.timezone).date;
+  const { requests, candidates } = await candidatesForGroup(settings, event.group_id, businessDate, group.workspace);
+  if (!candidates.length) return;
+
+  // Completion scrapers only need OCR budget; mixed AI catalogs still reserve a full AI slot.
+  const scrapableOnly = scrapableCandidates(candidates).length === candidates.length;
+  const reserveMs = scrapableOnly ? OCR_BUDGET_MS : AI_TIMEOUT_MS + 20_000;
+  if (Date.now() >= deadline - reserveMs) return;
+
   const windowMinutes = Number(settings.correlation_window_minutes ?? 10);
   let bundleId = event.bundle_id;
   if (!bundleId) {
-    const since = new Date(new Date(event.message_at).getTime() - windowMinutes * 60_000).toISOString();
-    // PostgREST eq(null) does not match NULL rows; use is() for unknown senders.
-    const peerBase = db.from("report_bot_inbound_events")
-      .select("id,bundle_id,message_at")
-      .eq("group_id", event.group_id)
-      .gte("message_at", since)
-      .neq("id", event.id)
-      .order("message_at", { ascending: false })
-      .limit(20);
-    const peers = must(
-      await (event.sender_jid == null ? peerBase.is("sender_jid", null) : peerBase.eq("sender_jid", event.sender_jid)),
-      "Load peer events"
-    ) as Array<{ id: string; bundle_id: string | null; message_at: string }>;
-    bundleId = findCorrelationBundle(peers, new Date(event.message_at), windowMinutes) ?? event.id;
+    if (scrapableOnly) {
+      // Bulk screenshots / number replies must not share one review — each event is its own bundle.
+      bundleId = event.id;
+    } else {
+      const since = new Date(new Date(event.message_at).getTime() - windowMinutes * 60_000).toISOString();
+      // PostgREST eq(null) does not match NULL rows; use is() for unknown senders.
+      const peerBase = db.from("report_bot_inbound_events")
+        .select("id,bundle_id,message_at")
+        .eq("group_id", event.group_id)
+        .gte("message_at", since)
+        .neq("id", event.id)
+        .order("message_at", { ascending: false })
+        .limit(20);
+      const peers = must(
+        await (event.sender_jid == null ? peerBase.is("sender_jid", null) : peerBase.eq("sender_jid", event.sender_jid)),
+        "Load peer events"
+      ) as Array<{ id: string; bundle_id: string | null; message_at: string }>;
+      bundleId = findCorrelationBundle(peers, new Date(event.message_at), windowMinutes) ?? event.id;
+    }
     must(await db.from("report_bot_inbound_events").update({ bundle_id: bundleId }).eq("id", event.id), "Save bundle");
   }
 
-  const bundle = must(await db.from("report_bot_inbound_events")
-    .select("*")
-    .eq("bundle_id", bundleId)
-    .order("message_at", { ascending: true }), "Load bundle") as InboundRow[];
-
   // One open review per bundle. If later evidence joins the same bundle, reclassify.
+  // A closed review must not block a later bulk screenshot that landed in the same window.
   const existing = await db.from("report_bot_review_items")
     .select("id,review_status,primary_event_id")
     .eq("company_id", settings.company_id)
@@ -237,18 +245,29 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
   if (existing.data?.id) {
     const open = ["observe_only", "draft_ready"].includes(existing.data.review_status);
     const newEvidence = existing.data.primary_event_id !== event.id;
-    if (!open || !newEvidence) return;
-    await db.from("report_bot_review_audit").delete().eq("review_id", existing.data.id);
-    await db.from("report_bot_actions").update({ source_review_id: null }).eq("source_review_id", existing.data.id);
-    must(await db.from("report_bot_review_items").delete().eq("id", existing.data.id), "Clear stale bundle review");
+    if (open && newEvidence) {
+      await db.from("report_bot_review_audit").delete().eq("review_id", existing.data.id);
+      await db.from("report_bot_actions").update({ source_review_id: null }).eq("source_review_id", existing.data.id);
+      must(await db.from("report_bot_review_items").delete().eq("id", existing.data.id), "Clear stale bundle review");
+    } else if (TERMINAL_REVIEW.has(existing.data.review_status) && (event.media_ref || scrapableOnly) && newEvidence) {
+      bundleId = event.id;
+      must(await db.from("report_bot_inbound_events").update({ bundle_id: bundleId }).eq("id", event.id), "Isolate bulk event");
+    } else {
+      return;
+    }
   }
 
-  const businessDate = localClock(new Date(event.message_at), settings.timezone).date;
-  const { requests, candidates } = await candidatesForGroup(settings, event.group_id, businessDate, group.workspace);
-  if (!candidates.length) return;
+  // Reload after possible isolation so we do not re-analyse a sibling's screenshot.
+  const activeBundle = must(await db.from("report_bot_inbound_events")
+    .select("*")
+    .eq("bundle_id", bundleId)
+    .order("message_at", { ascending: true }), "Load active bundle") as InboundRow[];
 
-  const bundleTexts = bundle.flatMap((row) => [row.text_body, row.caption].filter((part): part is string => Boolean(part?.trim())));
-  const imageRow = [...bundle].reverse().find((row) => row.media_ref);
+  const bundleTexts = activeBundle.flatMap((row) => [row.text_body, row.caption].filter((part): part is string => Boolean(part?.trim())));
+  // Prefer this event's own image when present (bulk receive); else latest media in the bundle.
+  const imageRow = (event.media_ref ? event : null)
+    ?? [...activeBundle].reverse().find((row) => row.media_ref)
+    ?? null;
   let image: Uint8Array | null = null;
   let mime: "image/jpeg" | "image/png" | "image/webp" | null = null;
   if (imageRow?.media_ref) {
@@ -322,8 +341,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     open_actions: analysis.open_actions,
     feedback_draft: feedback,
     ai_result: analysis,
-    ai_provider: settings.ai_provider,
-    ai_model: settings.ai_model,
+    ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
+    ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
     status_reason: decision === "silent" ? "Not an operational report." : null,
     updated_at: nowIso()
   }).select("id").single(), "Create review item") as { id: string };
@@ -334,10 +353,7 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     await upsertActionsFromAnalysis(settings, event.group_id, inserted.id, event.id, analysis);
     await tryLinkTicketClosure(settings, event.group_id, event.id, inserted.id, analysis, reportType?.category ?? null);
   }
-  // Silent policy: no feedback is ever sent, so requires_pass_to_close would loop reminders forever.
-  // Always complete (stop reminders) when the report type won't reply anyway.
-  const isSilent = reportType?.auto_reply_policy === "silent" || decision === "silent";
-  const complete = analysis.is_report && (!reportType || isSilent || reportType.requires_pass_to_close !== true || analysis.verdict === "pass");
+  const complete = shouldCompleteRequest(analysis, reportType);
   if (request && complete) {
     must(await db.from("report_bot_requests").update({
       status: "received",
@@ -349,22 +365,38 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
 
   // Keep legacy submission row in sync when this bundle has an image submission.
   if (imageRow?.submission_id) {
-    const submissionStatus = decision === "silent" ? "ignored" : decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode) ? "queued_to_send" : "awaiting_approval";
+    // Scraper pass on completion reports: stop reminders and leave the Waiting queue
+    // without requiring a human click (feedback is optional noise once cleared).
+    const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
+    const autoSend = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
+    const submissionStatus = decision === "silent" || scraperPassClose
+      ? "ignored"
+      : autoSend
+        ? "queued_to_send"
+        : "awaiting_approval";
     await db.from("report_bot_submissions").update({
       status: submissionStatus,
+      status_reason: scraperPassClose ? "Passed by image scrape — reminders stopped for today." : decision === "silent" ? "Not a report image." : null,
       report_type_id: reportType?.id ?? null,
       request_id: request?.id ?? null,
-      ai_provider: settings.ai_provider,
-      ai_model: settings.ai_model,
+      ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
+      ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
       ai_result: analysis,
       verdict: analysis.verdict,
       confidence: analysis.confidence,
-      feedback_text: feedback,
+      feedback_text: scraperPassClose ? null : feedback,
       review_id: inserted.id,
       locked_until: null,
       updated_at: nowIso()
     }).eq("id", imageRow.submission_id).in("status", ["queued", "awaiting_approval"]);
-    if (decision === "auto_send" && feedback && canAutoSendToGroup(settings.mode, groupMode)) {
+    if (scraperPassClose) {
+      await db.from("report_bot_review_items").update({
+        review_status: "dismissed",
+        status_reason: "Passed by image scrape — reminders stopped for today.",
+        feedback_draft: null,
+        updated_at: nowIso()
+      }).eq("id", inserted.id);
+    } else if (autoSend && feedback) {
       const mention = mentionFor(imageRow.sender_jid);
       const delay = randomDelaySeconds(settings.reply_delay_min_seconds, settings.reply_delay_max_seconds);
       await db.from("report_bot_outbox").upsert({

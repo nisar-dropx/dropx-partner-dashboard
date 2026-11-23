@@ -35,11 +35,12 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { canSeeGroup } from "@/lib/report-bot/access";
 import { formatClock, localClock, type AnalysisCheck, type ExtractedField } from "@/lib/report-bot/logic";
-import { aiKeyConfigured, aiKeyName, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+import { aiKeyConfigured, aiProviderLabel, loadReportBotSettings, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import {
   approveFeedback,
   approveReviewItem,
   closeOpenAction,
+  closeStuckReviewQueue,
   dismissReviewItem,
   duplicateGroupConfiguration,
   installLastMileTemplates,
@@ -209,7 +210,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           </Link>
           <Link className={s.tile} href={`${SETUP_HREF}#ai`}>
             <span className={`${s.tileIcon} ${s[aiReady ? "good" : "bad"]}`}><Sparkles size={15} aria-hidden /></span>
-            <span><span className={s.tileLabel}>AI check</span><div className={s.tileValue}>{aiReady ? `${aiProviderLabel(settings.ai_provider)} ready` : "Key missing"}</div><div className={s.tileHint}>{aiReady ? settings.ai_model : `Add ${aiKeyName(settings.ai_provider)} in Vercel`}</div></span>
+            <span><span className={s.tileLabel}>Completion checks</span><div className={s.tileValue}>Local OCR scrape</div><div className={s.tileHint}>Cycle / expiry / stowing / DG — no Gemini quota{aiReady ? ` · other types: ${aiProviderLabel(settings.ai_provider)}` : ""}</div></span>
           </Link>
         </div>}
 
@@ -518,6 +519,16 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
                   <ActionButton className={s.button} confirm={`Post the AI's reply for all ${waitTotal} waiting photos?`}><Send size={15} aria-hidden />Send all waiting</ActionButton>
                 </BotForm>
               ) : null}
+              {(waitTotal > 0 || attnTotal > 0) ? (
+                <BotForm workspace={workspace} action={closeStuckReviewQueue}>
+                  <ActionButton
+                    className={`${s.button} ${s.danger}`}
+                    confirm={`Close all ${waitTotal} waiting items and dismiss ${attnTotal} Needs attention rows? Reminders already received stay stopped; new photos use the image scraper.`}
+                  >
+                    Close waiting &amp; clear AI fails
+                  </ActionButton>
+                </BotForm>
+              ) : null}
               {workspace === "dark_store" ? <BotForm workspace={workspace} action={setAutoReply}>
                 <input type="hidden" name="auto" value={auto ? "off" : "on"} />
                 <ActionButton className={`${s.button} ${auto ? "" : s.primary}`}><Sparkles size={15} aria-hidden />{auto ? "Turn auto-reply off" : "Turn auto-reply on"}</ActionButton>
@@ -530,7 +541,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         title="Waiting for review"
         icon={<Inbox size={18} aria-hidden />}
         description={settings.mode === "live"
-          ? "Compare the AI's reading with the photo, adjust the reply if needed, and approve. It's posted in the group within seconds."
+          ? "Completion reports (cycle count, expiry, stowing, DG) are scraped from the image/text. Pass closes the day automatically; other replies wait here for approval."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
         action={waitTotal > 0 ? <span className={s.count}>{waitTotal}</span> : null}
       >

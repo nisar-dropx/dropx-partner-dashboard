@@ -24,6 +24,7 @@ import {
   renderTemplate,
   reviewStatusFor,
   senderLabel,
+  shouldCompleteRequest,
   sniffImageType,
   truncateText
 } from "./logic.ts";
@@ -146,6 +147,21 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T10:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), "a");
   assert.equal(findCorrelationBundle([{ id: "a", bundle_id: null, message_at: "2026-10-21T09:00:00Z" }], new Date("2026-10-21T10:05:00Z"), 10), null);
   assert.ok(previewReminderSlots(["09:00", "10:00", "15:00"], "18:00", 10 * 60).upcoming.length >= 1);
+});
+
+test("completion reports close only on pass; silent does not short-circuit that", () => {
+  const pass = { is_report: true, verdict: "pass" };
+  const fail = { is_report: true, verdict: "fail" };
+  const unclear = { is_report: true, verdict: "needs_review" };
+  const notReport = { is_report: false, verdict: "not_report" };
+  const completion = { requires_pass_to_close: true };
+  const ordinary = { requires_pass_to_close: false };
+  assert.equal(shouldCompleteRequest(pass, completion), true);
+  assert.equal(shouldCompleteRequest(fail, completion), false);
+  assert.equal(shouldCompleteRequest(unclear, completion), false);
+  assert.equal(shouldCompleteRequest(notReport, completion), false);
+  assert.equal(shouldCompleteRequest(fail, ordinary), true, "non-completion types close on any match");
+  assert.equal(shouldCompleteRequest(pass, null), true);
 });
 
 test("feedback message uses the configured layout and length limit", () => {

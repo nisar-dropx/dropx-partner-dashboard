@@ -1,6 +1,8 @@
 import type { ReportBotWorkspace } from "./workspace";
 import "server-only";
 import { AI_TIMEOUT_MS, AiError, analyseReportImage, type CandidateReport } from "@/lib/report-bot/ai";
+import { OCR_BUDGET_MS, OcrError } from "@/lib/report-bot/image-ocr";
+import { scrapableCandidates } from "@/lib/report-bot/image-scraper";
 import { fetchReportImage } from "@/lib/report-bot/image";
 import { pruneInboundEvents, refreshDailySummary } from "@/lib/report-bot/events";
 import {
@@ -19,6 +21,7 @@ import {
   retryDelayMinutes,
   reviewStatusFor,
   senderLabel,
+  shouldCompleteRequest,
   sniffImageType,
   type GroupMode,
   type LocalClock
@@ -195,32 +198,43 @@ async function candidatesForSubmission(settings: ReportBotSettings, submission: 
   // "missed" is included: an image posted before midnight but analysed after the
   // day rolled over still counts for the day it was posted.
   const requests = must(await db.from("report_bot_requests")
-    .select("id,status,report_type_id,business_date, report:report_bot_report_types(id,name,description,rules,is_active)")
+    .select("id,status,report_type_id,business_date, report:report_bot_report_types(id,name,description,rules,slug,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", submission.group_id)
     .eq("business_date", businessDate)
     .in("status", ["pending", "overdue", "received", "missed"]), "Load open requests for image") as unknown as Array<{
       id: string; status: string; report_type_id: string; business_date: string;
-      report: { id: string; name: string; description: string | null; rules: string[]; is_active: boolean } | null;
+      report: CandidateReport & { is_active: boolean } | null;
     }>;
   const open = requests.filter((request) => request.report?.is_active);
   // Prefer requests still waiting; a later image for a received request is a resubmission.
   open.sort((a, b) => Number(a.status === "received") - Number(b.status === "received"));
+  const toCandidate = (report: CandidateReport, requestStatus?: string | null): CandidateReport => ({
+    id: report.id,
+    name: report.name,
+    description: report.description,
+    rules: report.rules ?? [],
+    slug: report.slug,
+    category: report.category,
+    subtypes: report.subtypes,
+    auto_reply_policy: report.auto_reply_policy,
+    feedback_hint: report.feedback_hint,
+    requires_pass_to_close: report.requires_pass_to_close,
+    requestStatus: requestStatus ?? null
+  });
   if (open.length) {
     return {
       requests: open,
-      candidates: [...new Map(open.map((request) => [request.report!.id, {
-        id: request.report!.id, name: request.report!.name, description: request.report!.description, rules: request.report!.rules ?? []
-      }])).values()] as CandidateReport[]
+      candidates: [...new Map(open.map((request) => [request.report!.id, toCandidate(request.report!, request.status)])).values()] as CandidateReport[]
     };
   }
   if (!settings.accept_without_request) return { requests: [], candidates: [] as CandidateReport[] };
   const schedules = must(await db.from("report_bot_schedules")
-    .select("report:report_bot_report_types(id,name,description,rules,is_active)")
+    .select("report:report_bot_report_types(id,name,description,rules,slug,is_active,category,subtypes,auto_reply_policy,feedback_hint,requires_pass_to_close)")
     .eq("group_id", submission.group_id)
     .eq("is_active", true), "Load group report types") as unknown as Array<{ report: CandidateReport & { is_active: boolean } | null }>;
   return {
     requests: [],
-    candidates: schedules.flatMap((row) => (row.report?.is_active ? [{ id: row.report.id, name: row.report.name, description: row.report.description, rules: row.report.rules ?? [] }] : []))
+    candidates: schedules.flatMap((row) => (row.report?.is_active ? [toCandidate(row.report)] : []))
   };
 }
 
@@ -228,9 +242,10 @@ async function candidatesForSubmission(settings: ReportBotSettings, submission: 
 async function settleSubmissionFailure(submission: SubmissionRow, error: unknown) {
   const db = reportBotDb();
   const message = error instanceof Error ? error.message : "Unknown error";
-  const blocked = (error instanceof AiError || error instanceof WorkerError) && error.blocked;
+  const typed = error instanceof AiError || error instanceof WorkerError || error instanceof OcrError ? error : null;
+  const blocked = Boolean(typed && "blocked" in typed && typed.blocked);
   const workerDown = error instanceof WorkerError && error.unavailable;
-  const retryable = error instanceof AiError || error instanceof WorkerError ? error.retryable : true;
+  const retryable = typed ? typed.retryable : true;
   const finalAttempt = submission.attempts >= MAX_SUBMISSION_ATTEMPTS;
   const status = blocked ? "blocked" : workerDown || (retryable && !finalAttempt) ? "queued" : "failed";
   // Blocked rows wait for a settings fix and an unreachable worker is not the image's
@@ -244,14 +259,15 @@ async function settleSubmissionFailure(submission: SubmissionRow, error: unknown
     locked_until: null,
     updated_at: nowIso()
   }).eq("id", submission.id), "Record submission failure");
-  return giveBack;
+  // Stop the run when auth/config is broken — every following image would fail the same way.
+  return giveBack || blocked;
 }
 
 export async function processSubmissions(settings: ReportBotSettings, deadline: number) {
   const db = reportBotDb();
   let processed = 0;
-  // Only start an image when a full AI call (plus download and save) still fits in this run.
-  while (Date.now() < deadline - AI_TIMEOUT_MS - 30_000) {
+  // Local OCR scrapers are much faster than AI — keep draining while an OCR slot still fits.
+  while (Date.now() < deadline - OCR_BUDGET_MS) {
     const claimed = must(await db.rpc("report_bot_claim_submissions", { p_company_id: settings.company_id, p_limit: 1, p_lease_seconds: 240 }), "Claim submissions") as SubmissionRow[];
     const submission = claimed[0];
     if (!submission) break;
@@ -274,6 +290,18 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "No report was scheduled for this group that day.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
         continue;
       }
+      const scrapableOnly = scrapableCandidates(candidates).length === candidates.length;
+      // AI path still needs a full model slot; release the claim for the next cron if not enough time.
+      if (!scrapableOnly && Date.now() >= deadline - AI_TIMEOUT_MS - 30_000) {
+        must(await db.from("report_bot_submissions").update({
+          status: "queued",
+          locked_until: null,
+          next_attempt_at: nowIso(),
+          attempts: Math.max(submission.attempts - 1, 0),
+          updated_at: nowIso()
+        }).eq("id", submission.id), "Defer AI submission");
+        break;
+      }
       const image = await fetchReportImage(settings, submission.media_ref, submission.wa_message_record);
       const mime = sniffImageType(image);
       if (!mime) throw new AiError("The stored image could not be read.", false);
@@ -294,7 +322,8 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         // One quick retry for a transient failure (malformed reply, a 5xx), instead of making
         // the sender wait for the next run. Quota limits won't clear in seconds, so skip those.
         const transient = error instanceof AiError && error.retryable && !error.blocked && !/quota/i.test(error.message);
-        if (!transient || Date.now() > deadline - AI_TIMEOUT_MS - 40_000) throw error;
+        const retryBudget = scrapableOnly ? OCR_BUDGET_MS : AI_TIMEOUT_MS + 40_000;
+        if (!transient || Date.now() > deadline - retryBudget) throw error;
         await new Promise((resolve) => setTimeout(resolve, 2000));
         analysis = await analyseReportImage(settings, input);
       }
@@ -317,23 +346,27 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         checks: analysis.checks
       });
       const autoOk = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
-      const status = decision === "silent" ? "ignored" : autoOk ? "queued_to_send" : "awaiting_approval";
+      const complete = shouldCompleteRequest(analysis, reportType);
+      const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
+      const status = decision === "silent" || scraperPassClose ? "ignored" : autoOk ? "queued_to_send" : "awaiting_approval";
       must(await db.from("report_bot_submissions").update({
         status,
-        status_reason: decision === "silent" ? "Not a report image." : null,
+        status_reason: scraperPassClose
+          ? "Passed by image scrape — reminders stopped for today."
+          : decision === "silent" ? "Not a report image." : null,
         request_id: request?.id ?? null,
         report_type_id: reportType?.id ?? null,
-        ai_provider: settings.ai_provider,
-        ai_model: settings.ai_model,
+        ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
+        ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
         ai_result: analysis,
         verdict: analysis.verdict,
         confidence: analysis.confidence,
-        feedback_text: feedback,
+        feedback_text: scraperPassClose ? null : feedback,
         locked_until: null,
         updated_at: nowIso()
       }).eq("id", submission.id), "Save analysis");
       // Best-effort review row for the legacy image path (inbound table may already have one).
-      const reviewStatus = reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
+      const reviewStatus = scraperPassClose ? "dismissed" : reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
       const reviewInsert = await db.from("report_bot_review_items").insert({
         company_id: settings.company_id,
         group_id: submission.group_id,
@@ -346,17 +379,18 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         reason: analysis.extracted_summary,
         extracted_facts: analysis.extracted_fields,
         open_actions: analysis.open_actions,
-        feedback_draft: feedback,
+        feedback_draft: scraperPassClose ? null : feedback,
         ai_result: analysis,
-        ai_provider: settings.ai_provider,
-        ai_model: settings.ai_model,
+        ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
+        ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
+        status_reason: scraperPassClose ? "Passed by image scrape — reminders stopped for today." : null,
         updated_at: nowIso()
       });
       if (reviewInsert.error && !/does not exist|schema cache/i.test(reviewInsert.error.message)) {
         throw new Error(`Save review item: ${reviewInsert.error.message}`);
       }
-      if (request && analysis.is_report) {
-        // A resubmission updates the verdict but keeps the first time the report arrived.
+      if (request && complete) {
+        // Completion reports only stop reminders on pass (or silent types).
         must(await db.from("report_bot_requests").update({
           status: "received",
           ...(request.status === "received" ? {} : { received_at: submission.message_at }),
@@ -364,7 +398,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
           updated_at: nowIso()
         }).eq("id", request.id).in("status", ["pending", "overdue", "received", "missed"]), "Mark request received");
       }
-      if (autoOk && feedback) await queueFeedback(settings, submission, feedback, null);
+      if (autoOk && feedback && !scraperPassClose) await queueFeedback(settings, submission, feedback, null);
     } catch (error) {
       if (await settleSubmissionFailure(submission, error)) break;
     }

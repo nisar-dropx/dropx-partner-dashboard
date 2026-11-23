@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: dropx-report-image-ocr
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: REPORT_IMAGE_OCR_TOKEN
+        generateValue: true
