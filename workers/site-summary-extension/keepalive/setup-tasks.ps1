@@ -9,11 +9,11 @@
 
 $scriptDir = $PSScriptRoot
 
-Write-Host ""
-Write-Host "DropX WorkSpaces Task Setup (Local)" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
+Write-Host ''
+Write-Host 'DropX WorkSpaces Task Setup (Local)' -ForegroundColor Cyan
+Write-Host '=====================================' -ForegroundColor Cyan
 Write-Host "Script folder: $scriptDir" -ForegroundColor Gray
-Write-Host ""
+Write-Host ''
 
 $keepAliveScript = Join-Path $scriptDir "keepalive.ps1"
 $lockAlertScript = Join-Path $scriptDir "lock-alert.ps1"
@@ -87,17 +87,17 @@ Register-DropXTask `
   -IntervalMinutes 5 `
   -Description "DropX: Sends WhatsApp alert if WorkSpaces VM becomes locked"
 
-Write-Host ""
-Write-Host "Done! Both tasks registered — fully silent, no window flash." -ForegroundColor Green
-Write-Host ""
-Write-Host "IMPORTANT: Edit lock-alert.ps1 and fill in your WA_TOKEN." -ForegroundColor Yellow
-Write-Host ""
-Write-Host "To verify:" -ForegroundColor Cyan
-Write-Host "  schtasks /query /tn DropX-WorkSpaces-KeepAlive"
-Write-Host "  schtasks /query /tn DropX-WorkSpaces-LockAlert"
-Write-Host ""
-Write-Host "To run immediately:"
-Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
-Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-LockAlert'"
-Write-Host ""
-Write-Host 'To check keepalive log: open keepalive.log in the keepalive folder'
+Write-Host ''
+Write-Host 'Done! Both tasks registered - fully silent, no window flash.' -ForegroundColor Green
+Write-Host ''
+Write-Host 'IMPORTANT: Edit lock-alert.ps1 and fill in your WA_TOKEN.' -ForegroundColor Yellow
+Write-Host ''
+Write-Host 'To verify:' -ForegroundColor Cyan
+Write-Host '  schtasks /query /tn DropX-WorkSpaces-KeepAlive'
+Write-Host '  schtasks /query /tn DropX-WorkSpaces-LockAlert'
+Write-Host ''
+Write-Host 'To run immediately:'
+Write-Host '  Start-ScheduledTask DropX-WorkSpaces-KeepAlive'
+Write-Host '  Start-ScheduledTask DropX-WorkSpaces-LockAlert'
+Write-Host ''
+Write-Host 'To check log: open keepalive.log in the keepalive folder'
