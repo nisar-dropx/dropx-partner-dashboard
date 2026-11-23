@@ -10616,6 +10616,7 @@ body {
 .dx-advance-modal input, .dx-advance-modal textarea { width: 100%; padding: 12px; border: 1px solid #d8d3cb; border-radius: 10px; background: #fff; color: #202124; font: inherit; }
 .dx-advance-modal input:disabled { background: #f3f1ed; color: #737373; }
 .dx-advance-modal .submit { margin-top: 5px; padding: 13px; border: 0; border-radius: 11px; background: #df2f2f; color: #fff; font-weight: 700; }
+.dx-advance-hint { color: #c0392b; font-size: 12px; font-weight: 400; margin-top: 2px; }
 @media (max-width: 560px) {
   .dx-advances > header { grid-template-columns: 1fr; padding: 15px; }
   .dx-advances > header button { justify-content: center; width: 100%; padding: 11px 12px; }
@@ -12857,7 +12858,8 @@ body {
 }
 
 .dx-auth-panel form > button:disabled,
-.dx-save:disabled {
+.dx-save:disabled,
+.dx-advance-modal .submit:disabled {
   cursor: not-allowed;
   box-shadow: none;
   filter: saturate(.35);

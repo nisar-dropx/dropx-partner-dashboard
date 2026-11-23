@@ -318,6 +318,7 @@ export function ConnectAdvances({ account, active = true, readOnly = false }: { 
                 rows={4}
                 value={purpose}
               />
+              {purpose.length > 0 && purpose.trim().length < 10 ? <small className="dx-advance-hint">Please describe your reason (at least 10 characters)</small> : null}
             </label>
             <div className="dx-advance-modal-actions">
               <button className="ghost" disabled={saving} onClick={closeForm} type="button">Cancel</button>
