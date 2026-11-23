@@ -37,11 +37,20 @@ export async function GET(request: Request) {
     ? await supabaseAdmin.rpc(family ? "payment_delivery_identity_roster_v2" : "payment_delivery_identity_roster", { p_company_id: company, p_station_id: location, p_work_date: date })
     : await supabaseAdmin.rpc("payment_adhoc_da_roster", { p_company_id: company, p_station_id: location });
   if (result.error) return Response.json({ error: "Unable to load the associate roster. Please retry." }, { status: 503 });
+  const manualWorkforce = station.data.station_code.trim().toUpperCase() === "HBSC"
+    ? (await supabaseAdmin
+      .from("workforce")
+      .select("id,full_name,dropx_id")
+      .eq("company_id", company)
+      .eq("location_id", location)
+      .is("deleted_at", null)
+      .order("full_name")).data ?? []
+    : [];
   return Response.json({ client, options: (result.data ?? []).map((row: any) => ({
     value: family ? row.provider_member_id : row.shipment_id,
     ...(family ? { helper: (row.station_codes ?? []).join(" / ") } : {}),
     label: strict
       ? `${row.workforce_name || row.associate_name || "Unnamed associate"} — ${row.dropx_id || "No DropX ID"} — ${row.provider_member_id}`
       : `${row.associate_name || "Unnamed associate"} — ${row.provider_member_id}`
-  })) }, { headers: { "Cache-Control": "no-store" } });
+  })), manualWorkforce: manualWorkforce.map((row: any) => ({ value: row.dropx_id, label: `${row.full_name} — ${row.dropx_id}` })) }, { headers: { "Cache-Control": "no-store" } });
 }
