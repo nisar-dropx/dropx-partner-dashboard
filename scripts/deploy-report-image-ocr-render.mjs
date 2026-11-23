@@ -1,15 +1,19 @@
 /**
- * Create or redeploy the Python Tesseract OCR service on Render.
+ * Create or redeploy the Python Tesseract OCR service on Render, then wire
+ * REPORT_IMAGE_OCR_URL / REPORT_IMAGE_OCR_TOKEN into local .env (and print
+ * Vercel env commands).
  *
- * Usage (from repo root, after the OCR folder is on GitHub main):
+ * Usage (from repo root, after workers/report-image-ocr is on GitHub main):
  *   node scripts/deploy-report-image-ocr-render.mjs
  *
  * Reads render_api_key from .env
  */
-import { readFileSync, randomBytes } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
+const envPath = ".env";
 const env = Object.fromEntries(
-  readFileSync(".env", "utf8")
+  readFileSync(envPath, "utf8")
     .split(/\r?\n/)
     .filter((line) => line && !line.startsWith("#"))
     .map((line) => {
@@ -26,6 +30,7 @@ if (!apiKey) {
 
 const OWNER_ID = "tea-d9od66u417fc73f2ovf0";
 const SERVICE_NAME = "dropx-report-image-ocr";
+const DEFAULT_URL = "https://dropx-report-image-ocr.onrender.com";
 const headers = {
   authorization: `Bearer ${apiKey}`,
   accept: "application/json",
@@ -33,7 +38,7 @@ const headers = {
 };
 
 async function listServices() {
-  const response = await fetch("https://api.render.com/v1/services?limit=50", { headers });
+  const response = await fetch("https://api.render.com/v1/services?limit=100", { headers });
   if (!response.ok) throw new Error(`List services: ${response.status} ${await response.text()}`);
   const rows = await response.json();
   return rows.map((row) => row.service);
@@ -60,7 +65,8 @@ async function createService(token) {
         healthCheckPath: "/health",
         numInstances: 1,
         envVars: [
-          { key: "REPORT_IMAGE_OCR_TOKEN", value: token }
+          { key: "REPORT_IMAGE_OCR_TOKEN", value: token },
+          { key: "REPORT_IMAGE_OCR_CONCURRENCY", value: "2" }
         ]
       }
     })
@@ -79,25 +85,126 @@ async function triggerDeploy(serviceId) {
   return response.json();
 }
 
-const services = await listServices();
-const existing = services.find((service) => service.name === SERVICE_NAME);
-if (existing) {
-  console.log(`Service already exists: ${existing.id}`);
-  console.log(`URL: ${existing.serviceDetails?.url ?? existing.dashboardUrl}`);
-  const deploy = await triggerDeploy(existing.id);
-  console.log(`Redeploy started: ${deploy.id ?? deploy.deploy?.id ?? "ok"}`);
-  console.log("Set portal env REPORT_IMAGE_OCR_URL to that URL (token already on the service).");
-  process.exit(0);
+async function getEnvVars(serviceId) {
+  const response = await fetch(`https://api.render.com/v1/services/${serviceId}/env-vars`, { headers });
+  if (!response.ok) throw new Error(`List env vars: ${response.status} ${await response.text()}`);
+  const rows = await response.json();
+  return rows.map((row) => row.envVar ?? row);
 }
 
-const token = randomBytes(24).toString("hex");
-const created = await createService(token);
-const service = created.service ?? created;
-console.log(`Created ${SERVICE_NAME}: ${service.id}`);
-console.log(`URL: ${service.serviceDetails?.url ?? "(pending)"}`);
+async function upsertEnvVar(serviceId, key, value) {
+  const response = await fetch(`https://api.render.com/v1/services/${serviceId}/env-vars/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ value })
+  });
+  if (!response.ok) {
+    // Older API shape: POST collection
+    const create = await fetch(`https://api.render.com/v1/services/${serviceId}/env-vars`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify([{ key, value }])
+    });
+    if (!create.ok) throw new Error(`Set env ${key}: ${response.status}/${create.status} ${await create.text()}`);
+  }
+}
+
+async function getService(serviceId) {
+  const response = await fetch(`https://api.render.com/v1/services/${serviceId}`, { headers });
+  if (!response.ok) throw new Error(`Get service: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+async function waitForHealth(url, token, attempts = 36) {
+  const healthUrl = `${url.replace(/\/$/, "")}/health`;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetch(healthUrl, {
+        headers: token ? { authorization: `Bearer ${token}` } : undefined,
+        cache: "no-store"
+      });
+      if (response.ok) {
+        const body = await response.json().catch(() => ({}));
+        if (body.ok !== false) return body;
+      }
+    } catch {
+      // cold start / building
+    }
+    console.log(`Waiting for OCR health (${i + 1}/${attempts})…`);
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  throw new Error(`OCR service did not become healthy at ${healthUrl}`);
+}
+
+function upsertLocalEnv(url, token) {
+  let text = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const set = (key, value) => {
+    const line = `${key}=${value}`;
+    const re = new RegExp(`^${key}=.*$`, "m");
+    if (re.test(text)) text = text.replace(re, line);
+    else text = `${text.trimEnd()}\n${line}\n`;
+  };
+  // Drop stale comment-only placeholders for these keys.
+  text = text.replace(/^#\s*REPORT_IMAGE_OCR_URL=.*$/gm, "");
+  text = text.replace(/^#\s*REPORT_IMAGE_OCR_TOKEN=.*$/gm, "");
+  set("REPORT_IMAGE_OCR_URL", url);
+  set("REPORT_IMAGE_OCR_TOKEN", token);
+  writeFileSync(envPath, text.endsWith("\n") ? text : `${text}\n`);
+}
+
+const services = await listServices();
+let existing = services.find((service) => service.name === SERVICE_NAME);
+let token = env.REPORT_IMAGE_OCR_TOKEN?.trim() || "";
+let serviceId;
+let url;
+
+if (existing) {
+  serviceId = existing.id;
+  console.log(`Service already exists: ${serviceId}`);
+  const fresh = await getService(serviceId);
+  const service = fresh.service ?? fresh;
+  url = service.serviceDetails?.url || existing.serviceDetails?.url || DEFAULT_URL;
+  console.log(`URL: ${url}`);
+
+  const envVars = await getEnvVars(serviceId);
+  const current = envVars.find((row) => row.key === "REPORT_IMAGE_OCR_TOKEN");
+  if (current?.value) token = current.value;
+  if (!token) {
+    token = randomBytes(24).toString("hex");
+    await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_TOKEN", token);
+    console.log("Generated a new REPORT_IMAGE_OCR_TOKEN on the service.");
+  }
+  await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_CONCURRENCY", "2").catch(() => undefined);
+  const deploy = await triggerDeploy(serviceId);
+  console.log(`Redeploy started: ${deploy.id ?? deploy.deploy?.id ?? "ok"}`);
+} else {
+  token = randomBytes(24).toString("hex");
+  const created = await createService(token);
+  const service = created.service ?? created;
+  serviceId = service.id;
+  url = service.serviceDetails?.url || DEFAULT_URL;
+  console.log(`Created ${SERVICE_NAME}: ${serviceId}`);
+  console.log(`URL: ${url}`);
+}
+
+upsertLocalEnv(url, token);
+console.log("Wrote REPORT_IMAGE_OCR_URL and REPORT_IMAGE_OCR_TOKEN to .env");
+
 console.log("");
-console.log("Add these to the portal (Vercel) env:");
-console.log(`REPORT_IMAGE_OCR_URL=${service.serviceDetails?.url ?? "https://dropx-report-image-ocr.onrender.com"}`);
+console.log("Waiting for first healthy response (free tier cold start can take a few minutes)…");
+try {
+  const health = await waitForHealth(url, null);
+  console.log("OCR health OK:", JSON.stringify(health));
+} catch (error) {
+  console.warn(String(error.message || error));
+  console.warn("Deploy may still be building — re-check /health shortly.");
+}
+
+console.log("");
+console.log("Portal / Vercel env (production + preview):");
+console.log(`REPORT_IMAGE_OCR_URL=${url}`);
 console.log(`REPORT_IMAGE_OCR_TOKEN=${token}`);
 console.log("");
-console.log("NOTE: rootDir workers/report-image-ocr must exist on GitHub main before the first build succeeds.");
+console.log("If vercel CLI is linked, run:");
+console.log(`  printf '%s' '${url}' | npx vercel env add REPORT_IMAGE_OCR_URL production`);
+console.log(`  printf '%s' '${token}' | npx vercel env add REPORT_IMAGE_OCR_TOKEN production`);

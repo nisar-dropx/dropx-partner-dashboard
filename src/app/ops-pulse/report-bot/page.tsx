@@ -137,7 +137,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
   } catch (error) {
     return (
       <AppShell active="Report Bot" pageCode={pageCode}>
-        <div className={s.page}>
+        <div className={s.page} data-report-bot="">
           <div className={`${s.flash} ${s.flashError}`} role="alert">
             <AlertTriangle size={18} aria-hidden />
             <div><strong>Report Bot isn&apos;t set up in the database yet</strong>{error instanceof Error ? error.message : "Unavailable"}. Apply the Report Bot migrations, then reload.</div>
@@ -182,7 +182,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
 
   return (
     <AppShell active="Report Bot" pageCode={pageCode}>
-      <div className={s.page}>
+      <div className={s.page} data-report-bot="">
         <header className={s.hero}>
           <div>
             <span className={s.eyebrow}><Bot size={13} aria-hidden /> Ops Pulse · {workspace === "last_mile" ? "Last Mile" : "Dark Store"}</span>

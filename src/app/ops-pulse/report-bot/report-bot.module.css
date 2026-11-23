@@ -20,15 +20,7 @@
   color: var(--ink);
   font-size: 12.25px;
   line-height: 1.45;
-  /* Single page scroll — do not nest a second scroller inside Review. */
-  overflow: visible;
-}
-:global(body:has(.ops-modern)) :global(.ops-modern > .main:has(.page)) {
-  overflow: visible;
-  height: auto;
-  max-height: none;
-}
-:global(body:has(.ops-modern)) :global(.ops-modern .content:has(.page)) {
+  /* Single page scroll — parent shell overflow is unlocked via [data-report-bot] in ops-design.css. */
   overflow: visible;
 }
 .page h1, .page h2, .page h3, .page p { margin: 0; }
