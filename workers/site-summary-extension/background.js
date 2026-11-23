@@ -193,7 +193,7 @@ async function captureTabScreenshot(tabId) {
   // without distortion regardless of the browser viewport width.
   // Use createImageBitmap + OffscreenCanvas — Image and FileReader are not
   // available in background scripts (no DOM).
-  const TARGET_W = 900;
+  const TARGET_W = 1400;
   const resp = await fetch(dataUrl);
   const srcBlob = await resp.blob();
   const bitmap = await createImageBitmap(srcBlob);
@@ -221,7 +221,7 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
 
   const worst      = breachingRows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, breachingRows[0]);
   const worstClock = fmtClock(worst.elapsedS);
-  const unassigned = breachingRows.filter(r => !r.associate || r.associate === "Unassigned");
+  const unassigned = breachingRows.filter(r => !r.associate || r.associate === "Unassigned" || r.associate === "No Idle Associates");
   const allAssigned = unassigned.length === 0;
   const orderWord = breachingRows.length === 1 ? "order" : "orders";
   const bullet = allAssigned
@@ -357,7 +357,30 @@ async function checkStation(tabId, stationCode, storeId) {
     return;
   }
 
-  const breaching = (data.rows || []).filter(r => r.elapsedS != null && r.elapsedS >= CONFIG.ACCEPTANCE_THRESHOLD_S);
+  // Use the page's own red flag for DOM rows, but prefer the banner count as
+  // the authoritative total — the table may be virtualized so not all rows
+  // are in the DOM at once.
+  const redRows = (data.rows || []).filter(r => r.red === true);
+  const bannerCount = data.bannerPendingCount ?? null;
+  // If banner says more than we can see in DOM, synthesise extra "No Idle" rows
+  // so the count in the message matches what Amazon says.
+  let breaching = redRows;
+  if (bannerCount !== null) {
+    if (bannerCount > redRows.length) {
+      // Table is virtualized — banner sees more than DOM; pad with synthetic rows
+      const extra = bannerCount - redRows.length;
+      const synthetic = Array.from({ length: extra }, () => ({
+        oid: "—", items: "—", pct: "—", associate: "No Idle Associates",
+        elapsedText: null, elapsedS: null, slaText: "00:15", slaS: 15, red: true,
+      }));
+      breaching = [...redRows, ...synthetic];
+    } else if (bannerCount < redRows.length) {
+      // DOM has stale red rows from a previous station; trust the banner, take top N by elapsed
+      breaching = redRows
+        .sort((a, b) => (b.elapsedS ?? 0) - (a.elapsedS ?? 0))
+        .slice(0, bannerCount);
+    }
+  }
   addLog(`${stationCode}: ${(data.rows||[]).length} orders, ${breaching.length} breaching`);
 
   if (breaching.length === 0) {

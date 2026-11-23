@@ -67,11 +67,17 @@
       const slaText = slaEl ? slaEl.textContent.replace("/", "").trim() : "00:15";
       const slaS    = parseClockToSeconds(slaText) ?? 15;
 
+      // For "No Idle Associates" rows, there's no <a> — fall back to cell text
+      const assocCell = tr.querySelector("td.associateId");
+      const associateText = assocEl
+        ? assocEl.textContent.trim()
+        : (assocCell ? assocCell.textContent.trim() : "Unassigned");
+
       rows.push({
         oid:      oidEl    ? oidEl.textContent.trim()   : "—",
         items:    itemsEl  ? itemsEl.textContent.trim()  : "—",
         pct:      pctEl    ? pctEl.textContent.trim()    : "—",
-        associate: assocEl ? assocEl.textContent.trim()  : "Unassigned",
+        associate: associateText || "Unassigned",
         elapsedText,
         elapsedS,
         slaText,
@@ -82,11 +88,34 @@
     return rows;
   }
 
+  // Read the "Attention! You have N orders pending acceptance" banner count.
+  // This is Amazon's authoritative number — more reliable than counting DOM rows
+  // because the table may be virtualized (only visible rows in DOM).
+  function readPendingAcceptanceCount() {
+    const alerts = document.querySelectorAll('.alert-container .alert, [class*="alert"] span, [class*="Alert"] span, div[class*="attention"] span');
+    for (const el of alerts) {
+      const text = el.textContent || "";
+      const m = text.match(/you have (\d+) orders? pending acceptance/i);
+      if (m) return parseInt(m[1], 10);
+    }
+    // Fallback: scan all visible text nodes in alert/banner area
+    const banners = document.querySelectorAll('[class*="alert"], [class*="Alert"], [class*="banner"], [class*="Banner"]');
+    for (const el of banners) {
+      const text = el.textContent || "";
+      const m = text.match(/you have (\d+) orders? pending acceptance/i);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  }
+
   function readSiteSummary() {
+    const rows = readRows();
+    const bannerCount = readPendingAcceptanceCount();
     return {
       storeId: getStoreId(),
       onSiteSummary: isOnSiteSummary(),
-      rows: readRows(),
+      rows,
+      bannerPendingCount: bannerCount,
       readAt: Date.now(),
     };
   }
