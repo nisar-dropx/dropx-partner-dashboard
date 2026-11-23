@@ -59,4 +59,5 @@ Write-Host "Done! Task runs silently every 3 min — no window flash." -Foregrou
 Write-Host ""
 Write-Host "To verify:   schtasks /query /tn DropX-WorkSpaces-KeepAlive"
 Write-Host "To run now:  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
-Write-Host ("To check log: Get-Content " + (Join-Path $scriptDir "keepalive.log") + " -Tail 20")
+$log = $scriptDir + '\keepalive.log'
+Write-Host "To check log: Get-Content $log -Tail 20"
