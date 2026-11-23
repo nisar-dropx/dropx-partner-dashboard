@@ -112,8 +112,10 @@ async function loadStationResponsibilityRoots(companyId: string, locationIds: st
   if (historical.error) throw Error(historical.error.message);
   const engagementIds = [...new Set((historical.data ?? []).map((row) => row.engagement_id))];
   if (!engagementIds.length) return new Map<string, string[]>();
+  // Only active engagements: an offboarded person's stale responsibility record
+  // must not block the fallback to localRoots and the new manager's assignment.
   const engagements = await readAllRows(supabaseAdmin.from("hr_engagements")
-    .select("id,person_id").eq("company_id", companyId).in("id", engagementIds).order("id"));
+    .select("id,person_id").eq("company_id", companyId).eq("status", "active").in("id", engagementIds).order("id"));
   if (engagements.error) throw Error(engagements.error.message);
   const personByEngagement = new Map((engagements.data ?? []).map((row) => [row.id, row.person_id]));
   const personByAssignment = new Map((historical.data ?? []).map((row) => [row.id, personByEngagement.get(row.engagement_id)]));
