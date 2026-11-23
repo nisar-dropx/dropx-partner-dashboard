@@ -89,11 +89,22 @@
   }
 
   // Read the "Attention! You have N orders pending acceptance" banner count.
-  // kat-alert is the exact tag used on this page.
+  // kat-alert renders its slot content as a direct text node child (light DOM),
+  // so textContent works. Also try innerText as fallback.
   function readPendingAcceptanceCount() {
     for (const el of document.querySelectorAll("kat-alert")) {
-      const m = (el.textContent || "").match(/you have (\d+) orders? pending acceptance/i);
+      const text = (el.innerText || el.textContent || "").trim();
+      const m = text.match(/you have (\d+) orders? pending acceptance/i);
       if (m) return parseInt(m[1], 10);
+    }
+    // Also check the slot content directly — text node children of kat-alert
+    for (const el of document.querySelectorAll("kat-alert")) {
+      for (const node of el.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const m = node.textContent.match(/you have (\d+) orders? pending acceptance/i);
+          if (m) return parseInt(m[1], 10);
+        }
+      }
     }
     return null;
   }

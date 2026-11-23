@@ -368,6 +368,7 @@ async function checkStation(tabId, stationCode, storeId) {
   const bannerCount = data.bannerPendingCount ?? null;
 
 
+  addLog(`${stationCode}: pending=${pendingRows.length} banner=${bannerCount}`);
   // Use banner count to catch rows not in DOM (pagination/scroll), pad if needed
   let breaching = pendingRows;
   if (bannerCount !== null && bannerCount > pendingRows.length) {
