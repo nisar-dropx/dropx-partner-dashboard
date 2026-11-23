@@ -2,6 +2,12 @@
 
 ## Manually paid advance imports — 23 November 2026
 
+Canonical matching follows All People category precedence: Workforce first,
+Independent Contractor before legacy Employee copies of the same DropX ID.
+Migration `20261123130149_canonical_paid_advance_person_match.sql` fixes false
+ambiguity for converted profiles such as DROPX500; multiple matches within the
+canonical category still block import.
+
 Payments → Advance Register offers Bulk upload paid advances to users with
 Payment Process add access. The Excel/CSV upload accepts registered People and
 Workforce IDs, paid date, amount, already deducted amount, reference, mode and

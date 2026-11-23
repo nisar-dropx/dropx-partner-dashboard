@@ -19,6 +19,8 @@ insert into contractors values('${id(6)}','${company}','CTEST','Contractor test'
 insert into employees values('${id(7)}','${company}','DFTEST','Migrated source','${station}');`);
 const sql=readFileSync(new URL('../supabase/migrations/20261123123149_import_manually_paid_advances.sql',import.meta.url),'utf8');
 await db.exec(sql); await db.exec(sql);
+const canonicalSql=readFileSync(new URL('../supabase/migrations/20261123130149_canonical_paid_advance_person_match.sql',import.meta.url),'utf8');
+await db.exec(canonicalSql); await db.exec(canonicalSql);
 const row=(code,reference='REF-'+code)=>({rowNumber:2,dropxId:code,advanceDate:'2026-10-03',amount:4000,deductedAmount:500,reference,paymentMode:'cash',remark:'Paid outside system'});
 async function run(rows,commit=false,scope=null){return (await db.query('select import_manually_paid_advances($1,$2,$3::jsonb,$4,$5::uuid[],$6) result',[company,actor,JSON.stringify(rows),'hash',scope,commit])).rows[0].result;}
 let result=await run([row('DFTEST'),row('ETEST'),row('CTEST')]);
@@ -36,6 +38,14 @@ assert.equal((await run([row('ETEST','new')],true,[id(99)])).canCommit,false,'Sc
 assert.equal((await run([{...row('ETEST','new'),deductedAmount:4001}],true)).canCommit,false);
 assert.equal((await run([row('ETEST','new'),row('ETEST','new')],true)).canCommit,false,'Same-file duplicate blocked');
 assert.equal((await run([{...row('ETEST','future'),advanceDate:'2099-01-01'}])).canCommit,false,'Future payment rejected');
+await db.exec(`insert into employees values('${id(8)}','${company}','DUAL','Old employee','${station}');
+insert into contractors values('${id(8)}','${company}','DUAL','Current contractor','${station}');`);
+result=await run([row('DUAL')]);
+assert.equal(result.canCommit,true,'Contractor and old Employee copies are one canonical person');
+assert.equal(result.rows[0].workerType,'contractor');
+assert.equal(result.rows[0].fullName,'Current contractor');
+await db.exec(`insert into contractors values('${id(9)}','${company}','DUAL','Conflicting contractor','${station}')`);
+assert.equal((await run([row('DUAL')])).canCommit,false,'Multiple Contractor matches remain ambiguous');
 await db.exec('set role authenticated');
 await assert.rejects(()=>run([row('ETEST','new')]),/permission denied/);
 await db.close();
