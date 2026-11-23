@@ -100,6 +100,4 @@ Write-Host "To run immediately:"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-LockAlert'"
 Write-Host ""
-$log = $scriptDir + '\keepalive.log'
-Write-Host 'To check keepalive log:'
-Write-Host "  Get-Content $log -Tail 20"
+Write-Host 'To check keepalive log: open keepalive.log in the keepalive folder'
