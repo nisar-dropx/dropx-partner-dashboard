@@ -93,18 +93,17 @@
   // so textContent works. Also try innerText as fallback.
   function readPendingAcceptanceCount() {
     for (const el of document.querySelectorAll("kat-alert")) {
-      const text = (el.innerText || el.textContent || "").trim();
-      const m = text.match(/you have (\d+) orders? pending acceptance/i);
-      if (m) return parseInt(m[1], 10);
-    }
-    // Also check the slot content directly — text node children of kat-alert
-    for (const el of document.querySelectorAll("kat-alert")) {
+      // Text is a direct text node child — iterate childNodes first (most reliable)
       for (const node of el.childNodes) {
         if (node.nodeType === Node.TEXT_NODE) {
           const m = node.textContent.match(/you have (\d+) orders? pending acceptance/i);
           if (m) return parseInt(m[1], 10);
         }
       }
+      // Fallback: textContent aggregates all descendant text
+      const text = (el.textContent || "").trim();
+      const m = text.match(/you have (\d+) orders? pending acceptance/i);
+      if (m) return parseInt(m[1], 10);
     }
     return null;
   }
