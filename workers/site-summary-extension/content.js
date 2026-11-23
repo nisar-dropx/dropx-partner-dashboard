@@ -89,17 +89,10 @@
   }
 
   // Read the "Attention! You have N orders pending acceptance" banner count.
-  // Scans all text-bearing elements above the table — no guessing class names.
+  // kat-alert is the exact tag used on this page.
   function readPendingAcceptanceCount() {
-    // Walk every element that is not a table row to find the banner text
-    const all = document.querySelectorAll("p, span, div, li, section, kat-alert, kat-banner");
-    for (const el of all) {
-      // Skip elements inside the data table
-      if (el.closest("table")) continue;
-      // Only check leaf-ish nodes (avoid huge containers that contain the table text too)
-      const text = (el.childNodes.length <= 5) ? (el.textContent || "").trim() : "";
-      if (!text) continue;
-      const m = text.match(/you have (\d+) orders? pending acceptance/i);
+    for (const el of document.querySelectorAll("kat-alert")) {
+      const m = (el.textContent || "").match(/you have (\d+) orders? pending acceptance/i);
       if (m) return parseInt(m[1], 10);
     }
     return null;

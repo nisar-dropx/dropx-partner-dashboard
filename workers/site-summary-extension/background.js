@@ -357,29 +357,24 @@ async function checkStation(tabId, stationCode, storeId) {
     return;
   }
 
-  // Use the page's own red flag for DOM rows, but prefer the banner count as
-  // the authoritative total — the table may be virtualized so not all rows
-  // are in the DOM at once.
+  // "Pending acceptance" = red acceptance time AND no associate assigned yet.
+  // Orders assigned to a picker are accepted even if picking hasn't started (0%).
+  // The banner count confirms this — it only counts unassigned red rows.
+  const UNASSIGNED = ["Unassigned", "No Idle Associates", ""];
+  const isUnassigned = r => !r.associate || UNASSIGNED.includes(r.associate.trim());
   const redRows = (data.rows || []).filter(r => r.red === true);
+  const pendingRows = redRows.filter(r => isUnassigned(r));
   const bannerCount = data.bannerPendingCount ?? null;
-  // If banner says more than we can see in DOM, synthesise extra "No Idle" rows
-  // so the count in the message matches what Amazon says.
-  let breaching = redRows;
-  if (bannerCount !== null) {
-    if (bannerCount > redRows.length) {
-      // Table is virtualized — banner sees more than DOM; pad with synthetic rows
-      const extra = bannerCount - redRows.length;
-      const synthetic = Array.from({ length: extra }, () => ({
-        oid: "—", items: "—", pct: "—", associate: "No Idle Associates",
-        elapsedText: null, elapsedS: null, slaText: "00:15", slaS: 15, red: true,
-      }));
-      breaching = [...redRows, ...synthetic];
-    } else if (bannerCount < redRows.length) {
-      // DOM has stale red rows from a previous station; trust the banner, take top N by elapsed
-      breaching = redRows
-        .sort((a, b) => (b.elapsedS ?? 0) - (a.elapsedS ?? 0))
-        .slice(0, bannerCount);
-    }
+
+  // Use banner count to catch rows not in DOM (pagination/scroll), pad if needed
+  let breaching = pendingRows;
+  if (bannerCount !== null && bannerCount > pendingRows.length) {
+    const extra = bannerCount - pendingRows.length;
+    const synthetic = Array.from({ length: extra }, () => ({
+      oid: "—", items: "—", pct: "—", associate: "No Idle Associates",
+      elapsedText: null, elapsedS: null, slaText: "00:15", slaS: 15, red: true,
+    }));
+    breaching = [...pendingRows, ...synthetic];
   }
   addLog(`${stationCode}: ${(data.rows||[]).length} orders, ${breaching.length} breaching`);
 
