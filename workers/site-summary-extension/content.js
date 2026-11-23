@@ -89,19 +89,16 @@
   }
 
   // Read the "Attention! You have N orders pending acceptance" banner count.
-  // This is Amazon's authoritative number — more reliable than counting DOM rows
-  // because the table may be virtualized (only visible rows in DOM).
+  // Scans all text-bearing elements above the table — no guessing class names.
   function readPendingAcceptanceCount() {
-    const alerts = document.querySelectorAll('.alert-container .alert, [class*="alert"] span, [class*="Alert"] span, div[class*="attention"] span');
-    for (const el of alerts) {
-      const text = el.textContent || "";
-      const m = text.match(/you have (\d+) orders? pending acceptance/i);
-      if (m) return parseInt(m[1], 10);
-    }
-    // Fallback: scan all visible text nodes in alert/banner area
-    const banners = document.querySelectorAll('[class*="alert"], [class*="Alert"], [class*="banner"], [class*="Banner"]');
-    for (const el of banners) {
-      const text = el.textContent || "";
+    // Walk every element that is not a table row to find the banner text
+    const all = document.querySelectorAll("p, span, div, li, section, kat-alert, kat-banner");
+    for (const el of all) {
+      // Skip elements inside the data table
+      if (el.closest("table")) continue;
+      // Only check leaf-ish nodes (avoid huge containers that contain the table text too)
+      const text = (el.childNodes.length <= 5) ? (el.textContent || "").trim() : "";
+      if (!text) continue;
       const m = text.match(/you have (\d+) orders? pending acceptance/i);
       if (m) return parseInt(m[1], 10);
     }
