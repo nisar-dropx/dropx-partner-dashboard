@@ -91,8 +91,8 @@ export async function loadPaidAdvanceRegisterView(db: any, companyId: string): P
       workforceName: a.name, designation: a.designation, location: a.station, paidLocation: a.paidStation,
       total: a.amount, deducted, pending,
       status: pending <= 0 ? "Fully deducted" : deducted > 0 ? "Partially deducted" : "Pending",
-      linkStatus: a.worker_id ? "linked" : "pending", paymentMode: "bank", paymentReference: a.bank_reference ?? "",
-      externalReference: "", remark: a.evidence_type === "legacy_recorded" ? "Historical paid advance" : "Bank confirmed",
+      linkStatus: a.worker_id ? "linked" : "pending", paymentMode: String(a.provenance?.payment_mode ?? "bank"), paymentReference: a.bank_reference ?? "",
+      externalReference: "", remark: String(a.provenance?.remark || (a.evidence_type === "legacy_recorded" ? "Historical paid advance" : "Bank confirmed")),
       source: a.evidence_type, createdAt: a.created_at, recoveryHistory: history.get(a.id) ?? [], reassignmentHistory: []
     };
   });

@@ -1,5 +1,23 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Manually paid advance imports — 23 November 2026
+
+Payments → Advance Register offers Bulk upload paid advances to users with
+Payment Process add access. The Excel/CSV upload accepts registered People and
+Workforce IDs, paid date, amount, already deducted amount, reference, mode and
+remark. Preview writes nothing; commit revalidates and atomically inserts paid
+principal and confirmed opening recovery into the unified ledger. No payment
+request or bank instruction is created. Recovery begins in the paid date month.
+Unknown or ambiguous profiles and out-of-scope locations are rejected. Workforce
+is canonical when a migrated source profile shares its ID. Imports are limited
+to 500 rows / 5 MB and serialize per company; stable business keys and existing
+reference/date/amount checks prevent repeat imports. Provenance includes actor,
+file hash and source row. Existing paid entries remain immutable.
+
+Migration `20261123123149_import_manually_paid_advances.sql` is service-only.
+Regression: `node scripts/test-manually-paid-advance-import.mjs` plus the
+workforce-advance-import and paid-advance-register library tests.
+
 ## Completed payment finalization — 21 November 2026
 
 Manual finalization also records actual payments without rechecking overlapping

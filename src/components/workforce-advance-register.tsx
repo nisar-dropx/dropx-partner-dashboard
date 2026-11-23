@@ -458,7 +458,8 @@ function AdvanceMultiFilter({ allLabel, label, onChange, options, selected }: {
   </div>;
 }
 
-export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptions, personLabel = "Workforce", exportPrefix = "workforce-advances", registerDescription }: {
+export function WorkforceAdvanceRegister({ canAdd, canEdit, canBulkUpload = false, rows, workforceOptions, personLabel = "Workforce", exportPrefix = "workforce-advances", registerDescription }: {
+  canBulkUpload?: boolean;
   personLabel?: string;
   exportPrefix?: string;
   registerDescription?: string;
@@ -601,6 +602,7 @@ export function WorkforceAdvanceRegister({ canAdd, canEdit, rows, workforceOptio
     </section>
 
     <div className="workforce-advance-actions">
+      {canBulkUpload ? <WorkforceAdvanceBulkUpload manuallyPaid /> : null}
       {canAdd ? <>
         <button className="button" onClick={() => setShowAdd((current) => !current)} type="button">{showAdd ? "Close entry" : "Add advance"}</button>
         <WorkforceAdvanceBulkUpload />

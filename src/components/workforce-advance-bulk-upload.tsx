@@ -26,7 +26,8 @@ function money(value: number) {
   return `Rs ${Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function WorkforceAdvanceBulkUpload() {
+export function WorkforceAdvanceBulkUpload({ manuallyPaid = false }: { manuallyPaid?: boolean } = {}) {
+  const endpoint = manuallyPaid ? "/api/payments/advance-register/bulk-upload" : "/api/payments/workforce-advances/bulk-upload";
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -36,14 +37,16 @@ export function WorkforceAdvanceBulkUpload() {
 
   async function submit(mode: "preview" | "commit") {
     if (!file) { setError("Choose the completed Workforce advance workbook first."); return; }
-    if (mode === "commit" && !window.confirm(`Import ${preview?.totalRows ?? 0} advances?\n\nThis adds new register entries. DEDUCTED_AMOUNT will be recorded as already recovered for linked Workforce. Unregistered IDs will wait for registration and cannot be deducted from payouts until they link automatically. Existing advances will not be changed. Duplicate advances are blocked even if the workbook was re-saved.`)) return;
+    if (mode === "commit" && !window.confirm(manuallyPaid
+      ? `Record ${preview?.totalRows ?? 0} manually paid advances? DEDUCTED_AMOUNT records recovery already completed. No new bank payment is created. Recovery starts in the advance date month.`
+      : `Import ${preview?.totalRows ?? 0} advances? Existing advances will not be changed. DEDUCTED_AMOUNT records recovery already completed.`)) return;
     setBusy(mode);
     setError("");
     try {
       const body = new FormData();
       body.set("mode", mode);
       body.set("file", file);
-      const response = await fetch("/api/payments/workforce-advances/bulk-upload", { method: "POST", body });
+      const response = await fetch(endpoint, { method: "POST", body });
       const payload = await readResponse(response);
       setPreview(payload);
       if (!response.ok) throw new Error(payload.error ?? "Unable to process the workbook.");
@@ -56,12 +59,12 @@ export function WorkforceAdvanceBulkUpload() {
   }
 
   return <div className="workforce-advance-upload">
-    <button className="button secondary" onClick={() => setOpen((value) => !value)} type="button">{open ? "Close bulk upload" : "Bulk upload"}</button>
+    <button className="button secondary" onClick={() => setOpen((value) => !value)} type="button">{open ? "Close bulk upload" : manuallyPaid ? "Bulk upload paid advances" : "Bulk upload"}</button>
     {open ? <section className="panel compensation-import-panel">
-      <div className="panel-head"><div><h2>Bulk upload existing advances</h2><p className="subtle">Preview and validate every payment before adding it to the register.</p></div><a className="template-download-link" download href="/api/payments/workforce-advances/bulk-upload/template">Download Excel template</a></div>
+      <div className="panel-head"><div><h2>{manuallyPaid ? "Bulk upload manually paid advances" : "Bulk upload existing advances"}</h2><p className="subtle">Preview and validate every payment before adding it to the register.</p></div><a className="template-download-link" download href={`${endpoint}/template`}>Download Excel template</a></div>
       <div className="compensation-import-body">
         <div className="compensation-import-controls"><label><span>Advance workbook</span><input accept=".xlsx,.xls,.csv" className="field compensation-file-input" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setPreview(null); setError(""); }} type="file" /></label><button className="button secondary" disabled={Boolean(busy)} onClick={() => submit("preview")} type="button">{busy === "preview" ? "Checking…" : "Preview and validate"}</button></div>
-        <p className="compensation-match-rule"><strong>Matching:</strong> DROPX_ID is matched to the canonical Workforce profile in your company. For company-wide users, an unregistered ID is kept exactly as uploaded and marked Awaiting Workforce registration; it cannot be deducted from payouts until registration links it automatically. Linked profiles must be inside your location access scope. Dates accept DD-MM-YYYY or DD/MM/YYYY.</p>
+        <p className="compensation-match-rule"><strong>Matching:</strong> {manuallyPaid ? "Enter registered People or Workforce DropX IDs within your location access. Upload up to 500 advances already paid by bank transfer, UPI, cash or other methods. DEDUCTED_AMOUNT is recovery already completed. No new payment is issued. Recovery begins in the advance date month." : "DROPX_ID is matched to Workforce in your company. Unregistered IDs await registration."} Dates accept DD-MM-YYYY or DD/MM/YYYY.</p>
         {error ? <div className="compensation-import-message error"><strong>Import blocked</strong><span>{error}</span></div> : null}
         {preview?.message ? <div className="compensation-import-message success"><strong>Import completed</strong><span>{preview.message}</span></div> : null}
         {preview?.totalRows ? <div className="compensation-preview">

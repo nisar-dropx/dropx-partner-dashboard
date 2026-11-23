@@ -3,7 +3,7 @@ import { loadWorkforcePayoutRows } from "@/lib/workforce-payout-loader";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { WorkforceAdvanceRegister, type WorkforceAdvanceRegisterRow } from "@/components/workforce-advance-register";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadPaidAdvanceRegisterView } from "@/lib/paid-advance-register";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -27,7 +27,7 @@ export default async function AdvanceRegisterPage() {
       subtitle="Bank-confirmed advances and historical paid advances for HRMS and Workforce, with payroll recovery. Unpaid requests are shown in Payment Process." />
     {error
       ? <section className="panel message-panel error"><div className="panel-body"><strong>Advance register unavailable</strong><p className="subtle">{error}</p></div></section>
-      : <WorkforceAdvanceRegister canAdd={false} canEdit={false} rows={rows} workforceOptions={[]} personLabel="Person" exportPrefix="advance-register"
+      : <WorkforceAdvanceRegister canAdd={false} canEdit={false} canBulkUpload={hasPermission(authorization, "payment_process", "add")} rows={rows} workforceOptions={[]} personLabel="Person" exportPrefix="advance-register"
           registerDescription="Paid advances for HRMS and Workforce. Deducted includes recoveries already recorded or included in payout deductions. Pending is the remaining amount not yet included. Unregistered IDs remain visible until registration links them for payroll recovery." />}
   </AppShell>;
 }

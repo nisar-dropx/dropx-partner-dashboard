@@ -340,7 +340,7 @@ function displayDate(value: string | undefined) {
   return `${day}/${month}/${year}`;
 }
 
-export function buildWorkforceAdvanceImportTemplate(options: { exampleDate?: string } = {}) {
+export function buildWorkforceAdvanceImportTemplate(options: { exampleDate?: string; registeredPeopleOnly?: boolean } = {}) {
   const headers = [...WORKFORCE_ADVANCE_IMPORT_HEADERS];
   const widths = [22, 18, 18, 22, 28, 22, 52].map((wch) => ({ wch }));
   const upload = XLSX.utils.aoa_to_sheet([headers]);
@@ -370,6 +370,12 @@ export function buildWorkforceAdvanceImportTemplate(options: { exampleDate?: str
     ["Important", "Formula cells are not accepted. An exact duplicate payment in the same file is rejected. For a registered ID, DEDUCTED_AMOUNT is saved as an opening deduction in recovery history. For an unregistered ID, it is retained and applied only when the advance is linked to Workforce."]
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
+  if (options.registeredPeopleOnly) {
+    instructions.A1 = { t: "s", v: "MANUALLY PAID ADVANCES — up to 500 rows per upload" };
+    instructions.B2 = { t: "s", v: "Required. Enter a registered People or Workforce DropX ID in your company and location access. Unknown or ambiguous IDs are rejected." };
+    instructions.B9 = { t: "s", v: "Existing references for the same person are rejected. Without a reference, the same person, paid date and amount are treated as a duplicate. Enter a distinct reference for separate payments with otherwise identical details." };
+    instructions.B10 = { t: "s", v: "Formula cells are rejected. DEDUCTED_AMOUNT records recovery completed before this upload; leave zero if nothing has been recovered. Upload only advances already paid manually. No new bank payment is created. Recovery begins in the advance date month." };
+  }
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, upload, "Upload");
