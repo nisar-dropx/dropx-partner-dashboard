@@ -367,7 +367,6 @@ async function checkStation(tabId, stationCode, storeId) {
   const pendingRows = redRows.filter(r => isUnassigned(r));
   const bannerCount = data.bannerPendingCount ?? null;
 
-  addLog(`${stationCode}: allRows=${allRows.length} red=${redRows.length} pending=${pendingRows.length} banner=${bannerCount} associates=${redRows.map(r=>r.associate).join("|")}`);
 
   // Use banner count to catch rows not in DOM (pagination/scroll), pad if needed
   let breaching = pendingRows;
