@@ -1,10 +1,11 @@
 # DropX WorkSpaces Scheduled Tasks Setup — LOCAL MACHINE
 # No admin required. Run once in a normal PowerShell window.
 #
-# Usage (local laptop where WorkSpaces client runs):
+# Usage (local machine where WorkSpaces client runs):
 #   cd C:\keepalive
-#   Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 #   .\setup-tasks.ps1
+#
+# Uses wscript.exe as a silent launcher so no terminal window ever flashes.
 
 $scriptDir = $PSScriptRoot
 
@@ -20,21 +21,38 @@ $lockAlertScript = Join-Path $scriptDir "lock-alert.ps1"
 if (-not (Test-Path $keepAliveScript)) { Write-Host "MISSING: $keepAliveScript" -ForegroundColor Red; exit 1 }
 if (-not (Test-Path $lockAlertScript)) { Write-Host "MISSING: $lockAlertScript" -ForegroundColor Red; exit 1 }
 
+# Write a tiny .vbs wrapper for each script — wscript runs it with no window at all
+function Write-SilentLauncher([string]$psScript) {
+  $vbsPath = [System.IO.Path]::ChangeExtension($psScript, ".vbs")
+  $escaped = $psScript.Replace('"', '""')
+  $vbs = @"
+' Silent launcher — no terminal window
+CreateObject("WScript.Shell").Run "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File """ & "$escaped" & """", 0, False
+"@
+  [System.IO.File]::WriteAllText($vbsPath, $vbs, [System.Text.Encoding]::ASCII)
+  return $vbsPath
+}
+
+$keepAliveVbs = Write-SilentLauncher $keepAliveScript
+$lockAlertVbs = Write-SilentLauncher $lockAlertScript
+Write-Host "  Created silent launchers (.vbs)" -ForegroundColor Gray
+
 function Register-DropXTask {
   param(
     [string]$Name,
-    [string]$Script,
+    [string]$VbsScript,
     [int]$IntervalMinutes,
     [string]$Description
   )
 
   Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
 
+  # wscript.exe /B = batch mode (no dialog boxes), launches vbs with zero UI
   $action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-WindowStyle Hidden -NonInteractive -ExecutionPolicy Bypass -File `"$Script`""
+    -Execute "wscript.exe" `
+    -Argument "/B `"$VbsScript`""
 
-  # -Once -At + RepetitionInterval: works without admin, same pattern as PPI worker
+  # -Once -At + RepetitionInterval: works without admin (same as PPI worker)
   $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
 
@@ -52,25 +70,25 @@ function Register-DropXTask {
     -Description $Description `
     -Force | Out-Null
 
-  Write-Host "  Registered: $Name (every ${IntervalMinutes} min)" -ForegroundColor Green
+  Write-Host "  Registered: $Name (every ${IntervalMinutes} min, silent)" -ForegroundColor Green
 }
 
 Write-Host "Registering tasks..."
 
 Register-DropXTask `
   -Name "DropX-WorkSpaces-KeepAlive" `
-  -Script $keepAliveScript `
+  -VbsScript $keepAliveVbs `
   -IntervalMinutes 3 `
   -Description "DropX: Keeps Amazon WorkSpaces client alive by tapping F15 every 3 minutes"
 
 Register-DropXTask `
   -Name "DropX-WorkSpaces-LockAlert" `
-  -Script $lockAlertScript `
+  -VbsScript $lockAlertVbs `
   -IntervalMinutes 5 `
   -Description "DropX: Sends WhatsApp alert if WorkSpaces VM becomes locked"
 
 Write-Host ""
-Write-Host "Done! Both tasks registered." -ForegroundColor Green
+Write-Host "Done! Both tasks registered — fully silent, no window flash." -ForegroundColor Green
 Write-Host ""
 Write-Host "IMPORTANT: Edit lock-alert.ps1 and fill in your WA_TOKEN." -ForegroundColor Yellow
 Write-Host ""
@@ -81,3 +99,6 @@ Write-Host ""
 Write-Host "To run immediately:"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-LockAlert'"
+Write-Host ""
+Write-Host "To check keepalive log:"
+Write-Host "  Get-Content '$scriptDir\keepalive.log' -Tail 20"
