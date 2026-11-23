@@ -26,7 +26,7 @@ function Write-SilentLauncher([string]$psScript) {
   $vbsPath = [System.IO.Path]::ChangeExtension($psScript, ".vbs")
   $escaped = $psScript.Replace('"', '""')
   $vbs = @"
-' Silent launcher — no terminal window
+' Silent launcher
 CreateObject("WScript.Shell").Run "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File """ & "$escaped" & """", 0, False
 "@
   [System.IO.File]::WriteAllText($vbsPath, $vbs, [System.Text.Encoding]::ASCII)

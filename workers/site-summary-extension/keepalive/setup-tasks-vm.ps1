@@ -9,11 +9,11 @@
 
 $scriptDir = $PSScriptRoot
 
-Write-Host ""
-Write-Host "DropX WorkSpaces Task Setup (VM)" -ForegroundColor Cyan
-Write-Host "==================================" -ForegroundColor Cyan
+Write-Host ''
+Write-Host 'DropX WorkSpaces Task Setup (VM)' -ForegroundColor Cyan
+Write-Host '==================================' -ForegroundColor Cyan
 Write-Host "Script folder: $scriptDir" -ForegroundColor Gray
-Write-Host ""
+Write-Host ''
 
 $keepAliveScript = Join-Path $scriptDir "keepalive.ps1"
 
@@ -23,7 +23,7 @@ if (-not (Test-Path $keepAliveScript)) { Write-Host "MISSING: $keepAliveScript" 
 $vbsPath = [System.IO.Path]::ChangeExtension($keepAliveScript, ".vbs")
 $escaped = $keepAliveScript.Replace('"', '""')
 $vbs = @"
-' Silent launcher — no terminal window
+' Silent launcher
 CreateObject("WScript.Shell").Run "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File """ & "$escaped" & """", 0, False
 "@
 [System.IO.File]::WriteAllText($vbsPath, $vbs, [System.Text.Encoding]::ASCII)
@@ -53,10 +53,10 @@ Register-ScheduledTask `
   -Description "DropX: Keeps WorkSpaces VM alive by tapping F15 every 3 minutes" `
   -Force | Out-Null
 
-Write-Host "  Registered: DropX-WorkSpaces-KeepAlive (every 3 min, silent)" -ForegroundColor Green
-Write-Host ""
-Write-Host "Done! Task runs silently every 3 min — no window flash." -ForegroundColor Green
-Write-Host ""
-Write-Host "To verify:   schtasks /query /tn DropX-WorkSpaces-KeepAlive"
-Write-Host "To run now:  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
+Write-Host '  Registered: DropX-WorkSpaces-KeepAlive (every 3 min, silent)' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Done! Task runs silently every 3 min - no window flash.' -ForegroundColor Green
+Write-Host ''
+Write-Host 'To verify:   schtasks /query /tn DropX-WorkSpaces-KeepAlive'
+Write-Host '  Start-ScheduledTask DropX-WorkSpaces-KeepAlive'
 Write-Host 'To check log: open keepalive.log in the keepalive folder'
