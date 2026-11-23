@@ -1,5 +1,5 @@
 import "server-only";
-import { loadSalaryHoldContext } from "@/lib/salary-hold-context";
+import { loadSalaryHoldContext, type SalaryHoldContext } from "@/lib/salary-hold-context";
 
 import { ADVANCE_ELIGIBILITY_PERCENT, advanceEligibilityAmount } from "@/lib/advance-eligibility";
 import type { AuthorizationContext } from "@/lib/authorization";
@@ -106,7 +106,7 @@ export async function loadPayAdvanceCapacity(input: {
   if (active.error) throw new Error(active.error.message);
   const committedAdvance = roundPayableMoney((active.data ?? []).filter(row=>row.id!==input.excludeRequestId).reduce((sum, row) =>
     sum + Number(row.approved_amount ?? row.requested_amount ?? 0), 0));
-  const salaryHolds = await loadSalaryHoldContext(input.companyId, [`${input.profileType}:${input.accountId}`], months);
+  const salaryHolds = await loadSalaryHoldContext(input.companyId, [`${input.profileType}:${input.accountId}`], months).catch(() => [] as SalaryHoldContext[]);
   return {
     salaryHolds,
     outstandingPay,
