@@ -100,6 +100,5 @@ Write-Host "To run immediately:"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-KeepAlive'"
 Write-Host "  Start-ScheduledTask 'DropX-WorkSpaces-LockAlert'"
 Write-Host ""
-$logPath = Join-Path $scriptDir "keepalive.log"
 Write-Host "To check keepalive log:"
-Write-Host "  Get-Content $logPath -Tail 20"
+Write-Host ("  Get-Content " + (Join-Path $scriptDir "keepalive.log") + " -Tail 20")
