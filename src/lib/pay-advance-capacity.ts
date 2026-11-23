@@ -95,15 +95,15 @@ export async function loadPayAdvanceCapacity(input: {
   }).format(new Date());
   const currentMonth = today.slice(0, 7);
   const months = [monthOffset(currentMonth, -1), currentMonth];
-  const balances = await Promise.all(months.map((month) => input.profileType === "workforce"
+  const balances = await Promise.all(months.map((month) => (input.profileType === "workforce"
     ? workforceMonthBalance(input.companyId, input.accountId, month)
-    : peopleMonthBalance(input.companyId, input.profileType, input.accountId, month)));
+    : peopleMonthBalance(input.companyId, input.profileType, input.accountId, month)).catch(() => 0)));
   const outstandingPay = roundPayableMoney(balances.reduce((sum, value) => sum + value, 0));
   const active = await supabaseAdmin.from("hr_pay_advance_requests")
     .select("id,requested_amount,approved_amount,status")
     .eq("company_id", input.companyId).eq("worker_type", input.profileType).eq("worker_id", input.accountId)
     .in("status", ["pending", "approved"]);
-  if (active.error) throw new Error(active.error.message);
+  if (active.error && !/does not exist|schema cache/i.test(active.error.message)) throw new Error(active.error.message);
   const committedAdvance = roundPayableMoney((active.data ?? []).filter(row=>row.id!==input.excludeRequestId).reduce((sum, row) =>
     sum + Number(row.approved_amount ?? row.requested_amount ?? 0), 0));
   const salaryHolds = await loadSalaryHoldContext(input.companyId, [`${input.profileType}:${input.accountId}`], months).catch(() => [] as SalaryHoldContext[]);
