@@ -8,8 +8,10 @@ $workerDir = "C:\ppi-worker"
 $null = Get-Command node -ErrorAction Stop
 $script    = Join-Path $workerDir "fetch.mjs"
 $monitor   = Join-Path $workerDir "site-summary-monitor.mjs"
+$hiddenVbs = Join-Path $workerDir "run-hidden.vbs"
 $logFile   = Join-Path $workerDir "run.log"
 $siteLog   = Join-Path $workerDir "site-summary.log"
+$wscript   = Join-Path $env:SystemRoot "System32\wscript.exe"
 
 if (-not (Test-Path $script)) {
   throw "Missing $script - set workerDir correctly."
@@ -18,16 +20,30 @@ if (-not (Test-Path $monitor)) {
   throw "Missing $monitor - copy site-summary-monitor.mjs into $workerDir first."
 }
 
+# Hidden launcher - Scheduled Task runs wscript so no cmd window pops up every minute.
+@'
+' Run a cmd line with no console window.
+' Usage: wscript //B //Nologo run-hidden.vbs "cmd /c ..."
+If WScript.Arguments.Count < 1 Then WScript.Quit 1
+CreateObject("WScript.Shell").Run WScript.Arguments.Item(0), 0, True
+'@ | Set-Content -Path $hiddenVbs -Encoding ASCII
+
 # Current-user tasks only - no admin / AtLogOn elevation needed on WorkSpaces.
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
-# No -RunLevel Highest so it works without admin
 $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
   -MultipleInstances IgnoreNew `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
   -Hidden
+
+function New-HiddenCmdAction {
+  param([Parameter(Mandatory = $true)][string]$CmdLine)
+  # Quote the whole cmd line as a single wscript argument.
+  $arg = "//B //Nologo `"$hiddenVbs`" `"$CmdLine`""
+  return (New-ScheduledTaskAction -Execute $wscript -Argument $arg -WorkingDirectory $workerDir)
+}
 
 function Register-DropXTask {
   param(
@@ -52,23 +68,19 @@ function Register-DropXTask {
   }
 }
 
-# PPI every 30 minutes
-$wrapperArg = "/c node `"$script`" >> `"$logFile`" 2>&1"
-$actionPPI = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArg -WorkingDirectory $workerDir
+# PPI every 30 minutes (hidden)
+$actionPPI = New-HiddenCmdAction -CmdLine "cmd /c node `"$script`" >> `"$logFile`" 2>&1"
 $trigger30 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 30) -Once -At (Get-Date)
 Register-DropXTask -TaskName "DropX-DarkStore-PPI" -Action $actionPPI -Trigger $trigger30 -Settings $settings | Out-Null
 Write-Host "  Log: $logFile"
 
-# Inbound every 60 minutes
-$wrapperArgInbound = "/c node `"$script`" --inbound >> `"$logFile`" 2>&1"
-$actionInbound = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArgInbound -WorkingDirectory $workerDir
+# Inbound every 60 minutes (hidden)
+$actionInbound = New-HiddenCmdAction -CmdLine "cmd /c node `"$script`" --inbound >> `"$logFile`" 2>&1"
 $trigger60 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 60) -Once -At (Get-Date)
 Register-DropXTask -TaskName "DropX-DarkStore-Inbound" -Action $actionInbound -Trigger $trigger60 -Settings $settings | Out-Null
 
-# Site Summary: --once every 1 minute (same permission model as PPI; no AtLogOn / long-running process).
-# MultipleInstances IgnoreNew prevents overlap if a poll is still running.
-$wrapperArgSite = "/c node `"$monitor`" --once >> `"$siteLog`" 2>&1"
-$actionSite = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArgSite -WorkingDirectory $workerDir
+# Site Summary: --once every 1 minute, hidden (no console flash)
+$actionSite = New-HiddenCmdAction -CmdLine "cmd /c node `"$monitor`" --once >> `"$siteLog`" 2>&1"
 $trigger1 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 1) -Once -At (Get-Date)
 $settingsSite = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
@@ -83,14 +95,14 @@ Write-Host ""
 if ($siteOk) {
   Start-ScheduledTask -TaskName "DropX-DarkStore-SiteSummary"
   Start-Sleep -Seconds 3
-  Write-Host "Started DropX-DarkStore-SiteSummary. Recent log:"
+  Write-Host "Started DropX-DarkStore-SiteSummary (hidden). Recent log:"
   if (Test-Path $siteLog) {
     Get-Content $siteLog -Tail 20
   } else {
     Write-Host "(log not written yet - wait one minute and run: Get-Content '$siteLog' -Tail 40)"
   }
 } else {
-  Write-Host "Site Summary task was NOT registered. Run PowerShell as the logged-in WorkSpaces user (no admin needed for this version)."
+  Write-Host "Site Summary task was NOT registered."
 }
 
 Write-Host ""
