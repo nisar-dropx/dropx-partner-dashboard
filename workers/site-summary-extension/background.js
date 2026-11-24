@@ -220,13 +220,14 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
   if (!to) { addLog(`⚠ ${stationCode}: no group JID — skipped`); return { ok: false, reason: "no_group" }; }
 
   const worst      = breachingRows.reduce((a, b) => (b.elapsedS ?? 0) > (a.elapsedS ?? 0) ? b : a, breachingRows[0]);
-  const worstClock = fmtClock(worst.elapsedS);
+  const worstClock = worst.elapsedS != null ? fmtClock(worst.elapsedS) : null;
   const unassigned = breachingRows.filter(r => !r.associate || r.associate === "Unassigned" || r.associate === "No Idle Associates");
   const allAssigned = unassigned.length === 0;
   const orderWord = breachingRows.length === 1 ? "order" : "orders";
+  const worstSuffix = worstClock ? ` (Worst ${worstClock})` : "";
   const bullet = allAssigned
-    ? `Acceptance time over ${CONFIG.ACCEPTANCE_THRESHOLD_S}s SLA (Worst ${worstClock})`
-    : `${breachingRows.length} ${orderWord} pending acceptance (Worst ${worstClock})`;
+    ? `Acceptance time over ${CONFIG.ACCEPTANCE_THRESHOLD_S}s SLA${worstSuffix}`
+    : `${breachingRows.length} ${orderWord} pending acceptance${worstSuffix}`;
   const action = allAssigned
     ? "Ask people to accept fast"
     : "Move more people to picking or ask people to accept fast";
