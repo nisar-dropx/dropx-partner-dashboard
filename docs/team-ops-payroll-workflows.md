@@ -1,5 +1,20 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Category-scoped contact duplicates — 24 November 2026
+
+Email and mobile may be reused across People/Workforce categories. Duplicate
+contacts block only within the same company and category/register. Email compares
+case-insensitively; mobile compares digits plus country code (legacy blank codes
+mean India). The shared onboarding checks query only the target register.
+Migration `20261124105416_category_scoped_people_contacts.sql` enforces the same
+rule for direct saves and imports across existing configured profile tables,
+including custom category tables. Advisory locks serialize matching claims.
+Existing duplicates are not modified and remain editable when their contact and
+company are unchanged. This supersedes the older unrestricted same-category
+shared-mobile policy; DropX and biometric identity guards remain independent.
+Checks: `node --test src/lib/workforce-contact-availability.test.mjs` and
+`node scripts/test-category-scoped-people-contacts.mjs`.
+
 ## Flipkart RD production export — 24 November 2026
 
 Flipkart production imports prefer `created_at` (column Y in the RD export) for

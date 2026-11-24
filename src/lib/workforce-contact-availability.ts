@@ -60,13 +60,15 @@ async function findMatches(params: {
   companyId: string;
   column: "mobile" | "email";
   value: string;
+  register: WorkforceContactRegister;
+  mobileCountryCode?: string;
   excludeId?: string | null;
   excludeRegister?: WorkforceContactRegister | null;
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const matches: WorkforceContactMatch[] = [];
 
-  for (const item of CONTACT_REGISTERS) {
+  for (const item of CONTACT_REGISTERS.filter(item => item.register === params.register)) {
     let query = supabaseAdmin
       .from(item.register)
       .select(`id, full_name, ${item.codeColumn}`)
@@ -74,8 +76,8 @@ async function findMatches(params: {
       .limit(5);
 
     query = params.column === "email"
-      ? query.ilike("email", params.value)
-      : query.eq("mobile", params.value);
+      ? query.ilike("email", params.value.replace(/[\\%_]/g, "\\$&"))
+      : query.eq("mobile", params.value).eq("mobile_country_code", (params.mobileCountryCode ?? "91").replace(/\D/g, ""));
 
     const result = await query;
     if (result.error) {
@@ -88,7 +90,6 @@ async function findMatches(params: {
       if (!id) continue;
       if (
         params.excludeId
-        && params.excludeRegister === item.register
         && id === params.excludeId
       ) {
         continue;
@@ -108,6 +109,8 @@ async function findMatches(params: {
 export async function checkWorkforceMobileAvailability(params: {
   companyId: string;
   mobile: string;
+  register?: WorkforceContactRegister;
+  mobileCountryCode?: string;
   excludeId?: string | null;
   excludeRegister?: WorkforceContactRegister | null;
 }): Promise<WorkforceContactFieldStatus> {
@@ -115,12 +118,15 @@ export async function checkWorkforceMobileAvailability(params: {
   if (!/^\d{10}$/.test(mobile)) {
     return { status: "invalid", message: "Enter a 10-digit mobile number.", match: null };
   }
-  return { status: "available", message: "Mobile number format is valid.", match: null };
+  const matches = await findMatches({ ...params, register: params.register ?? params.excludeRegister ?? "workforce", column: "mobile", value: mobile });
+  if (matches.length) return { status: "taken", message: `Mobile number is already registered to ${matchLabel(matches[0])}.`, match: matches[0] };
+  return { status: "available", message: "Mobile number is available in this category.", match: null };
 }
 
 export async function checkWorkforceEmailAvailability(params: {
   companyId: string;
   email: string;
+  register?: WorkforceContactRegister;
   excludeId?: string | null;
   excludeRegister?: WorkforceContactRegister | null;
 }): Promise<WorkforceContactFieldStatus> {
@@ -130,6 +136,7 @@ export async function checkWorkforceEmailAvailability(params: {
   }
   const matches = await findMatches({
     companyId: params.companyId,
+    register: params.register ?? params.excludeRegister ?? "workforce",
     column: "email",
     value: email,
     excludeId: params.excludeId,
@@ -149,6 +156,8 @@ export async function assertWorkforceContactsAvailable(params: {
   companyId: string;
   mobile: string;
   email: string;
+  register?: WorkforceContactRegister;
+  mobileCountryCode?: string;
   excludeId?: string | null;
   excludeRegister?: WorkforceContactRegister | null;
 }) {
@@ -157,6 +166,7 @@ export async function assertWorkforceContactsAvailable(params: {
     checkWorkforceEmailAvailability(params)
   ]);
   if (mobileStatus.status === "invalid") throw new Error(mobileStatus.message);
+  if (mobileStatus.status === "taken") throw new Error(mobileStatus.message);
   if (emailStatus.status === "taken") throw new Error(emailStatus.message);
   if (emailStatus.status === "invalid") throw new Error(emailStatus.message);
 }

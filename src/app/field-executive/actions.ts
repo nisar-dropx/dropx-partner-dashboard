@@ -489,6 +489,8 @@ export async function createFieldExecutive(formData: FormData) {
     }
     await assertWorkforceContactsAvailable({
       companyId,
+      register: table,
+      mobileCountryCode,
       mobile,
       email,
       excludeRegister: table
@@ -842,6 +844,8 @@ export async function updateFieldExecutive(formData: FormData) {
     };
     await assertWorkforceContactsAvailable({
       companyId,
+      register: table,
+      mobileCountryCode: payload.mobile_country_code,
       mobile: payload.mobile,
       email: payload.email,
       excludeId: executiveId,
