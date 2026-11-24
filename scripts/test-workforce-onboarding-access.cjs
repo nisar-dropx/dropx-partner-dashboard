@@ -6,6 +6,11 @@ new Function('require','module','exports',ts.transpileModule(source,{compilerOpt
  if(name==='next/cache')return {unstable_cache:f=>f};
  if(name==='@/lib/access-pages')return {accessPages:[]};
  if(name==='./mapping-summary-access')return {inheritsMappingSummaryAccess:()=>false};
+ if(name==='@/lib/ops-pulse/ds-live-performance-access')return {
+  DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary'],
+  canViewDsOperations:()=>false,
+  canViewDsLivePerformance:()=>false
+ };
  return {};
 },m,m.exports);
 const {hasPermission}=m.exports;
