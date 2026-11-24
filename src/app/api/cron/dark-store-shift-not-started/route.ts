@@ -141,7 +141,7 @@ export async function GET(request: Request) {
       .is("deleted_at", null);
     if (clErr) { results.push(`slot ${slot}: DB error — ${clErr.message}`); continue; }
 
-    // Same as store ops: submitted / accepted / cancelled counts as done.
+    // Same as store ops: only submitted counts as complete.
     const statusByLocation = new Map<string, string>();
     for (const row of checklists ?? []) {
       statusByLocation.set(row.location_id as string, String(row.status ?? ""));
@@ -155,8 +155,8 @@ export async function GET(request: Request) {
       if (!group) continue;
 
       const status = statusByLocation.get(locationId);
-      if (status === "submitted" || status === "accepted" || status === "cancelled") {
-        results.push(`${group.groupName} ${slot}: shift operations ${status}`);
+      if (status === "submitted") {
+        results.push(`${group.groupName} ${slot}: shift operations submitted`);
         continue;
       }
 

@@ -126,8 +126,9 @@ export async function GET(request: Request) {
     }
 
     const status = statusByLocation.get(locationId);
-    if (status === "submitted" || status === "cancelled") {
-      results.push(`${group.groupName}: store operations ${status}`);
+    // Only submitted counts as complete — open / cancelled / other still alert.
+    if (status === "submitted") {
+      results.push(`${group.groupName}: store operations submitted`);
       continue;
     }
 

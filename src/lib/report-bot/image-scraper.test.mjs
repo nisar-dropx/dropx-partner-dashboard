@@ -6,11 +6,15 @@ import {
   analyseExpiryRemoved,
   analyseStowingPendency,
   analyseWithImageScraper,
+  istWallClockMs,
   matchScrapable,
   parseExpiryDates,
   parseStowingQuantity,
   quantityNearLabel
 } from "./image-scraper.ts";
+
+/** Fixed “now” in Asia/Kolkata for expiry timestamp comparisons. */
+const asOf = (date, hours = 12, minutes = 0) => istWallClockMs(date, hours, minutes, 0);
 
 const cycle = {
   id: "cycle-1",
@@ -98,49 +102,59 @@ describe("expiry scraper", () => {
     ]);
   });
 
-  test("passes when all visible dates are after business date", () => {
+  test("passes when all visible date+times are still in the future", () => {
     const ocr = "Expiry Dashboard\nExpiration 2026-11-21\nQuantity 12\nExpiration 11/22/2026 4";
-    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20");
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20", asOf("2026-11-20", 12));
     assert.equal(result.verdict, "pass");
   });
 
-  test("fails when a current/past date still has quantity", () => {
+  test("fails when a past date+time still has quantity", () => {
     const ocr = "Expiry Dashboard Expiration 2026-11-19 Quantity 5 ASIN B00";
-    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20");
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20", asOf("2026-11-20", 12));
     assert.equal(result.verdict, "fail");
   });
 
-  test("reads Excel snapshot with today 23:59 shrink as received/pass", () => {
+  test("reads Excel snapshot with today 23:59 shrink as received before that time", () => {
     const ocr = `
       DU-AA-35_EXPIRATION_AUDIT_SNAPSHOT
       Bin Name Product Expiration Shrink Quantity Unit ASIN
       CHL-A01B HERITAGE GOLD MILK 11/24/2026 23:59 11/24/2026 23:59 8 unit B0H7JNK6
       AMB-G01J Fresh Onion 11/25/2026 23:59 11/24/2026 23:59 12 unit B08B4367
     `;
-    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24", asOf("2026-11-24", 11, 18));
     assert.equal(result.verdict, "pass");
-    assert.match(result.extracted_summary, /2026-11-24|same-day|received/i);
+    assert.match(result.extracted_summary, /2026-11-24|received|future/i);
   });
 
-  test("reads Ihm web dashboard and passes when only today 23:59 / future shrink remains", () => {
+  test("fails Excel today 23:59 after that timestamp has passed", () => {
+    const ocr = `
+      DU-AA-35_EXPIRATION_AUDIT_SNAPSHOT
+      Bin Name Product Expiration Shrink Quantity Unit ASIN
+      CHL-A01B HERITAGE GOLD MILK 11/24/2026 23:59 11/24/2026 23:59 8 unit B0H7JNK6
+    `;
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24", asOf("2026-11-25", 0, 1));
+    assert.equal(result.verdict, "fail");
+  });
+
+  test("reads Ihm web dashboard and passes when only later-today / future shrink remains", () => {
     const ocr = `
       Ihm Inventory Expiration Audit Dashboard TEZ-HYDERABAD-TTG9
       Bin Name Product Name Expiration Shrink Quantity Unit ASIN
       CHL-A08E4 Sid's Farm High Protein Milk 2026-11-25 23:59 2026-11-24 23:59 15 unit B0FGDFKV7C
       CHL-B02B2 Fresh Chinese Cabbage 2026-11-25 23:59 2026-11-24 23:59 1 unit B0ABC
     `;
-    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24", asOf("2026-11-24", 7, 6));
     assert.equal(result.verdict, "pass");
   });
 
-  test("still fails when a past shrink date has quantity", () => {
+  test("still fails when a past shrink date+time has quantity", () => {
     const ocr = `
       DU-AA-45_EXPIRATION_AUDIT_SNAPSHOT
       Bin Name Product Expiration Shrink Quantity Unit ASIN
       CHL-B HERITAGE 11/23/2026 23:59 11/23/2026 23:59 8 unit B0H7
       AMB-I Fresh Onion 11/25/2026 23:59 11/24/2026 23:59 12 unit B08B
     `;
-    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24", asOf("2026-11-24", 12));
     assert.equal(result.verdict, "fail");
   });
 
@@ -150,7 +164,7 @@ describe("expiry scraper", () => {
       ASIN Shrink Date Qty LocationId
       Total Expired Items: 0
     `;
-    const result = analyseExpiryRemoved(expiry, text, "2026-11-24");
+    const result = analyseExpiryRemoved(expiry, text, "2026-11-24", asOf("2026-11-24", 12));
     assert.equal(result.verdict, "pass");
   });
 
@@ -166,7 +180,8 @@ describe("expiry scraper", () => {
       businessDate: "2026-11-24",
       text,
       hasImage: false,
-      ocrText: ""
+      ocrText: "",
+      asOfMs: asOf("2026-11-24", 12)
     });
     assert.equal(result?.verdict, "fail");
     assert.equal(result?.matched_report_type_id, expiry.id);

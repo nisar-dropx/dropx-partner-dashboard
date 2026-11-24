@@ -35,6 +35,8 @@ export type ScraperInput = {
   hasImage: boolean;
   /** Full OCR / scraped text from the screenshot (may be empty for text-only reports). */
   ocrText?: string;
+  /** Instant used for overdue comparison (default: now). Tests pass a fixed value. */
+  asOfMs?: number;
 };
 
 const SLUG_SET = new Set<string>(SCRAPABLE_SLUGS);
@@ -298,16 +300,45 @@ export function parseExpiryDates(ocrText: string): string[] {
 
 export type ExpiryDueRow = {
   date: string;
+  /** Instant of shrink/expiration in Asia/Kolkata (date-only defaults to 23:59:00 IST). */
+  atMs: number;
+  /** Display stamp e.g. 2026-11-24 23:59 */
+  atLabel: string;
   quantity: number | null;
   source: "expiration" | "shrink" | "row";
 };
 
+const DATE_TOKEN_RE = String.raw`(?:20\d{2}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]20\d{2}|\d{1,2}\s+[A-Za-z]{3,9}\s+20\d{2})`;
+const TIME_TOKEN_RE = String.raw`(\d{1,2}):(\d{2})(?::(\d{2}))?`;
+
+/** Interpret a wall-clock date+time as Asia/Kolkata. Date-only → 23:59:00 IST (Amazon EOD). */
+export function istWallClockMs(date: string, hours = 23, minutes = 59, seconds = 0): number {
+  const hh = String(Math.min(23, Math.max(0, hours))).padStart(2, "0");
+  const mm = String(Math.min(59, Math.max(0, minutes))).padStart(2, "0");
+  const ss = String(Math.min(59, Math.max(0, seconds))).padStart(2, "0");
+  return Date.parse(`${date}T${hh}:${mm}:${ss}+05:30`);
+}
+
+function formatAtLabel(date: string, hours: number, minutes: number, seconds: number): string {
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  if (seconds) return `${date} ${hh}:${mm}:${String(seconds).padStart(2, "0")}`;
+  return `${date} ${hh}:${mm}`;
+}
+
+function readTimeAfter(line: string, dateEndIndex: number): { hours: number; minutes: number; seconds: number } | null {
+  const slice = line.slice(dateEndIndex, dateEndIndex + 16);
+  const match = new RegExp(`^\\s*[T ]?${TIME_TOKEN_RE}`).exec(slice);
+  if (!match) return null;
+  return { hours: Number(match[1]), minutes: Number(match[2]), seconds: match[3] ? Number(match[3]) : 0 };
+}
+
 /**
  * Row-oriented expiry evidence from Excel photos, Ihm web dashboards, or pasted tables.
  * Prefers same-line quantity after the date; also accepts Quantity / Qty columns and
- * "Total Expired Items: N" summaries.
+ * "Total Expired Items: N" summaries. Captures date+time when present.
  */
-export function parseExpiryDueRows(ocrText: string, businessDate: string): {
+export function parseExpiryDueRows(ocrText: string, _businessDate?: string): {
   looksLike: boolean;
   dates: string[];
   dueRows: ExpiryDueRow[];
@@ -322,10 +353,11 @@ export function parseExpiryDueRows(ocrText: string, businessDate: string): {
 
   const dueRows: ExpiryDueRow[] = [];
   const lines = raw.split(/\r?\n/).map((line) => line.replace(/[|¦]/g, " ").replace(/[ \t]+/g, " ").trim()).filter(Boolean);
+  const dateTimeGlobal = new RegExp(`\\b(${DATE_TOKEN_RE})(?:\\s*[T ]${TIME_TOKEN_RE})?`, "gi");
 
   for (const line of lines) {
     if (/^(bin\s*name|product|expiration|shrink|quantity|asin|fcsku|fnsku|age|unit)\b/i.test(line) && !/\d{4}/.test(line)) continue;
-    const dateMatches = [...line.matchAll(/\b(?:20\d{2}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]20\d{2}|\d{1,2}\s+[A-Za-z]{3,9}\s+20\d{2})\b/g)];
+    const dateMatches = [...line.matchAll(new RegExp(`\\b(${DATE_TOKEN_RE})`, "gi"))];
     if (!dateMatches.length) continue;
 
     let quantity: number | null = null;
@@ -333,50 +365,79 @@ export function parseExpiryDueRows(ocrText: string, businessDate: string): {
       || /(\d{1,7}(?:\.\d+)?)\s*(?:unit|units|pcs?)\b/i.exec(line);
     if (qtyLabeled) quantity = Math.floor(Number(qtyLabeled[1]));
 
-    // Excel / web row: date … date … quantity … unit
+    // Excel / web row: date … date … quantity … unit — skip times when reading trailing qty
     if (quantity === null) {
-      const afterLastDate = line.slice((dateMatches[dateMatches.length - 1]?.index ?? 0) + dateMatches[dateMatches.length - 1][0].length);
-      const trailingQty = /(\d{1,7}(?:\.\d+)?)/.exec(afterLastDate);
+      const last = dateMatches[dateMatches.length - 1];
+      const afterLastDate = line.slice((last?.index ?? 0) + last[0].length);
+      const afterTime = afterLastDate.replace(/^\s*[T ]?\d{1,2}:\d{2}(?::\d{2})?/, "");
+      const trailingQty = /(\d{1,7}(?:\.\d+)?)/.exec(afterTime);
       if (trailingQty) quantity = Math.floor(Number(trailingQty[1]));
     }
 
     for (const match of dateMatches) {
-      const date = parseOneDateToken(match[0]);
-      if (!date || date > businessDate) continue;
-      const before = line.slice(0, match.index ?? 0).toLowerCase();
+      const date = parseOneDateToken(match[1] ?? match[0]);
+      if (!date) continue;
+      const start = match.index ?? 0;
+      const time = readTimeAfter(line, start + match[0].length);
+      const hours = time?.hours ?? 23;
+      const minutes = time?.minutes ?? 59;
+      const seconds = time?.seconds ?? 0;
+      const before = line.slice(0, start).toLowerCase();
       const source = /shrink/.test(before) ? "shrink"
         : /expir/.test(before) ? "expiration"
           : "row";
-      dueRows.push({ date, quantity, source });
+      dueRows.push({
+        date,
+        atMs: istWallClockMs(date, hours, minutes, seconds),
+        atLabel: formatAtLabel(date, hours, minutes, seconds),
+        quantity,
+        source
+      });
     }
   }
 
-  // Flat OCR blob with no reliable line breaks: keep legacy near-date quantity.
+  // Flat OCR blob with no reliable line breaks: keep legacy near-date quantity + optional time.
   if (!dueRows.length) {
-    for (const date of dates.filter((value) => value <= businessDate)) {
+    for (const match of text.matchAll(dateTimeGlobal)) {
+      const date = parseOneDateToken(match[1]);
+      if (!date) continue;
+      const hours = match[2] !== undefined ? Number(match[2]) : 23;
+      const minutes = match[3] !== undefined ? Number(match[3]) : 59;
+      const seconds = match[4] !== undefined ? Number(match[4]) : 0;
       const [y, m, d] = date.split("-");
       const variants = [date, `${Number(m)}/${Number(d)}/${y}`, `${m}/${d}/${y}`, `${d}/${m}/${y}`];
       let quantity: number | null = null;
       for (const token of variants) {
         const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const after = new RegExp(`${escaped}[^\\d]{0,64}(\\d{1,7}(?:\\.\\d+)?)`, "i").exec(text);
+        const after = new RegExp(`${escaped}(?:\\s*[T ]?\\d{1,2}:\\d{2}(?::\\d{2})?)?[^\\d]{0,64}(\\d{1,7}(?:\\.\\d+)?)`, "i").exec(text);
         if (after) {
           quantity = Math.floor(Number(after[1]));
           break;
         }
       }
-      dueRows.push({ date, quantity, source: "row" });
+      dueRows.push({
+        date,
+        atMs: istWallClockMs(date, hours, minutes, seconds),
+        atLabel: formatAtLabel(date, hours, minutes, seconds),
+        quantity,
+        source: "row"
+      });
     }
   }
 
   return { looksLike, dates, dueRows, totalExpired };
 }
 
-export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: string, businessDate: string): Analysis {
+export function analyseExpiryRemoved(
+  candidate: ScrapableCandidate,
+  ocrText: string,
+  businessDate: string,
+  asOfMs: number = Date.now()
+): Analysis {
   const rules = candidate.rules.length ? candidate.rules : [
-    "Check the Expiration / Shrink column against today in Asia/Kolkata.",
-    "Treat same-day 23:59 shrink as still valid for today; only earlier calendar dates are overdue.",
-    "Pass when there are no past-date rows with quantity above 0 (today 23:59 is accepted)."
+    "Check the Expiration / Shrink date and time against now in Asia/Kolkata.",
+    "A row is overdue only when its date+time has already passed (today 23:59 is fine until then).",
+    "Pass when there are no overdue rows with quantity above 0."
   ];
   const parsed = parseExpiryDueRows(ocrText, businessDate);
   if (!parsed.looksLike && !parsed.dates.length && parsed.totalExpired === null) {
@@ -392,13 +453,10 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
     });
   }
 
-  // Amazon shrink/expiration at today 23:59 is end-of-day — not overdue until the next business date.
-  const overdueRows = parsed.dueRows.filter((row) => row.date < businessDate);
-  const overdueDates = [...new Set(overdueRows.map((row) => row.date))].sort();
-  const pastCalendarDates = parsed.dates.filter((date) => date < businessDate);
-  const sameDayOrFutureOnly =
-    (parsed.dueRows.length > 0 && overdueRows.length === 0)
-    || (parsed.dates.length > 0 && pastCalendarDates.length === 0 && overdueRows.length === 0);
+  const overdueRows = parsed.dueRows.filter((row) => row.atMs <= asOfMs);
+  const futureRows = parsed.dueRows.filter((row) => row.atMs > asOfMs);
+  const overdueLabels = [...new Set(overdueRows.map((row) => row.atLabel))].sort();
+  const notYetDueOnly = parsed.dueRows.length > 0 && overdueRows.length === 0;
 
   // Explicit empty summary from Amazon / Ops text tables.
   if (parsed.totalExpired === 0 && !overdueRows.some((row) => (row.quantity ?? 0) > 0)) {
@@ -414,29 +472,31 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
     });
   }
 
-  // Excel / Ihm snapshots often show only today's 23:59 shrink — treat as received/clear for today.
-  if (sameDayOrFutureOnly && !(parsed.totalExpired !== null && parsed.totalExpired > 0 && pastCalendarDates.length > 0)) {
+  // Excel / Ihm / photos: only future (or later-today) timestamps remain — report received.
+  if (notYetDueOnly) {
+    const soonest = futureRows.map((row) => row.atLabel).sort()[0] ?? "later today";
     return analysis({
       matched: candidate,
       checks: [
-        check(rules[0], "pass", `Read dates for ${businessDate}; visible shrink/expiration is today 23:59 or later.`),
-        check(rules[1], "pass", "No past-date overdue rows — same-day 23:59 is accepted."),
+        check(rules[0], "pass", `Read shrink/expiration timestamps; soonest remaining is ${soonest}.`),
+        check(rules[1], "pass", "No overdue date+time yet — later-today stamps (e.g. 23:59) are accepted."),
         check(rules[2], "pass", "Expiry report received for today.")
       ],
       fields: fieldsOf(
         field("Business Date", businessDate),
         field("Earliest Expiration Date", parsed.dates[0] ?? null),
         field("Latest Expiration Date", parsed.dates.length ? parsed.dates[parsed.dates.length - 1] : null),
+        field("Soonest remaining", soonest),
         parsed.totalExpired !== null ? field("Total Expired Items", parsed.totalExpired) : null
       ),
-      summary: `Expiry report received for ${businessDate}; remaining rows are same-day 23:59 or future.`
+      summary: `Expiry report received for ${businessDate}; remaining timestamps are still in the future (from ${soonest}).`
     });
   }
 
   const positiveDue = overdueRows.some((row) => (row.quantity ?? 0) > 0)
-    || (parsed.totalExpired !== null && parsed.totalExpired > 0 && (pastCalendarDates.length > 0 || overdueRows.length > 0))
+    || (parsed.totalExpired !== null && parsed.totalExpired > 0 && overdueRows.length > 0)
     || (parsed.totalExpired !== null && parsed.totalExpired > 0 && !parsed.dates.length && !parsed.dueRows.length);
-  const qtyUnclear = overdueDates.length > 0
+  const qtyUnclear = overdueLabels.length > 0
     && !positiveDue
     && parsed.totalExpired === null
     && overdueRows.every((row) => row.quantity === null);
@@ -447,39 +507,39 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
       rules[0],
       parsed.dates.length || parsed.totalExpired !== null ? "pass" : "unclear",
       parsed.dates.length
-        ? `Read expiration/shrink dates from ${earliest} to ${latest} (business date ${businessDate}).`
+        ? `Read expiration/shrink timestamps from ${earliest} to ${latest} (as of ${businessDate} IST).`
         : parsed.totalExpired !== null
           ? `Total Expired Items reported as ${parsed.totalExpired}.`
           : "No expiration dates were readable."
     ),
     check(
       rules[1],
-      !overdueDates.length && !positiveDue
+      !overdueLabels.length && !positiveDue
         ? "pass"
         : positiveDue
           ? "fail"
           : qtyUnclear
             ? "unclear"
             : "pass",
-      !overdueDates.length && !positiveDue
-        ? "No past-date overdue rows visible (today 23:59 is not overdue)."
+      !overdueLabels.length && !positiveDue
+        ? "No overdue date+time rows visible."
         : positiveDue
-          ? `Past-date rows still show quantity above 0 (${overdueDates.join(", ") || `total ${parsed.totalExpired}`}).`
+          ? `Overdue rows still show quantity above 0 (${overdueLabels.join(", ") || `total ${parsed.totalExpired}`}).`
           : qtyUnclear
-            ? `Past dates visible (${overdueDates.join(", ")}) but quantity could not be confirmed as 0.`
-            : "Past-date rows show quantity 0."
+            ? `Overdue timestamps visible (${overdueLabels.join(", ")}) but quantity could not be confirmed as 0.`
+            : "Overdue rows show quantity 0."
     ),
     check(
       rules[2],
-      !overdueDates.length && !positiveDue
+      !overdueLabels.length && !positiveDue
         ? "pass"
         : positiveDue
           ? "fail"
           : qtyUnclear
             ? "unclear"
             : "pass",
-      !overdueDates.length && !positiveDue && !qtyUnclear
-        ? "No past-date stock remaining on the visible rows."
+      !overdueLabels.length && !positiveDue && !qtyUnclear
+        ? "No overdue stock remaining on the visible rows."
         : "Expiry clearance is not confirmed."
     )
   ];
@@ -490,12 +550,12 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
       field("Business Date", businessDate),
       field("Earliest Expiration Date", earliest),
       field("Latest Expiration Date", latest),
-      field("Past dates visible", overdueDates.length ? overdueDates.join(", ") : "none"),
+      field("Overdue timestamps", overdueLabels.length ? overdueLabels.join(", ") : "none"),
       parsed.totalExpired !== null ? field("Total Expired Items", parsed.totalExpired) : null
     ),
-    summary: !overdueDates.length && !positiveDue
+    summary: !overdueLabels.length && !positiveDue
       ? `Expiry dashboard clear for ${businessDate}; visible dates start at ${earliest ?? "n/a"}.`
-      : `Expiry dashboard still shows past dates: ${overdueDates.join(", ") || `total ${parsed.totalExpired}`}.`
+      : `Expiry dashboard still shows overdue timestamps: ${overdueLabels.join(", ") || `total ${parsed.totalExpired}`}.`
   });
 }
 
@@ -666,7 +726,7 @@ export function analyseWithImageScraper(input: ScraperInput): Analysis | null {
         summary: "Expiry removed report needs a dashboard screenshot, Excel photo, or pasted expiry table."
       });
     }
-    return analyseExpiryRemoved(matched, evidence, input.businessDate);
+    return analyseExpiryRemoved(matched, evidence, input.businessDate, input.asOfMs ?? Date.now());
   }
   if (slug === "dg-fuel-level") {
     return analyseDgFuel(matched, { hasImage: input.hasImage, ocrText: ocr, messageText: message });
