@@ -3,6 +3,7 @@ import { PageHead } from "@/components/page-head";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { CortexWorkspace } from "@/components/cortex-workspace";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { canViewDsLivePerformance } from "@/lib/ops-pulse/ds-live-performance-access";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
@@ -48,6 +49,7 @@ export default async function CortexPerformancePage({
           />
           <PerformanceWorkspaceTabs
             active="cortex"
+            canViewLive={canViewDsLivePerformance(auth)}
             canViewReviews={hasPermission(auth, "performance_review", "access")}
             canViewReviewStatus={hasPermission(auth, "performance_review_status", "access")}
             darkStore

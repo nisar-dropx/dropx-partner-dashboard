@@ -38,6 +38,7 @@ export const accessPages = [
   { code: "performance_review", name: "Performance Reviews", sort_order: 84 },
   { code: "performance_review_cluster_filter", name: "Review Desk Cluster Filter", sort_order: 84 },
   { code: "performance_review_status", name: "Review Status", sort_order: 84 },
+  { code: "ds_live_performance", name: "Dark Store · Live performance", sort_order: 84 },
   { code: "capacity", name: "Capacity", sort_order: 84 },
   { code: "capacity_overview", name: "Capacity Overview", sort_order: 84 },
   { code: "capacity_associates", name: "Associate SPR", sort_order: 84 },
@@ -681,6 +682,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
+    // ds_live_performance is role-gated (FSD / Admin only) — not seeded from Review Desk.
     await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], "station_edd");
     for (const code of ["edd_live_ops", "edd_station_board", "edd_ageing", "edd_performance", "edd_edds", "edd_scorecard", "edd_scrub"]) {
       await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], code);

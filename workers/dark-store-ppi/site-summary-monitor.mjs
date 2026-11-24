@@ -14,6 +14,7 @@
  * Required env (set in .env or environment):
  *   WHATSAPP_WORKER_URL    https://dropx-report-bot.onrender.com
  *   WHATSAPP_WORKER_TOKEN  rbw_...
+ *   SUPABASE_URL / SUPABASE_SERVICE_KEY  (same as fetch.mjs — portal Live Performance)
  *
  * Optional env:
  *   ACCEPTANCE_THRESHOLD_SECONDS   default 15
@@ -22,6 +23,7 @@
  *   TESTING_GROUP_JID              override — send ALL alerts here instead of per-station groups
  *   AMAZON_STATION_GROUP_JIDS      TCC3:1203…@g.us,TCD4:…  (per-station war rooms)
  *   DARK_STORE_OPS_GROUP_JID       fallback if station JID missing
+ *   COMPANY_ID                     defaults to DropX production company
  */
 
 import { readFileSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
@@ -58,6 +60,9 @@ const TESTING_GROUP  = process.env.TESTING_GROUP_JID ?? "";   // set this to Dar
 const FALLBACK_GROUP = process.env.DARK_STORE_OPS_GROUP_JID ?? "";
 const GC_BASE        = "https://eu.store-management.f3.amazon.dev";
 const STATE_DIR      = join(__dir, ".site-summary-state");
+const SUPABASE_URL   = (process.env.SUPABASE_URL || "https://uimajyffojydenqsegjv.supabase.co").replace(/\/$/, "");
+const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY || process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
+const COMPANY_ID     = process.env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997";
 
 // Per-station war room JIDs: TCC3:120363424408130632@g.us,TCD4:…
 const stationGroupMap = Object.fromEntries(
@@ -171,21 +176,131 @@ async function fetchSiteSummary(storeId, cookies) {
 }
 
 // ── Acceptance time computation ───────────────────────────────────────────────
+/** Amazon may return assignment epoch in seconds or milliseconds. */
+function assignmentEpochSeconds(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // ms since epoch is ~1e12; seconds is ~1e9
+  return n > 1e11 ? n / 1000 : n;
+}
+
+function orderOid(summary) {
+  const raw = String(summary.fulfillmentId ?? summary.procurementListId ?? summary.orderId ?? "").trim();
+  if (!raw) return null;
+  const stripped = raw.replace(/^.+-/, "");
+  // Prefer last 12 chars when available to cut collision risk vs last-6.
+  return (stripped || raw).slice(-12);
+}
+
 function computeAcceptance(summaries) {
   const nowS = Date.now() / 1000;
   const pending = [];
   for (const s of summaries) {
     if (s.status !== "OFFERED" && s.status !== "UNASSIGNED") continue;
-    const assignedAt = Number(s.procurementListAssignmentTime ?? s.assignmentTime ?? 0);
-    if (!assignedAt) continue;
+    const assignedAt = assignmentEpochSeconds(s.procurementListAssignmentTime ?? s.assignmentTime ?? 0);
+    if (assignedAt == null) continue;
     const elapsedS = Math.max(0, nowS - assignedAt);
-    const oid = String(s.fulfillmentId ?? s.procurementListId ?? "").replace(/^.+-/, "").slice(-6);
-    const picker = s.associateInfo?.associateId ?? "Unassigned";
+    const oid = orderOid(s);
+    if (!oid) continue; // skip rows without a stable key — avoid collapsing onto "unknown"
+    const picker = s.associateInfo?.associateId ?? s.associateInfo?.login ?? "Unassigned";
     const items = Number(s.totalItems ?? s.itemsToPick ?? 0);
-    pending.push({ oid, picker, elapsedS, items });
+    const pct = Number(s.percentComplete ?? s.pctComplete ?? s.completionPercentage ?? NaN);
+    pending.push({
+      oid,
+      picker: String(picker),
+      elapsedS,
+      items,
+      pctComplete: Number.isFinite(pct) ? pct : null,
+      status: String(s.status ?? "")
+    });
   }
   pending.sort((a, b) => b.elapsedS - a.elapsedS);
   return pending;
+}
+
+// ── Supabase ingest (portal Live Performance) ─────────────────────────────────
+const SB_HEADERS = SUPABASE_KEY ? {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
+  "Content-Type": "application/json",
+  Prefer: "resolution=merge-duplicates,return=minimal"
+} : null;
+
+async function sbUpsert(table, rows, onConflict) {
+  if (!SB_HEADERS || !rows.length) return;
+  if (dryRun) { console.log(`  [dry-run] upsert ${rows.length} → ${table}`); return; }
+  const qs = onConflict ? `?on_conflict=${onConflict}` : "";
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${qs}`, {
+    method: "POST",
+    headers: SB_HEADERS,
+    body: JSON.stringify(rows)
+  });
+  if (!r.ok) throw new Error(`Supabase upsert ${table}: ${r.status} ${await r.text()}`);
+}
+
+async function sbDelete(table, filter) {
+  if (!SB_HEADERS) return;
+  if (dryRun) { console.log(`  [dry-run] delete ${table}?${filter}`); return; }
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
+    method: "DELETE",
+    headers: SB_HEADERS
+  });
+  if (!r.ok) throw new Error(`Supabase delete ${table}: ${r.status} ${await r.text()}`);
+}
+
+async function persistSiteSummary(stationCode, summaries, pending) {
+  if (!SUPABASE_KEY) {
+    console.warn(`[${stationCode}] SUPABASE_SERVICE_KEY missing — skip Live Performance upsert`);
+    return;
+  }
+  const fetchedAt = new Date().toISOString();
+  const breaching = pending.filter((o) => o.elapsedS >= THRESHOLD_S);
+  const worst = pending[0]?.elapsedS ?? null;
+  await sbUpsert("ds_site_summary_snapshots", [{
+    company_id: COMPANY_ID,
+    station_code: stationCode,
+    fetched_at: fetchedAt,
+    active_orders: summaries.length,
+    pending_acceptance: pending.length,
+    breaching_count: breaching.length,
+    worst_elapsed_seconds: worst,
+    sla_seconds: THRESHOLD_S,
+    payload_json: {
+      active: summaries.length,
+      pending: pending.length,
+      breaching: breaching.length,
+      threshold_s: THRESHOLD_S
+    }
+  }], "company_id,station_code");
+
+  const orderRows = pending.map((o) => ({
+    company_id: COMPANY_ID,
+    station_code: stationCode,
+    oid: o.oid,
+    picker: o.picker,
+    items: o.items,
+    elapsed_seconds: Math.round(o.elapsedS * 100) / 100,
+    pct_complete: o.pctComplete,
+    status: o.status,
+    fetched_at: fetchedAt
+  }));
+  if (orderRows.length) {
+    await sbUpsert("ds_site_summary_orders", orderRows, "company_id,station_code,oid");
+  }
+  // Drop OIDs that are no longer pending for this store.
+  const keep = orderRows.map((r) => r.oid).filter(Boolean);
+  if (keep.length) {
+    const listed = keep.map((oid) => `"${String(oid).replace(/"/g, "")}"`).join(",");
+    await sbDelete(
+      "ds_site_summary_orders",
+      `company_id=eq.${COMPANY_ID}&station_code=eq.${stationCode}&oid=not.in.(${listed})`
+    );
+  } else {
+    await sbDelete(
+      "ds_site_summary_orders",
+      `company_id=eq.${COMPANY_ID}&station_code=eq.${stationCode}`
+    );
+  }
 }
 
 function fmtClock(s) {
@@ -358,6 +473,12 @@ async function pollOnce() {
       const breaching = pending.filter(o => o.elapsedS >= THRESHOLD_S);
 
       console.log(`[${station}] ${summaries.length} active orders, ${pending.length} pending acceptance, ${breaching.length} over ${THRESHOLD_S}s SLA`);
+
+      try {
+        await persistSiteSummary(station, summaries, pending);
+      } catch (persistErr) {
+        console.error(`[${station}] Live Performance upsert failed — ${persistErr.message}`);
+      }
 
       if (breaching.length === 0) continue;
       if (isOnCooldown(station)) {

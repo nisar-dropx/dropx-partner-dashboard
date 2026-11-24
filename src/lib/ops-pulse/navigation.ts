@@ -2,6 +2,7 @@ import { fleetNavItem, type NavItem } from "@/lib/app-navigation";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 import { canAccessDailyCodPending } from "@/lib/ops-pulse/cod-pending-access";
+import { canViewDsLivePerformance } from "@/lib/ops-pulse/ds-live-performance-access";
 
 export const shiftAttendanceNavItem: NavItem = { code: "ops_rostering", label: "Shift Attendance", href: "/ops-pulse?view=manpower", icon: "S" };
 
@@ -237,6 +238,7 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
       label: "Performance",
       icon: "P",
       children: [
+        { code: "ds_live_performance", label: "Live performance", href: "/performance/live" },
         { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
         { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" }
       ]
@@ -270,6 +272,7 @@ export function opsNavItemsForMode(mode: OperatingMode, authorization?: Authoriz
   const showLastMileReportBot = Boolean(authorization && hasPermission(authorization, "ops_lm_report_bot", "access"));
   return items.map(item=>item.children?{...item,children:item.children
     .filter(child => child.code !== "ops_lm_report_bot" || showLastMileReportBot)
+    .filter(child => child.code !== "ds_live_performance" || Boolean(authorization && canViewDsLivePerformance(authorization)))
     .filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))
     .map(child => {
       if (!authorization || !child.permissionSections?.length) return child;

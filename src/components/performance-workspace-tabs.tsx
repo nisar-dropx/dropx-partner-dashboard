@@ -2,17 +2,20 @@ import Link from "next/link";
 
 export function PerformanceWorkspaceTabs({
   active,
+  canViewLive = false,
   canViewReviews,
   canViewReviewStatus,
   darkStore = false
 }: {
-  active: "daily" | "sls" | "reviews" | "status" | "cortex";
+  active: "daily" | "sls" | "reviews" | "status" | "cortex" | "live";
+  canViewLive?: boolean;
   canViewReviews: boolean;
   canViewReviewStatus: boolean;
   darkStore?: boolean;
 }) {
   if (darkStore) {
     return <nav className="performance-tabs performance-workspace-tabs">
+      {canViewLive ? <Link className={active === "live" ? "active" : ""} href="/performance/live">Live performance</Link> : null}
       {canViewReviews ? <Link className={active === "reviews" ? "active" : ""} href="/performance?view=reviews">Review desk</Link> : null}
       {canViewReviewStatus ? <Link className={active === "status" ? "active" : ""} href="/performance/review-status">Review status</Link> : null}
     </nav>;

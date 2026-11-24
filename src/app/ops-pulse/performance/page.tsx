@@ -11,6 +11,7 @@ import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performan
 import { StoreHealthReviewDesk } from "@/components/store-health-review-desk";
 import "./review-desk.css";
 import { hasPermission, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { canViewDsLivePerformance } from "@/lib/ops-pulse/ds-live-performance-access";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
@@ -869,7 +870,7 @@ async function renderStoreHealthReviewDesk({
     <AppShell active="Review Desk" pageCode="performance_review">
       <div className="ops-command-center performance-workspace">
         <PageHead eyebrow="Performance" title="Review Desk" subtitle="D-2 Store Health Scorecard — performance date T is published on T+1; review from T+2." />
-        <PerformanceWorkspaceTabs active="reviews" canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} darkStore />
+        <PerformanceWorkspaceTabs active="reviews" canViewLive={canViewDsLivePerformance(authorization)} canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} darkStore />
         {dayFacts.error ? <section className="panel message-panel error"><div className="panel-body">{dayFacts.error.message}</div></section> : null}
         {selectedReviewLocation ? <StoreHealthReviewDesk
           canAdd={Boolean(reviewAccess?.canStart)}

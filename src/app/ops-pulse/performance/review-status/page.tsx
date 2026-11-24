@@ -6,6 +6,7 @@ import { PageHead } from "@/components/page-head";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
+import { canViewDsLivePerformance } from "@/lib/ops-pulse/ds-live-performance-access";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
@@ -239,7 +240,13 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
         subtitle={`Every ${locationLabel.toLowerCase()} review, reviewer stage and pending dependency.`}
         action={canManageAccess ? <Link className="button secondary compact" href="/users?section=roles">Manage access</Link> : undefined}
       />
-      <PerformanceWorkspaceTabs active="status" canViewReviews={canViewReviews} canViewReviewStatus darkStore={darkStore} />
+      <PerformanceWorkspaceTabs
+        active="status"
+        canViewLive={canViewDsLivePerformance(authorization)}
+        canViewReviews={canViewReviews}
+        canViewReviewStatus
+        darkStore={darkStore}
+      />
 
       <nav className="review-status-presets" aria-label="Review date presets">
         <Link className={range.from === latestDate && range.to === latestDate ? "active" : ""} href={hrefFor(todayFilters, { from: latestDate, to: latestDate, page: undefined })}>Previous day</Link>
