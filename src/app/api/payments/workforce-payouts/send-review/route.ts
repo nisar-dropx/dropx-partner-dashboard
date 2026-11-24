@@ -1,4 +1,5 @@
 import { disputeWindowDays } from "@/lib/payout-dispute-workflow-settings";
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { payoutDisputeDeadline, payoutDisputeHours } from "@/lib/payout-dispute-window";
 import { waitUntil } from "@vercel/functions";
 
@@ -51,7 +52,6 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const PAYOUT_DEPENDENCY_CHANGED = "Payout inputs changed after this worksheet was displayed. Refresh the page and review the recalculated amounts.";
@@ -60,19 +60,6 @@ type PublicationSnapshot = WorkforcePayoutPublicationSnapshot;
 
 function responseError(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
-}
-
-function validDate(value: unknown) {
-  const text = String(value ?? "");
-  return DATE.test(text) && !Number.isNaN(Date.parse(`${text}T00:00:00Z`));
-}
-
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const end = new Date(`${periodStart}T00:00:00Z`);
-  end.setUTCMonth(end.getUTCMonth() + 1);
-  end.setUTCDate(0);
-  return end.toISOString().slice(0, 10) === periodEnd;
 }
 
 function sameOrigin(request: Request) {
@@ -441,7 +428,7 @@ export async function POST(request: Request) {
     }
     const sendWhatsAppNotification = body?.sendWhatsAppNotification === true;
     const items: unknown[] = Array.isArray(body?.items) ? body.items : [];
-    if (!validDate(periodStart) || !validDate(periodEnd) || periodEnd < periodStart) {
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) {
       return responseError("Select a valid payout period.", 400);
     }
     if (!items.length) return responseError("Select at least one Workforce payout.", 400);
@@ -487,8 +474,8 @@ export async function POST(request: Request) {
     }
 
     if (subjectTypes.has("helper")) {
-      if (!completeCalendarMonth(periodStart, periodEnd)) {
-        return responseError("Publish Payment is available only for one complete calendar month.", 400);
+      if (!validPayoutPublicationPeriod(periodStart, periodEnd)) {
+        return responseError("Choose a valid payout date range with From on or before To.", 400);
       }
 
       const helperItems = normalized.map((item) => {
@@ -759,8 +746,8 @@ export async function POST(request: Request) {
       }, { headers: noStore });
     }
 
-    if (!completeCalendarMonth(periodStart, periodEnd)) {
-      return responseError("Publish Payment is available only for one complete calendar month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) {
+      return responseError("Choose a valid payout date range with From on or before To.", 400);
     }
 
     const verified = normalized.map((item) => {

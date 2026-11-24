@@ -254,14 +254,14 @@ test("Helper publication migration atomically creates an App-only worker notific
     notification_config_snapshot: notificationSnapshot,
     notification_primary: true
   }];
-  const publish = async (publicationItems) => {
+  const publish = async (publicationItems, start = "2026-09-01", end = "2026-09-30") => {
     const identities = publicationItems.map((item) => ({
       helper_id: item.subject_id,
       station_id: item.location_id
     }));
     const dependency = await db.query(
-      "select * from public.helper_payout_dependency_state($1,'2026-09-01','2026-09-30',$2::jsonb)",
-      [company, JSON.stringify(identities)]
+      "select * from public.helper_payout_dependency_state($1,$2,$3,$4::jsonb)",
+      [company, start, end, JSON.stringify(identities)]
     );
     const stateByIdentity = new Map(dependency.rows.map((row) => [
       `${row.helper_id}|${row.station_id}`,
@@ -276,8 +276,8 @@ test("Helper publication migration atomically creates an App-only worker notific
       };
     });
     return db.query(
-      "select public.helper_publish_payout_notifications($1,$2,'2026-09-01','2026-09-30',$3::jsonb,null,'2099-12-31T00:00:00Z',now(),$4,$5) as result",
-      [company, actor, JSON.stringify(versionedItems), config, updatedAt]
+      "select public.helper_publish_payout_notifications($1,$2,$3,$4,$5::jsonb,null,'2099-12-31T00:00:00Z',now(),$6,$7) as result",
+      [company, actor, start, end, JSON.stringify(versionedItems), config, updatedAt]
     );
   };
   const published = await publish(items);
@@ -372,6 +372,17 @@ test("Helper publication migration atomically creates an App-only worker notific
   assert.equal(legacyPublished.rows[0].result.published, 1);
   const legacyStored = await db.query("select revision from public.helper_payout_publications where helper_id=$1", [legacyHelperId]);
   assert.deepEqual(legacyStored.rows.map((row) => row.revision), [1]);
+  const rangeMigration = readFileSync(new URL("../../supabase/migrations/20261124124400_publish_payout_selected_periods.sql", import.meta.url), "utf8");
+  await db.exec(rangeMigration);
+  await db.exec(rangeMigration);
+  for (const [start,end] of [["2026-11-01","2026-11-15"],["2026-11-16","2026-11-30"],["2026-12-16","2026-12-31"],["2027-01-05","2027-01-05"],["2027-01-28","2027-02-04"]]) {
+    const rangeSnapshot=buildHelperPayoutPublicationSnapshot(helperRow(),start,end);
+    const result=await publish([{...items[0],calculation_snapshot:rangeSnapshot,snapshot_hash:helperPayoutPublicationSnapshotHash(rangeSnapshot)}],start,end);
+    assert.equal(result.rows[0].result.published,1);
+    const saved=(await db.query('select period_start::text,period_end::text from helper_payout_publications where id=$1',[result.rows[0].result.publication_ids[0]])).rows[0];
+    assert.deepEqual(saved,{period_start:start,period_end:end});
+  }
+  await assert.rejects(publish(items,"2026-11-16","2026-11-15"),/valid payout publication date range/i);
   await db.close();
 });
 

@@ -1,5 +1,6 @@
 "use client";
 import { facetRows } from "@/lib/dependent-filters";
+import { validPayoutPublicationPeriod, payoutPublicationPeriodLabel } from "@/lib/payout-publication-period";
 import { ReportTable } from "@/components/report-table";
 import { DEFAULT_PAYOUT_DISPUTE_HOURS, MAX_PAYOUT_DISPUTE_HOURS, PAYOUT_DISPUTE_HOUR_PRESETS, payoutDisputeHours } from "@/lib/payout-dispute-window";
 
@@ -508,7 +509,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     return date.toISOString().slice(0, 10);
   }, [periodStart]);
   const canViewPaymentHistory = calendarMonthEnd === periodEnd;
-  const canPublishPeriod = canEdit && canViewPaymentHistory;
+  const canPublishPeriod = canEdit && validPayoutPublicationPeriod(periodStart, periodEnd);
+  const publicationPeriodLabel = payoutPublicationPeriodLabel(periodStart, periodEnd);
   const canPublish = canPublishPeriod && canPublishNotifications;
   const canManuallyEdit = canEdit;
   const canManageLocks = canManageMappingLocks && audience === "workforce";
@@ -1079,7 +1081,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         busy: false,
         error: "",
         notice: action === "unlock"
-          ? `${totals.unlocked} Workforce mapping${totals.unlocked === 1 ? " is" : "s are"} unlocked for ${periodStart.slice(0, 7)}. Remap the IDs, then relock this month.`
+          ? `${totals.unlocked} Workforce mapping${totals.unlocked === 1 ? " is" : "s are"} unlocked for ${publicationPeriodLabel}. Remap the IDs, then relock this period.`
           : `${totals.relocked} mapping unlock${totals.relocked === 1 ? " was" : "s were"} relocked; ${totals.published} revised payout${totals.published === 1 ? " is" : "s are"} now available in DropX One.`
       });
       router.refresh();
@@ -1163,7 +1165,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
     {mappingState.error || mappingState.notice ? <div aria-live="polite" className={`payout-inline-message ${mappingState.error ? "error" : "success"}`}>{mappingState.error || mappingState.notice}</div> : null}
     {cancellationNotice ? <div aria-live="polite" className="payout-inline-message success">{cancellationNotice}</div> : null}
     {holdNotice ? <div aria-live="polite" className="payout-inline-message success">{holdNotice}</div> : null}
-    {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this month.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
+    {mappingUnlocks.length ? <div className="payout-inline-message" role="status"><strong>{mappingUnlocks.length} mapping {mappingUnlocks.length === 1 ? "correction is" : "corrections are"} open for this period.</strong> The last stable payout remains in DropX One as revising until you relock and republish. <span>{mappingUnlocks.slice(0, 5).map((entry) => entry.dropxId || entry.name).join(", ")}{mappingUnlocks.length > 5 ? ` and ${mappingUnlocks.length - 5} more` : ""}.</span></div> : null}
     {advanceState.error || advanceState.notice ? <div aria-live="polite" className={`payout-inline-message ${advanceState.error ? "error" : "success"}`}>{advanceState.error || advanceState.notice}</div> : null}
     {canProcessPayments && selectedRows.length > 0 && selectedBankUnavailableCount > 0 ? <div aria-live="polite" className="payout-inline-message warn">
       <strong>{bankPayoutRows.length > 0 ? `${bankPayoutRows.length.toLocaleString("en-IN")} eligible payout${bankPayoutRows.length === 1 ? "" : "s"} can be downloaded.` : "No selected payout is currently eligible for a new bank file."}</strong>{" "}
@@ -1204,7 +1206,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           {canManuallyEdit && manualSelectedRows.length ? <WorkforcePayoutManualEditor audience={audience} buttonLabel="Edit payout inputs" fromDate={periodStart} selectedRows={manualSelectedRows.map((row) => ({ id: row.id, dropxId: row.dropxId, name: row.name, location: row.location, locationId: row.locationId, status: row.status, ...manualAttendancePeriod(row, periodStart, periodEnd) }))} toDate={periodEnd} /> : null}
           {canDeductAdvances ? <button className="button secondary" disabled={!advanceSelectedRows.length || hasAdvanceSelectionConflict || actionBusy} onClick={deductPendingAdvances} title={hasAdvanceSelectionConflict ? "Select one location row per Workforce member to deduct pending advances." : undefined} type="button">{advanceState.busy ? "Deducting…" : `Deduct pending advances${advanceSelectedRows.length ? ` (${advanceSelectedRows.length})` : ""}`}</button> : null}
         </PayoutActionMenu> : null}
-        {canEdit && !(canManageLocks && relockTargets.length && !reviewSelectedRows.length) ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Publish Payment is available only for a complete monthly payout worksheet." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
+        {canEdit && !(canManageLocks && relockTargets.length && !reviewSelectedRows.length) ? <button className="button" disabled={!canPublish || !reviewSelectedRows.length || actionBusy} onClick={(event) => openPublishDialog(event.currentTarget)} title={!canPublishNotifications ? "Publish Payment is unavailable for this account." : !canPublishPeriod ? "Choose a valid payout date range." : skippedReviewSelectionCount ? `${skippedReviewSelectionCount} selected payout${skippedReviewSelectionCount === 1 ? " is" : "s are"} available for manual editing but not eligible for publishing; only the eligible count will be submitted.` : undefined} type="button">{reviewState.busy ? "Publishing…" : `Publish Payment${reviewSelectedRows.length ? ` (${reviewSelectedRows.length})` : ""}`}</button> : null}
         <button className="button secondary" disabled={actionBusy} onClick={() => setSelected(new Set())} type="button">Clear selection</button>
       </div>
     </div> : showSelection ? <div className="payout-selection-hint">
@@ -1448,10 +1450,10 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
           <button aria-label="Close publish payment dialog" className="button secondary compact" disabled={reviewState.busy} onClick={closePublishDialog} type="button">Close</button>
         </div>
         <div className="confirmation-body">
-          <p id="publish-payment-dialog-description">Publish {reviewSelectedRows.length} selected {subjectLabelLower} payout{reviewSelectedRows.length === 1 ? "" : "s"} for {periodStart.slice(0, 7)}?</p>
+          <p id="publish-payment-dialog-description">Publish {reviewSelectedRows.length} selected {subjectLabelLower} payout{reviewSelectedRows.length === 1 ? "" : "s"} for {publicationPeriodLabel}?</p>
           <p className="subtle">{audience === "workforce"
-            ? "This freezes each selected DropX ID’s provider mapping, remapping and direct-pay allocation for the month, then publishes the payment in DropX One."
-            : "This freezes each selected Helper payout and direct-pay allocation for the month, then publishes the payment in DropX One."}</p>
+            ? "This freezes each selected DropX ID’s provider mapping, remapping and direct-pay allocation for the selected period, then publishes the payment in DropX One."
+            : "This freezes each selected Helper payout and direct-pay allocation for the selected period, then publishes the payment in DropX One."}</p>
           <fieldset className="payout-dispute-window" disabled={reviewState.busy}>
             <legend>Dispute window</legend>
             <div aria-label="Dispute window presets" className="payout-dispute-window-presets" role="group">
@@ -1495,8 +1497,8 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
         </div>
         <div className="panel-body">
           <p id="mapping-lock-dialog-description">{mappingDialog.action === "unlock"
-            ? `Unlock ${mappingUnlockWorkforceIds.length} selected DropX ID${mappingUnlockWorkforceIds.length === 1 ? "" : "s"} only for ${periodStart.slice(0, 7)}. You can then correct the provider ID mapping. The current DropX One payout stays visible as revising until relock.`
-            : `Recalculate affected payouts and close the ${relockTargets.length} selected open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${periodStart.slice(0, 7)}. Other open corrections remain unlocked. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
+            ? `Unlock ${mappingUnlockWorkforceIds.length} selected DropX ID${mappingUnlockWorkforceIds.length === 1 ? "" : "s"} only for ${publicationPeriodLabel}. You can then correct the provider ID mapping. The current DropX One payout stays visible as revising until relock.`
+            : `Recalculate affected payouts and close the ${relockTargets.length} selected open mapping correction${relockTargets.length === 1 ? "" : "s"} for ${publicationPeriodLabel}. Other open corrections remain unlocked. This creates a silent payout revision in Dashboard and DropX One; it does not send another notification.`}</p>
           <div className="payout-inline-message">
             <strong>{mappingDialog.action === "unlock" ? "Selected IDs" : "Open corrections"}</strong>
             <p>{(mappingDialog.action === "unlock"

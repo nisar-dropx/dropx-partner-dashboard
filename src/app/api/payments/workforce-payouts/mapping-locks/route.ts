@@ -1,4 +1,5 @@
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadStablePayoutWorksheet } from "@/lib/stable-payout-worksheet";
@@ -19,7 +20,6 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_MAPPING_LOCK_SELECTION = 50;
 const MAX_MAPPING_LOCK_REQUEST_BYTES = 64 * 1024;
@@ -43,20 +43,6 @@ function errorResponse(error: string, status: number) {
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === new URL(request.url).origin;
-}
-
-function validDate(value: string) {
-  if (!DATE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const end = new Date(`${periodStart}T00:00:00Z`);
-  end.setUTCMonth(end.getUTCMonth() + 1);
-  end.setUTCDate(0);
-  return end.toISOString().slice(0, 10) === periodEnd;
 }
 
 function uniqueUuidList(value: unknown) {
@@ -144,8 +130,8 @@ export async function POST(request: Request) {
     if (action !== "unlock" && action !== "relock") {
       return errorResponse("Select mapping unlock or relock.", 400);
     }
-    if (!completeCalendarMonth(periodStart, periodEnd)) {
-      return errorResponse("Mapping unlock and relock is available only for one complete calendar month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) {
+      return errorResponse("Choose a valid date range for mapping unlock or relock.", 400);
     }
     if (!UUID.test(operationId)) {
       return errorResponse("A valid operation ID is required.", 400);

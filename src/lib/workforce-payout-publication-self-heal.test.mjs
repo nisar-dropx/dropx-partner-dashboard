@@ -42,9 +42,9 @@ test("self-heal uses the source-neutral idempotent database contract", () => {
   ]) assert.match(helper, new RegExp(resultKey));
 });
 
-test("publication refresh endpoint requires a real editor and validates an exact full-month selection", () => {
+test("publication refresh endpoint requires a real editor and validates the exact selected period", () => {
   assert.match(route, /authorization\.readOnly \|\| !hasPermission\(authorization, pageCode, "edit"\)/);
-  assert.match(route, /completeCalendarMonth\(periodStart, periodEnd\)/);
+  assert.match(route, /validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
   assert.match(route, /MAX_WORKFORCE_PAYOUT_PUBLICATION_SELF_HEAL_ROWS/);
   assert.match(route, /new Set\(targets\.map\(identity\)\)\.size !== targets\.length/);
   assert.match(route, /ensureWorkforcePayoutPublicationRefreshJobs\(\{/);
@@ -72,11 +72,11 @@ test("the invisible client retries transient failures and refreshes verified no-
   assert.match(client, /return null;/);
 });
 
-test("page discovers exact stable monthly mismatches before payment-state merge", () => {
+test("page discovers exact stable period mismatches before payment-state merge", () => {
   const candidates = page.indexOf("const publicationSelfHealRows");
   const merge = page.indexOf("const reviewedPaymentRows");
   assert.ok(candidates > 0 && merge > candidates);
-  assert.match(page, /audience === "workforce"[\s\S]*?period\.mode === "monthly"[\s\S]*?canEdit[\s\S]*?!authorization\.readOnly[\s\S]*?!provisional[\s\S]*?!loadError[\s\S]*?!reviewed\.error/);
+  assert.match(page, /audience === "workforce"[\s\S]*?validPayoutPublicationPeriod\(period\.fromDate, period\.toDate\)[\s\S]*?canEdit[\s\S]*?!authorization\.readOnly[\s\S]*?!provisional[\s\S]*?!loadError[\s\S]*?!reviewed\.error/);
   assert.match(page, /workforcePayoutPublicationRefreshPending\([\s\S]*?row\.publicationLockState,[\s\S]*?row\.netAmount,[\s\S]*?row\.publicationTargetAmount/);
   assert.match(page, /WorkforcePayoutPublicationSelfHeal[\s\S]*?periodStart=\{period\.fromDate\}[\s\S]*?periodEnd=\{period\.toDate\}/);
 });

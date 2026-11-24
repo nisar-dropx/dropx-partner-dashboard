@@ -13,8 +13,8 @@ test("mapping locks require same-origin payout edit access and company-wide scop
   assert.match(source, /Cache-Control": "private, no-store"/);
 });
 
-test("mapping lock request validates month, idempotency key, bounded unique selections and audit text", () => {
-  assert.match(source, /completeCalendarMonth\(periodStart, periodEnd\)/);
+test("mapping lock request validates period, idempotency key, bounded unique selections and audit text", () => {
+  assert.match(source, /validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
   assert.match(source, /UUID\.test\(operationId\)/);
   assert.match(source, /MAX_MAPPING_LOCK_SELECTION = 50/);
   assert.match(source, /new Set\(ids\)\.size !== ids\.length/);

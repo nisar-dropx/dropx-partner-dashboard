@@ -1,5 +1,21 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Selected-period payout publication — 24 November 2026
+
+Publish Payment accepts the exact daily/custom date range shown in the worksheet,
+including Flipkart 1–15 and 16–month-end cycles. Confirmation shows both dates.
+The page, signed snapshot validation and Workforce/Helper database publication
+writers share ordered, valid-date semantics. Reviews, notifications, revisions,
+mapping unlock/relock and publication refresh retain the exact selected range.
+Location access, calculation freshness and dispute deadlines stay enforced.
+Calculation rules and bank-payment period rules are independent of publication.
+Migration `20261124124400_publish_payout_selected_periods.sql` relaxes only
+publication/review lifecycle guards and their period constraints. Existing
+snapshots and recovery records are not rewritten.
+Tests cover real PostgreSQL publication writes for both half-month cycles,
+single-day and cross-month ranges, plus malformed/reversed dates, permissions,
+notification settings, snapshot freshness and repeatable migration.
+
 ## Category-scoped contact duplicates — 24 November 2026
 
 Email and mobile may be reused across People/Workforce categories. Duplicate

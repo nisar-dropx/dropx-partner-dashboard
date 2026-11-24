@@ -1,4 +1,5 @@
 import { loadPayoutProcessingInstructions } from "@/lib/payout-processing-instructions";
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -698,8 +699,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   const canManageMappingLocks = audience === "workforce"
     && canEdit
     && authorization.hasAllLocationAccess
-    && period.mode === "monthly"
-    && period.fromDate === `${period.month}-01`;
+    && validPayoutPublicationPeriod(period.fromDate, period.toDate);
   const emptyUnlocks = {
     unlocks: [] as WorkforcePayoutMappingUnlock[],
     impactedWorkforceIds: new Set<string>(),
@@ -773,7 +773,7 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   ]);
   const paymentByRowId = new Map(paymentEnriched.rows.map((row) => [row.id, row]));
   const publicationSelfHealRows = audience === "workforce"
-    && period.mode === "monthly"
+    && validPayoutPublicationPeriod(period.fromDate, period.toDate)
     && canEdit
     && !authorization.readOnly
     && !provisional

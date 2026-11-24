@@ -4,6 +4,7 @@ import fs from "node:fs";
 import ts from "typescript";
 import * as windowPolicy from "../../../../../lib/payout-dispute-window.ts";
 import { disputeWindowDays } from "../../../../../lib/payout-dispute-workflow-settings.ts";
+import * as periodPolicy from "../../../../../lib/payout-publication-period.ts";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const worker = "00000000-0000-4000-8000-000000000002";
@@ -11,9 +12,9 @@ const station = "00000000-0000-4000-8000-000000000003";
 const source = fs.readFileSync(new URL("./route.ts", import.meta.url), "utf8");
 const output = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 
-function fixture({days=2, canEdit=true, policyError=false, locationSetHash="locations"}={}) {
+function fixture({days=2, canEdit=true, policyError=false, locationSetHash="locations", periodStart="2026-10-01", periodEnd="2026-10-31"}={}) {
   const calls=[]; const reads=[];
-  const snapshot={schema_version:2,source:"workforce_payout_worksheet",dependency_hash:"dep",run:{period_start:"2026-10-01",period_end:"2026-10-31"},item:{workforce_id:worker,station_id:station,net_amount:100},lines:[],worksheet:{}};
+  const snapshot={schema_version:2,source:"workforce_payout_worksheet",dependency_hash:"dep",run:{period_start:periodStart,period_end:periodEnd},item:{workforce_id:worker,station_id:station,net_amount:100},lines:[],worksheet:{}};
   const db={
     from(table) {
       reads.push(table);
@@ -37,6 +38,7 @@ function fixture({days=2, canEdit=true, policyError=false, locationSetHash="loca
     }
   };
   const mocks={
+    "@/lib/payout-publication-period":periodPolicy,
     "@/lib/payout-dispute-window":windowPolicy,
     "@/lib/payout-dispute-workflow-settings":{disputeWindowDays},
     "@vercel/functions":{waitUntil:()=>{throw Error("No delivery should be scheduled by fixture");}},
@@ -52,7 +54,7 @@ function fixture({days=2, canEdit=true, policyError=false, locationSetHash="loca
   };
   const mod={exports:{}};
   new Function("require","module","exports",output)((id)=>mocks[id]??{},mod,mod.exports);
-  const body={periodStart:"2026-10-01",periodEnd:"2026-10-31",sendWhatsAppNotification:false,items:[{subjectType:"workforce",subjectId:worker,locationId:station,reviewToken:"signed",calculationSnapshot:snapshot}]};
+  const body={periodStart,periodEnd,sendWhatsAppNotification:false,items:[{subjectType:"workforce",subjectId:worker,locationId:station,reviewToken:"signed",calculationSnapshot:snapshot}]};
   return {calls,reads,body,post:(overrides={},origin="https://dashboard.example")=>mod.exports.POST(new Request("https://dashboard.example/api/payments/workforce-payouts/send-review",{method:"POST",headers:{origin,"content-type":"application/json"},body:JSON.stringify({...body,...overrides})}))};
 }
 
@@ -68,6 +70,21 @@ test("publishing passes the chosen deadline to the atomic writer and both notifi
     assert.equal(args.p_items[0].notification_config_snapshot.whatsapp_notification_enabled,notify);
     assert.deepEqual(args.p_locations,[station]);
     assert.equal(args.p_items[0].calculation_snapshot.item.net_amount,100);
+  }
+});
+
+test("publishes exact half-month, daily and cross-month periods without rounding dates",async()=>{
+  for(const [periodStart,periodEnd] of [["2026-11-01","2026-11-15"],["2026-11-16","2026-11-30"],["2026-10-16","2026-10-31"],["2026-11-04","2026-11-04"],["2026-10-28","2026-11-05"]]) {
+    const f=fixture({periodStart,periodEnd});
+    const response=await f.post();
+    assert.equal(response.status,200,JSON.stringify(await response.json()));
+    assert.equal(f.calls[0].p_period_start,periodStart);
+    assert.equal(f.calls[0].p_period_end,periodEnd);
+  }
+  for(const [periodStart,periodEnd] of [["2026-11-16","2026-11-15"],["2026-02-30","2026-03-01"]]) {
+    const f=fixture({periodStart,periodEnd});
+    assert.equal((await f.post()).status,400);
+    assert.equal(f.calls.length,0);
   }
 });
 

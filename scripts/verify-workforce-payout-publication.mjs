@@ -194,4 +194,24 @@ assert.equal(appNotice.rows[0].recipient_account_id, workforce);
 assert.equal(appNotice.rows[0].route, notificationSnapshot.resolved_values.payout_url);
 assert.equal(appNotice.rows[0].data.payoutMonth, "2026-10");
 
-console.log("Workforce payout publication migration verification passed.");
+// Exercise the real writer after the selected-period migration, not a mocked
+// period predicate. Both Flipkart cycles remain separate immutable snapshots.
+const selectedPeriodMigration = readFileSync(new URL("../supabase/migrations/20261124124400_publish_payout_selected_periods.sql", import.meta.url), "utf8");
+await db.exec(selectedPeriodMigration);
+await db.exec(selectedPeriodMigration);
+for (const [start, end] of [["2026-11-01","2026-11-15"],["2026-11-16","2026-11-30"],["2026-12-16","2026-12-31"],["2027-01-05","2027-01-05"],["2027-01-28","2027-02-04"]]) {
+  const snapshot = {...calculationSnapshot,run:{period_start:start,period_end:end}};
+  const notice = {...notificationSnapshot,resolved_values:{...notificationSnapshot.resolved_values,payout_period:`${start} to ${end}`}};
+  const result = await db.query(`select public.workforce_publish_payout_notifications(
+    $1,$2,$3,$4,$5::jsonb,null,'hash',now()+interval '1 day',now(),$6,$7) as result`,
+    [company,actor,start,end,JSON.stringify([{subject_type:"workforce",subject_id:workforce,location_id:station,
+      expected_status:"ready",calculation_snapshot:snapshot,snapshot_hash:`range-${start}-${end}`,
+      notification_config_snapshot:notice,notification_primary:true}]),appConfig,configUpdatedAt]);
+  assert.equal(result.rows[0].result.published,1);
+  const saved = (await db.query('select period_start::text,period_end::text,snapshot from workforce_payout_publications where id=$1',[result.rows[0].result.publication_ids[0]])).rows[0];
+  assert.equal(saved.period_start,start);
+  assert.equal(saved.period_end,end);
+  assert.equal(saved.snapshot.run.period_end,end);
+}
+await assert.rejects(db.query(`select public.workforce_publish_payout_notifications($1,$2,'2026-11-16','2026-11-15','[]'::jsonb,null,'hash',now()+interval '1 day',now(),$3,$4)`,[company,actor,appConfig,configUpdatedAt]),/valid payout publication date range/i);
+console.log("Workforce publication verification passed, including independent half-month, daily and cross-month snapshots.");
