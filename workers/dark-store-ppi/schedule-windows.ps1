@@ -11,8 +11,12 @@ $monitor   = Join-Path $workerDir "site-summary-monitor.mjs"
 $logFile   = Join-Path $workerDir "run.log"
 $siteLog   = Join-Path $workerDir "site-summary.log"
 
-if (-not (Test-Path $script)) { throw "Missing $script — set `$workerDir correctly." }
-if (-not (Test-Path $monitor)) { throw "Missing $monitor — copy site-summary-monitor.mjs into $workerDir first." }
+if (-not (Test-Path $script)) {
+  throw "Missing $script - set workerDir correctly."
+}
+if (-not (Test-Path $monitor)) {
+  throw "Missing $monitor - copy site-summary-monitor.mjs into $workerDir first."
+}
 
 # No -RunLevel Highest so it works without admin
 $settings = New-ScheduledTaskSettingsSet `
@@ -20,7 +24,7 @@ $settings = New-ScheduledTaskSettingsSet `
   -MultipleInstances IgnoreNew `
   -Hidden
 
-# ── PPI every 30 minutes ───────────────────────────────────────────────────────
+# PPI every 30 minutes
 $wrapperArg = "/c node `"$script`" >> `"$logFile`" 2>&1"
 $actionPPI = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArg -WorkingDirectory $workerDir
 $trigger30 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 30) -Once -At (Get-Date)
@@ -35,7 +39,7 @@ Register-ScheduledTask `
 Write-Host "PPI task registered: runs every 30 minutes."
 Write-Host "Log file: $logFile"
 
-# ── Inbound every 60 minutes ───────────────────────────────────────────────────
+# Inbound every 60 minutes
 $wrapperArgInbound = "/c node `"$script`" --inbound >> `"$logFile`" 2>&1"
 $actionInbound = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArgInbound -WorkingDirectory $workerDir
 $trigger60 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 60) -Once -At (Get-Date)
@@ -49,7 +53,7 @@ Register-ScheduledTask `
 
 Write-Host "Inbound task registered: runs every 60 minutes."
 
-# ── Site Summary monitor: long-running loop (do NOT open a PowerShell window) ─
+# Site Summary monitor: long-running loop (no open PowerShell window needed).
 # Starts at user logon and keeps polling every POLL_INTERVAL_SECONDS (default 60).
 # Firefox must stay logged into Site Summary so Mons cookies stay fresh.
 $wrapperArgSite = "/c node `"$monitor`" >> `"$siteLog`" 2>&1"
