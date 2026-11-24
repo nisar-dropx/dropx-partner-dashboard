@@ -506,11 +506,11 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         <section className={s.card}>
           <div className={s.reviewBar}>
             <div>
-              <strong>Auto-reply is {auto ? "on" : "off"}</strong>
+              <strong>AI auto-reply is {auto ? "on" : "off"}</strong>
               <div className={s.hint}>
                 {auto
-                  ? `Confident results (${Math.round(settings.auto_send_min_confidence * 100)}%+, no unclear rule) are posted without a click. Unclear photos still wait below.`
-                  : "Every reply waits here for you to approve."}
+                  ? `AI replies at ${Math.round(settings.auto_send_min_confidence * 100)}%+ post without a click. Local OCR (cycle / expiry / stowing / DG) always posts in Live groups — put a group in Review to require approval.`
+                  : "AI replies wait here for approval. Local OCR completion checks still post automatically in Live groups (pass closes the day; fail/unclear feedback goes out without a click)."}
               </div>
             </div>
             <div className={s.formActions}>
@@ -541,7 +541,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         title="Waiting for review"
         icon={<Inbox size={18} aria-hidden />}
         description={settings.mode === "live"
-          ? "Completion reports (cycle count, expiry, stowing, DG) are scraped from the image/text. Pass closes the day automatically; other replies wait here for approval."
+          ? "Completion reports (cycle count, expiry, stowing, DG) are scraped from the image, Excel photo, web screenshot or pasted text. Pass closes the day automatically; OCR fail/unclear feedback posts in Live without waiting here."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
         action={waitTotal > 0 ? <span className={s.count}>{waitTotal}</span> : null}
       >

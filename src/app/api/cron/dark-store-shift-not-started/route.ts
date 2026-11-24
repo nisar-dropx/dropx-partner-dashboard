@@ -24,8 +24,16 @@ function minutesToHHMM(minutes: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+/** Groups that must never receive automated shift-not-started WhatsApp. */
+const MUTED_GROUP_NAME = /^(?:tfb7(?:\s*:\s*war\s*room)?|dark\s*store\s*testing|testing)$/i;
+
+function isMutedGroup(name: string | null | undefined) {
+  return MUTED_GROUP_NAME.test(String(name ?? "").trim());
+}
+
 // SI checklist shift slots and their alert windows (2 hrs after shift start).
-// Alert fires in the 15-min window starting 2 hrs after shift start, once per hour.
+// Alert fires only in the first 15 minutes of the window so a cron retry cannot double-post.
+const ALERT_WINDOW_MINUTES = 15;
 const SHIFT_SLOTS: { slot: string; alertAfterMinutes: number }[] = [
   { slot: "06:00", alertAfterMinutes: 6 * 60 + 120 },  // alert at 08:00
   { slot: "14:00", alertAfterMinutes: 14 * 60 + 120 }, // alert at 16:00
@@ -69,14 +77,14 @@ export async function GET(request: Request) {
   if (groupsErr) return NextResponse.json({ error: groupsErr.message }, { status: 500 });
   if (!groups?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no dark_store groups" });
 
-  const locationIds = groups
-    .filter((g) => g.wa_group_id)
-    .map((g) => g.location_id as string);
+  const activeGroups = groups.filter((g) => g.wa_group_id && !isMutedGroup(g.group_name as string | null));
+  const locationIds = activeGroups.map((g) => g.location_id as string);
 
   const groupByLocation = new Map(
-    groups
-      .filter((g) => g.wa_group_id)
-      .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? (g.location_id as string) }])
+    activeGroups.map((g) => [
+      g.location_id as string,
+      { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? (g.location_id as string) }
+    ])
   );
 
   if (!locationIds.length) return NextResponse.json({ ok: true, sent: 0, reason: "no groups with location_id and wa_group_id" });
@@ -104,7 +112,7 @@ export async function GET(request: Request) {
     // 22:00 shift alerts at 00:00 next day — nowMinutes 0–14 maps to 1440–1454
     const isOvernightAlert = alertAfterMinutes >= 1440;
     const effectiveNow = isOvernightAlert && nowMinutes < 60 ? nowMinutes + 1440 : nowMinutes;
-    const inWindow = effectiveNow >= alertAfterMinutes && effectiveNow < alertAfterMinutes + 60;
+    const inWindow = effectiveNow >= alertAfterMinutes && effectiveNow < alertAfterMinutes + ALERT_WINDOW_MINUTES;
 
     if (!inWindow && !testMode && !forceMode) continue;
 
@@ -168,6 +176,7 @@ export async function GET(request: Request) {
         workerRequest<{ id: string }>(settings, "/send", {
           method: "POST",
           body: { to: toGroup, text, client_ref: clientRef },
+          timeoutMs: 45_000
         })
           .then(() => { sent++; results.push(`${label}: not started — sent`); })
           .catch((err) => {

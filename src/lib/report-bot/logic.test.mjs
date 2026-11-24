@@ -116,6 +116,8 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery({ ...base, is_report: false, verdict: "not_report" }, auto), "silent");
   assert.equal(decideDelivery(base, auto), "auto_send");
   assert.equal(decideDelivery(base, { ...auto, approval_mode: "manual" }), "needs_approval");
+  assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "auto_send", "OCR scrape bypasses AI approval mode");
+  assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "auto_send");
   assert.equal(decideDelivery({ ...base, confidence: 0.8 }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, verdict: "needs_review" }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, checks: [{ rule: "r", status: "unclear", note: "" }] }, auto), "needs_approval");

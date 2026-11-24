@@ -452,67 +452,77 @@ async function startSocket({ method, phone = null }) {
 async function sendToGroup(body) {
   const cached = sentRefs.get(body.client_ref);
   if (cached) return cached;
-  if (!session.sock || session.state !== "open") throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
-  const isDirect = DIRECT_JID.test(body.to);
-  if (!isDirect) {
-    if (!session.groups.has(body.to)) await refreshGroups();
-    const group = session.groups.get(body.to);
-    if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
-    if (group.announce) {
-      // Only admins can post; WhatsApp would reject a non-admin silently.
-      const metadata = await session.sock.groupMetadata(body.to);
-      const mine = myIds(session.sock);
-      const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
-      if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+  // Claim the idempotency key before the pre-send delay so a retried cron cannot
+  // double-post while the first call is still composing.
+  const pending = { id: null, pending: true };
+  sentRefs.set(body.client_ref, pending);
+  try {
+    if (!session.sock || session.state !== "open") throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
+    const isDirect = DIRECT_JID.test(body.to);
+    if (!isDirect) {
+      if (!session.groups.has(body.to)) await refreshGroups();
+      const group = session.groups.get(body.to);
+      if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
+      if (group.announce) {
+        // Only admins can post; WhatsApp would reject a non-admin silently.
+        const metadata = await session.sock.groupMetadata(body.to);
+        const mine = myIds(session.sock);
+        const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
+        if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+      }
     }
+    const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;
+    const quoted = quotedId
+      ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
+      : undefined;
+    await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
+    const mentions = cleanMentions(body.mentions);
+    const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+    const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
+    let payload;
+    let messageType = "text";
+    let messageText = body.text;
+    if (hasDocument) {
+      const bytes = Buffer.from(body.document_base64, "base64");
+      if (!bytes.length) throw Object.assign(new Error("document_base64 is empty."), { status: 422 });
+      if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("document is too large."), { status: 413 });
+      const caption = String(body.caption ?? "").trim().slice(0, 1024);
+      payload = { document: bytes, fileName: body.filename, mimetype: body.mime, caption, ...(mentions.length ? { mentions } : {}) };
+      messageType = "document";
+      messageText = caption || body.filename;
+    } else if (hasImage) {
+      const bytes = Buffer.from(body.image_base64, "base64");
+      if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
+      if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });
+      const caption = String(body.caption ?? body.text ?? "").trim().slice(0, 1024);
+      payload = { image: bytes, caption, mimetype: body.mime || "image/jpeg", ...(mentions.length ? { mentions } : {}) };
+      messageType = "image";
+      messageText = caption || null;
+    } else {
+      payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
+    }
+    const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
+    await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
+    const result = { id: sent?.key?.id ?? null };
+    if (result.id) {
+      botMessageIds.set(result.id, true);
+      const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
+      chatLog.add(body.to, {
+        id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: messageType, text: messageText,
+        quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
+        mentions
+      });
+      scheduleChatPersist(body.to);
+    }
+    sentRefs.set(body.client_ref, result);
+    await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
+    return result;
+  } catch (error) {
+    // Release only a still-pending claim so a completed send is never forgotten.
+    if (sentRefs.get(body.client_ref)?.pending) sentRefs.delete(body.client_ref);
+    throw error;
   }
-  const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;
-  const quoted = quotedId
-    ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
-    : undefined;
-  await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
-  await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
-  const mentions = cleanMentions(body.mentions);
-  const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
-  const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
-  let payload;
-  let messageType = "text";
-  let messageText = body.text;
-  if (hasDocument) {
-    const bytes = Buffer.from(body.document_base64, "base64");
-    if (!bytes.length) throw Object.assign(new Error("document_base64 is empty."), { status: 422 });
-    if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("document is too large."), { status: 413 });
-    const caption = String(body.caption ?? "").trim().slice(0, 1024);
-    payload = { document: bytes, fileName: body.filename, mimetype: body.mime, caption, ...(mentions.length ? { mentions } : {}) };
-    messageType = "document";
-    messageText = caption || body.filename;
-  } else if (hasImage) {
-    const bytes = Buffer.from(body.image_base64, "base64");
-    if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
-    if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });
-    const caption = String(body.caption ?? body.text ?? "").trim().slice(0, 1024);
-    payload = { image: bytes, caption, mimetype: body.mime || "image/jpeg", ...(mentions.length ? { mentions } : {}) };
-    messageType = "image";
-    messageText = caption || null;
-  } else {
-    payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
-  }
-  const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
-  await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
-  const result = { id: sent?.key?.id ?? null };
-  if (result.id) {
-    botMessageIds.set(result.id, true);
-    const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
-    chatLog.add(body.to, {
-      id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: messageType, text: messageText,
-      quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
-      mentions
-    });
-    scheduleChatPersist(body.to);
-  }
-  sentRefs.set(body.client_ref, result);
-  await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
-  return result;
 }
 
 /** Retract one message previously sent by this linked account. The caller must

@@ -70,16 +70,29 @@ def run_ocr(image: Image.Image) -> str:
     return "\n".join(line for line in lines if line)
 
 
+_TESSERACT_VERSION: Optional[str] = None
+
+
+def _tesseract_version_cached() -> str:
+    global _TESSERACT_VERSION
+    if _TESSERACT_VERSION is None:
+        _TESSERACT_VERSION = str(pytesseract.get_tesseract_version())
+    return _TESSERACT_VERSION
+
+
 @app.get("/health")
 def health() -> dict:
+    # Keep this cheap — Render's free-tier health probe times out at ~5s and must
+    # not wait behind a busy OCR semaphore or a cold Tesseract spawn every time.
     try:
-        version = pytesseract.get_tesseract_version()
+        version = _tesseract_version_cached()
     except Exception as exc:  # noqa: BLE001 — surface install problems in health
         return {"ok": False, "error": str(exc)}
     return {
         "ok": True,
-        "tesseract": str(version),
+        "tesseract": version,
         "concurrency": OCR_CONCURRENCY,
+        "busy": OCR_CONCURRENCY - _ocr_lock._value,  # noqa: SLF001 — probe only
     }
 
 

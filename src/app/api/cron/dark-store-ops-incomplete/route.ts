@@ -9,6 +9,9 @@ export const maxDuration = 120;
 // IST = UTC+5:30
 const IST_OFFSET_MINUTES = 330;
 
+/** Groups that must never receive automated Dark Store ops WhatsApp. */
+const MUTED_GROUP_NAME = /^(?:tfb7(?:\s*:\s*war\s*room)?|dark\s*store\s*testing|testing)$/i;
+
 function nowInIst() {
   return new Date(Date.now() + IST_OFFSET_MINUTES * 60000);
 }
@@ -24,11 +27,13 @@ function minutesToHHMM(minutes: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-// Fires at 08:00 IST — checks yesterday's checklists for any slot not accepted.
-const ALERT_HOUR_MINUTES = 8 * 60; // 08:00
-const ALERT_WINDOW_MINUTES = 60;   // fire within 60-min window
+function isMutedGroup(name: string | null | undefined) {
+  return MUTED_GROUP_NAME.test(String(name ?? "").trim());
+}
 
-const ALL_SLOTS = ["06:00", "14:00", "22:00"];
+// Fires at 08:00 IST — checks yesterday's Store Operations checklist (not SI shifts).
+const ALERT_HOUR_MINUTES = 8 * 60; // 08:00
+const ALERT_WINDOW_MINUTES = 15;   // once in the first quarter-hour only
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -56,7 +61,6 @@ export async function GET(request: Request) {
 
   const yesterday = isoDateInIst(new Date(Date.now() - 24 * 3600 * 1000));
 
-  // --- 1. Load dark_store War Room groups ---
   const botDb = reportBotDb();
   if (!botDb) return NextResponse.json({ error: "Report bot DB not configured." }, { status: 500 });
 
@@ -69,19 +73,18 @@ export async function GET(request: Request) {
   if (groupsErr) return NextResponse.json({ error: groupsErr.message }, { status: 500 });
   if (!groups?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no dark_store groups" });
 
-  const locationIds = groups
-    .filter((g) => g.wa_group_id)
-    .map((g) => g.location_id as string);
+  const activeGroups = groups.filter((g) => g.wa_group_id && !isMutedGroup(g.group_name as string | null));
+  const locationIds = activeGroups.map((g) => g.location_id as string);
 
   const groupByLocation = new Map(
-    groups
-      .filter((g) => g.wa_group_id)
-      .map((g) => [g.location_id as string, { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? (g.location_id as string) }])
+    activeGroups.map((g) => [
+      g.location_id as string,
+      { waGroupId: g.wa_group_id as string, groupName: (g.group_name as string | null) ?? (g.location_id as string) }
+    ])
   );
 
   if (!locationIds.length) return NextResponse.json({ ok: true, sent: 0, reason: "no groups with location_id and wa_group_id" });
 
-  // --- 2. Find company_id ---
   const { data: stationRows, error: stErr } = await admin
     .from("stations")
     .select("id,company_id")
@@ -91,32 +94,25 @@ export async function GET(request: Request) {
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
   const companyId = stationRows[0].company_id as string;
 
-  // --- 3. Load yesterday's checklists for all dark store locations ---
+  // Store Operations = one checklist per store per work_date. Submitted (or cancelled) counts as done.
   const { data: checklists, error: clErr } = await admin
-    .from("ops_si_shift_checklists")
-    .select("location_id,shift_slot,status")
+    .from("ops_store_ops_checklists")
+    .select("location_id,status")
     .eq("company_id", companyId)
-    .eq("shift_date", yesterday)
-    .in("location_id", locationIds)
-    .is("deleted_at", null);
+    .eq("work_date", yesterday)
+    .in("location_id", locationIds);
   if (clErr) return NextResponse.json({ error: clErr.message }, { status: 500 });
 
-  // Map: locationId → slot → status
-  const statusMap = new Map<string, Map<string, string>>();
-  for (const c of checklists ?? []) {
-    const locId = c.location_id as string;
-    if (!statusMap.has(locId)) statusMap.set(locId, new Map());
-    statusMap.get(locId)!.set(c.shift_slot as string, c.status as string);
+  const statusByLocation = new Map<string, string>();
+  for (const row of checklists ?? []) {
+    statusByLocation.set(row.location_id as string, String(row.status ?? ""));
   }
 
-  // --- 4. Load report-bot settings ---
   const settings = await loadReportBotSettings(companyId);
 
   let sent = 0;
   const results: string[] = [];
   const sendTasks: Promise<void>[] = [];
-
-  // Deduplicate by WA group JID — multiple locations may share one group
   const sentToGroup = new Set<string>();
 
   for (const locationId of locationIds) {
@@ -129,24 +125,9 @@ export async function GET(request: Request) {
       continue;
     }
 
-    const slotStatuses = statusMap.get(locationId) ?? new Map<string, string>();
-    // Find slots that are missing or not accepted
-    const incompleteSlots: string[] = [];
-    for (const slot of ALL_SLOTS) {
-      const status = slotStatuses.get(slot);
-      if (!status) {
-        incompleteSlots.push(`${slot} hrs shift — not started`);
-      } else if (status === "open") {
-        incompleteSlots.push(`${slot} hrs shift — in progress, not submitted`);
-      } else if (status === "submitted") {
-        incompleteSlots.push(`${slot} hrs shift — submitted, not accepted`);
-      } else if (status === "rejected") {
-        incompleteSlots.push(`${slot} hrs shift — rejected`);
-      }
-    }
-
-    if (!incompleteSlots.length) {
-      results.push(`${group.groupName}: all 3 shifts accepted`);
+    const status = statusByLocation.get(locationId);
+    if (status === "submitted" || status === "cancelled") {
+      results.push(`${group.groupName}: store operations ${status}`);
       continue;
     }
 
@@ -156,6 +137,7 @@ export async function GET(request: Request) {
     const groupShort = toGroup.replace(/[^a-z0-9]/gi, "").slice(-8);
     const clientRef = `dsoi-${groupShort}-${dateShort}${testSuffix}`;
     sentToGroup.add(toGroup);
+    const reason = !status ? "not started" : status === "open" ? "started but not submitted" : `status ${status}`;
     const text = `Store operations in Ops Pulse for yesterday not completed. Why?`;
     const label = `${group.groupName}`;
 
@@ -163,8 +145,9 @@ export async function GET(request: Request) {
       workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
         body: { to: toGroup, text, client_ref: clientRef },
+        timeoutMs: 45_000
       })
-        .then(() => { sent++; results.push(`${label}: ${incompleteSlots.length} incomplete — sent`); })
+        .then(() => { sent++; results.push(`${label}: ${reason} — sent`); })
         .catch((err) => {
           const msg = err instanceof WorkerError ? err.message : String(err);
           results.push(`${label}: send failed — ${msg}`);

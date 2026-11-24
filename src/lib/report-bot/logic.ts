@@ -290,6 +290,11 @@ export type DeliveryDecision = "silent" | "needs_approval" | "auto_send";
 export function decideDelivery(analysis: Analysis, settings: DeliverySettings): DeliveryDecision {
   if (!analysis.is_report || analysis.verdict === "not_report") return "silent";
   if (!analysis.feedback.trim()) return "needs_approval";
+  // Local OCR scrape: post automatically in Live groups. Approval mode only gates AI replies.
+  // Put a group in Review (or report policy "never") when a human must approve OCR replies.
+  if (analysis.source === "scraper") {
+    return analysis.confidence >= 0.5 ? "auto_send" : "needs_approval";
+  }
   if (settings.approval_mode !== "auto") return "needs_approval";
   if (analysis.verdict === "needs_review") return "needs_approval";
   if (analysis.checks.some((check) => check.status === "unclear")) return "needs_approval";

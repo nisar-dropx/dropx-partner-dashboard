@@ -109,6 +109,57 @@ describe("expiry scraper", () => {
     const result = analyseExpiryRemoved(expiry, ocr, "2026-11-20");
     assert.equal(result.verdict, "fail");
   });
+
+  test("reads Excel snapshot rows with shrink and unit columns", () => {
+    const ocr = `
+      DU-AA-35_EXPIRATION_AUDIT_SNAPSHOT
+      Bin Name Product Expiration Shrink Quantity Unit ASIN
+      CHL-A01B HERITAGE GOLD MILK 11/24/2026 23:59 11/24/2026 23:59 8 unit B0H7JNK6
+      AMB-G01J Fresh Onion 11/25/2026 23:59 11/24/2026 23:59 12 unit B08B4367
+    `;
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    assert.equal(result.verdict, "fail");
+    assert.match(result.extracted_summary, /2026-11-24/);
+  });
+
+  test("reads Ihm web dashboard and fails on due shrink/expiration qty", () => {
+    const ocr = `
+      Ihm Inventory Expiration Audit Dashboard TEZ-HYDERABAD-TTG9
+      Bin Name Product Name Expiration Shrink Quantity Unit ASIN
+      CHL-A08E4 Sid's Farm High Protein Milk 2026-11-25 23:59 2026-11-24 23:59 15 unit B0FGDFKV7C
+      CHL-B02B2 Fresh Chinese Cabbage 2026-11-25 23:59 2026-11-24 23:59 1 unit B0ABC
+    `;
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    assert.equal(result.verdict, "fail");
+  });
+
+  test("accepts pasted Expired Items text with Total Expired Items 0 as pass", () => {
+    const text = `
+      Expired Items at TTB3
+      ASIN Shrink Date Qty LocationId
+      Total Expired Items: 0
+    `;
+    const result = analyseExpiryRemoved(expiry, text, "2026-11-24");
+    assert.equal(result.verdict, "pass");
+  });
+
+  test("pasted expired table with positive total fails without an image", () => {
+    const text = `
+      Expired Items at TTB3
+      ASIN            Shrink Date          Qty        LocationId
+      B09VSKJ1G4      2026-11-20 18:29:59  2.0        Bin:AMB-Q05C2
+      Total Expired Items: 1
+    `;
+    const result = analyseWithImageScraper({
+      candidates: [expiry],
+      businessDate: "2026-11-24",
+      text,
+      hasImage: false,
+      ocrText: ""
+    });
+    assert.equal(result?.verdict, "fail");
+    assert.equal(result?.matched_report_type_id, expiry.id);
+  });
 });
 
 describe("stowing scraper", () => {
