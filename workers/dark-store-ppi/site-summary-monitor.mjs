@@ -48,10 +48,11 @@ if (existsSync(envPath)) {
 const args = process.argv.slice(2);
 const runOnce = args.includes("--once");
 const dryRun = args.includes("--dry-run");
+const debugAuth = args.includes("--debug-auth");
 const storeFlagIdx = args.indexOf("--store");
 const argStore = storeFlagIdx >= 0 ? String(args[storeFlagIdx + 1] ?? "").trim() : "";
 if (storeFlagIdx >= 0 && (!argStore || argStore.startsWith("--"))) {
-  console.error("Usage: node site-summary-monitor.mjs [--once] [--dry-run] [--store TTB3]");
+  console.error("Usage: node site-summary-monitor.mjs [--once] [--dry-run] [--debug-auth] [--store TTB3]");
   process.exit(1);
 }
 
@@ -92,50 +93,95 @@ const CODE_TO_STORE = Object.fromEntries(Object.entries(STORE_MAP).map(([id, cod
 const ALL_STATIONS = Object.values(STORE_MAP);
 const STATIONS = argStore ? [argStore.toUpperCase()] : ALL_STATIONS;
 
-// ── Firefox cookie reader (copied from fetch.mjs) ─────────────────────────────
+// ── Firefox cookie reader ─────────────────────────────────────────────────────
+// WorkSpaces often has Firefox profiles on both C: and D:. Never stop at the first
+// Profiles folder — pick the cookie with the newest lastAccessed across all of them.
+function firefoxProfileRoots() {
+  const bases = [
+    process.env.APPDATA,
+    process.env.APPDATA?.replace(/^C:/i, "D:"),
+    process.env.APPDATA?.replace(/^D:/i, "C:"),
+    `D:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+    `C:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
+  ].filter(Boolean);
+  const roots = [];
+  const seen = new Set();
+  for (const base of bases) {
+    const root = join(base, "Mozilla", "Firefox", "Profiles");
+    const key = root.toLowerCase();
+    if (seen.has(key) || !existsSync(root)) continue;
+    seen.add(key);
+    roots.push(root);
+  }
+  return roots;
+}
+
 async function readFirefoxCookie(host, name) {
+  const hit = await readFirefoxCookieMeta(host, name);
+  return hit?.value ?? null;
+}
+
+async function readFirefoxCookieMeta(host, name) {
   try {
-    const appDataCandidates = [
-      process.env.APPDATA,
-      process.env.APPDATA?.replace(/^C:/, "D:"),
-      `D:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
-      `C:\\Users\\${process.env.USERNAME}\\AppData\\Roaming`,
-    ].filter(Boolean);
-    let profilesDir = null;
-    for (const base of appDataCandidates) {
-      const c = join(base, "Mozilla", "Firefox", "Profiles");
-      if (existsSync(c)) { profilesDir = c; break; }
-    }
-    if (!profilesDir) return null;
     const { readdirSync } = await import("node:fs");
-    const profiles = readdirSync(profilesDir, { withFileTypes: true })
-      .filter(d => d.isDirectory()).map(d => d.name);
-    const priority = ["default-esr", "default-release", "default"];
-    const rank = p => { for (let i = 0; i < priority.length; i++) if (p.includes(priority[i])) return i + 1; return 99; };
-    const sorted = [...profiles].sort((a, b) => rank(a) - rank(b));
     const { DatabaseSync } = await import("node:sqlite");
-    for (const profileName of sorted) {
-      const dbSrc = join(profilesDir, profileName, "cookies.sqlite");
-      if (!existsSync(dbSrc)) continue;
-      const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}.sqlite`);
-      copyFileSync(dbSrc, dbTmp);
-      for (const ext of ["-wal", "-shm"]) { if (existsSync(dbSrc + ext)) copyFileSync(dbSrc + ext, dbTmp + ext); }
-      try {
-        const db = new DatabaseSync(dbTmp);
-        try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
-        const row = db.prepare(
-          "SELECT value FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
-        ).get(host, `.${host}`, name);
-        db.close();
-        if (row?.value) return row.value;
-      } catch { /* try next profile */ }
-      finally {
-        try { unlinkSync(dbTmp); } catch {}
-        for (const ext of ["-wal", "-shm"]) { try { unlinkSync(dbTmp + ext); } catch {} }
+    let best = null;
+    for (const profilesDir of firefoxProfileRoots()) {
+      const profiles = readdirSync(profilesDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+      for (const profileName of profiles) {
+        const dbSrc = join(profilesDir, profileName, "cookies.sqlite");
+        if (!existsSync(dbSrc)) continue;
+        const dbTmp = join(tmpdir(), `ff-cookies-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+        copyFileSync(dbSrc, dbTmp);
+        for (const ext of ["-wal", "-shm"]) {
+          if (existsSync(dbSrc + ext)) copyFileSync(dbSrc + ext, dbTmp + ext);
+        }
+        try {
+          const db = new DatabaseSync(dbTmp);
+          try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* ignore */ }
+          const row = db.prepare(
+            "SELECT value, lastAccessed, expiry FROM moz_cookies WHERE (host = ? OR host = ?) AND name = ? ORDER BY lastAccessed DESC LIMIT 1"
+          ).get(host, `.${host}`, name);
+          db.close();
+          if (!row?.value) continue;
+          const lastAccessed = Number(row.lastAccessed || 0);
+          if (!best || lastAccessed > best.lastAccessed) {
+            best = {
+              value: String(row.value),
+              lastAccessed,
+              expiry: Number(row.expiry || 0),
+              profile: join(profilesDir, profileName)
+            };
+          }
+        } catch { /* try next profile */ }
+        finally {
+          try { unlinkSync(dbTmp); } catch { /* ignore */ }
+          for (const ext of ["-wal", "-shm"]) {
+            try { unlinkSync(dbTmp + ext); } catch { /* ignore */ }
+          }
+        }
       }
     }
+    return best;
+  } catch {
     return null;
-  } catch { return null; }
+  }
+}
+
+function ageLabelFromFirefoxMicros(lastAccessed) {
+  if (!lastAccessed) return "unknown age";
+  // Firefox stores lastAccessed in microseconds since epoch.
+  const ms = lastAccessed > 1e15 ? Math.floor(lastAccessed / 1000) : lastAccessed;
+  const ageMs = Date.now() - ms;
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "unknown age";
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 // ── Amazon auth cookies ───────────────────────────────────────────────────────
@@ -153,9 +199,12 @@ async function getMonsCookies() {
   const host = "eu.store-management.f3.amazon.dev";
   const names = ["__Host-mons-sid", "__Host-mons-ubid", "__Host-mons-st", "__Host-mons-sidp"];
   const vals = {};
+  let sidMeta = null;
   for (const name of names) {
-    const v = await readFirefoxCookie(host, name);
-    if (v) vals[name] = v;
+    const meta = await readFirefoxCookieMeta(host, name);
+    if (!meta?.value) continue;
+    vals[name] = meta.value;
+    if (name === "__Host-mons-sid") sidMeta = meta;
   }
   if (envSid) vals["__Host-mons-sid"] = envSid;
   if (envUbid) vals["__Host-mons-ubid"] = envUbid;
@@ -163,10 +212,16 @@ async function getMonsCookies() {
   if (envSidp) vals["__Host-mons-sidp"] = envSidp;
 
   if (!vals["__Host-mons-sid"]) {
-    throw new Error("__Host-mons-sid not found in Firefox cookies — open https://eu.store-management.f3.amazon.dev/siteSummary in Firefox, log in, then retry");
+    throw new Error(
+      `__Host-mons-sid not found in Firefox — open ${GC_BASE}/siteSummary, complete Midway sign-in until store data loads, then retry`
+    );
   }
+
+  const roots = firefoxProfileRoots();
   console.log(
-    `[site-summary] cookies: ${Object.keys(vals).join(", ")}${vals["__Host-mons-st"] ? "" : " (missing st — CSRF may fail)"}`
+    `[site-summary] cookies: ${Object.keys(vals).join(", ")} · sid last used ${ageLabelFromFirefoxMicros(sidMeta?.lastAccessed)}` +
+      (sidMeta?.profile ? ` · profile ${sidMeta.profile}` : "") +
+      (roots.length ? ` · scanned ${roots.length} Firefox root(s)` : " · no Firefox profiles found")
   );
   _monsCookies = vals;
   return vals;
@@ -177,31 +232,27 @@ function buildCookieHeader(vals) {
 }
 
 function siteSummaryHeaders(cookies, { jsonBody = false } = {}) {
-  const st = cookies["__Host-mons-st"] || "";
+  // Match the original working request shape — Cookie + Accept + Origin + Referer.
   return {
     Cookie: buildCookieHeader(cookies),
     Accept: "application/json",
     Origin: GC_BASE,
     Referer: `${GC_BASE}/siteSummary`,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-    ...(jsonBody ? { "Content-Type": "application/json" } : {}),
-    // Midway / Mons apps often expect the session token as CSRF as well as cookie.
-    ...(st
-      ? {
-          "anti-csrftoken-a2z": st,
-          "x-amz-csrf-token": st
-        }
-      : {})
+    ...(jsonBody ? { "Content-Type": "application/json" } : {})
   };
 }
 
 async function parseSiteSummaryResponse(storeId, r) {
   const text = await r.text();
   const looksHtml = /^\s*</.test(text) || /<!DOCTYPE|<html/i.test(text);
-  if (r.status === 401 || r.status === 403 || looksHtml) {
+  const signIn = /"reason"\s*:\s*"sign_in"/i.test(text) || /sign[_ -]?in/i.test(text);
+  if (r.status === 401 || r.status === 403 || looksHtml || signIn) {
     _monsCookies = null;
     throw new Error(
-      `Auth failed (${r.status}${looksHtml ? ", HTML login/SPA" : ""}) for store ${storeId} — reopen ${GC_BASE}/siteSummary in Firefox, confirm the page loads data, then retry. ${text.slice(0, 160).replace(/\s+/g, " ")}`
+      `Auth failed (${r.status}${looksHtml ? ", HTML" : ""}${signIn ? ", reason=sign_in" : ""}) for store ${storeId}. ` +
+        `Firefox still has old Mons cookies, but Amazon rejected the session. ` +
+        `In Firefox: open ${GC_BASE}/siteSummary → Midway sign-in → wait until live store rows appear → then re-run. ` +
+        `Body: ${text.slice(0, 160).replace(/\s+/g, " ")}`
     );
   }
   if (!r.ok) throw new Error(`Site Summary API ${r.status} for ${storeId}: ${text.slice(0, 400)}`);
@@ -574,6 +625,18 @@ async function pollOnce() {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 await mkdir(STATE_DIR, { recursive: true }).catch(() => null);
+
+if (debugAuth) {
+  console.log("DropX Site Summary Monitor — debug-auth");
+  console.log(`Firefox roots: ${firefoxProfileRoots().join(" | ") || "(none)"}`);
+  try {
+    await getMonsCookies();
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
 console.log(`DropX Site Summary Monitor — stations: ${STATIONS.join(", ")} — threshold: ${THRESHOLD_S}s — interval: ${POLL_MS / 1000}s${dryRun ? " [DRY RUN]" : ""}`);
 if (TESTING_GROUP) console.log(`  Testing mode: all alerts → ${TESTING_GROUP}`);
