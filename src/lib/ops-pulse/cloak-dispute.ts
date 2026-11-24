@@ -82,21 +82,39 @@ export async function fileDisputeInCloak(input: {
       cookie,
     ),
   ]);
-  const held = Array.isArray(disputes) ? disputes.find((d) => d?.tid === tid) : undefined;
-  if (held && revision === "1") {
-    if (held.dispute_selected !== "YES")
+  // Cloak returns one row per revision; never treat revision 1 as covering revision 2.
+  const heldRows = (Array.isArray(disputes) ? disputes : []).filter((d) => d?.tid === tid);
+  const heldRev = (rev: string) =>
+    heldRows.find((d) => String(d.revision ?? "") === rev) ??
+    (rev === "1" ? heldRows[0] : undefined);
+  const held1 = heldRev("1");
+  const held2 = heldRev("2");
+  if (revision === "1" && held1) {
+    if (held1.dispute_selected !== "YES")
       throw new CloakError("Cloak already holds this case as not disputed.", "STATE");
-    return { alreadyFiled: true, proofKey: held.dispute_proof ?? "" };
+    return { alreadyFiled: true, proofKey: held1.dispute_proof ?? "" };
   }
+  if (revision === "2" && held2?.dispute_selected === "YES")
+    return { alreadyFiled: true, proofKey: held2.dispute_proof ?? "" };
   const rows = (list.data ?? []).filter((r) => r?.tid === tid);
   const row = rows[0];
   if (rows.length !== 1 || !row)
     throw new CloakError("Cloak does not list this case in the live month.", "STATE");
-  if (row.current_sla_stage !== stage)
-    throw new CloakError(`Cloak is no longer at ${stage} for this case.`, "STATE");
-  if (revision === "1" && (row.case_status !== "not_started" || held))
+  const liveStage = String(row.current_sla_stage ?? "");
+  // First dispute: must still be eDSP1. eDSP2 response: Cloak may already show NL2.
+  const stageOk =
+    liveStage === stage ||
+    (revision === "2" &&
+      (stage === "eDSP2" || stage === "NL2") &&
+      (liveStage === "eDSP2" || liveStage === "NL2"));
+  if (!stageOk)
+    throw new CloakError(
+      `Cloak is no longer at ${stage} for this case (now ${liveStage || "unknown"}).`,
+      "STATE",
+    );
+  if (revision === "1" && (row.case_status !== "not_started" || held1))
     throw new CloakError("Cloak is no longer waiting for a first dispute on this case.", "STATE");
-  if (revision === "2" && (!held || held.dispute_selected !== "YES"))
+  if (revision === "2" && (!held1 || held1.dispute_selected !== "YES"))
     throw new CloakError("The first dispute is not recorded in Cloak; the response cannot be filed.", "STATE");
   if (!me.email || !me.permissions?.includes("write:own_data") || !row.value || !row.case_with)
     throw new CloakError("The Cloak login cannot file disputes right now.", "STATE");

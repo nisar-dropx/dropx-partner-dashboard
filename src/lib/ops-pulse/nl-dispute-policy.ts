@@ -214,7 +214,7 @@ export type DisputeRequest = {
  * itself on the next hourly pull without anyone marking it.
  */
 export function filedInCloak(
-  request: Pick<DisputeRequest, "decision" | "status"> | null,
+  request: Pick<DisputeRequest, "decision" | "status" | "source_stage"> | null,
   c: LiveCaseLike,
 ) {
   if (!request || (request.status !== "submitted" && request.status !== "filed"))
@@ -222,10 +222,19 @@ export function filedInCloak(
   if (request.status === "filed") return true;
   const phase = casePhase(c).key;
   const held = String(c.extra?.dispute_selected ?? "").toUpperCase();
+  const want = request.decision === "dispute" ? "YES" : "NO";
+  if (held !== want) return false;
   const revision = String(c.extra?.revision ?? "");
+  const stage = String(c.extra?.current_sla_stage ?? "");
+  // eDSP2 response: require rev 2 or live NL2. Do not use phase alone — an empty
+  // stage maps to "amazon" and would falsely close an open eDSP2 submission.
+  if (request.source_stage === "eDSP2")
+    return revision === "2" || stage === "NL2";
+  // First-round dispute: filed once Cloak leaves the station stage, or records a revision.
   return (
-    (revision === "2" || (phase !== "action" && phase !== "respond")) &&
-    held === (request.decision === "dispute" ? "YES" : "NO")
+    revision === "1" ||
+    revision === "2" ||
+    (stage !== "" && phase !== "action" && phase !== "respond")
   );
 }
 /**

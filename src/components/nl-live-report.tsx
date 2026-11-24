@@ -153,10 +153,9 @@ export function NlLiveReport({
                   {v.deskQueue === 1 ? "" : "s"} to file
                 </strong>
                 <span>
-                  Stations have sent these for filing. Open a case to file its
-                  first dispute in Cloak from here. Accepted losses and
-                  responses to Amazon are filed in Cloak by hand — download the
-                  queue; they are marked filed on the next hourly check.
+                  Disputes normally file in Cloak on submit. These are still
+                  waiting — open a case to retry filing, or mark accepted losses
+                  filed by hand. They also clear on the next hourly Cloak check.
                 </span>
               </div>
               <a

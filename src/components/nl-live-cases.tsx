@@ -9,6 +9,7 @@ import {
   filedInCloak,
   requestSent,
   DISPUTE_REASONS,
+  PHASES,
   REQUEST_STATUS,
   type DisputeRequest,
   type LiveWindow,
@@ -56,26 +57,25 @@ const FILTERS = [
   { key: "amazon", label: "Pending with Amazon", phases: ["amazon"] },
   { key: "", label: "All", phases: null },
 ] as const satisfies readonly { key: string; label: string; phases: readonly PhaseKey[] | null }[];
-const phaseOf = (c: LiveCase) =>
-  casePhase({
-    case_status: c.details.case_status,
-    nl_status: c.source_status,
-    extra: c.details.extra,
-  });
-const gateOf = (c: LiveCase, window: LiveWindow) =>
-  disputeGate(
-    {
-      case_status: c.details.case_status,
-      nl_status: c.source_status,
-      extra: c.details.extra,
-    },
-    window,
-  );
 const likeOf = (c: LiveCase) => ({
   case_status: c.details.case_status,
   nl_status: c.source_status,
   extra: c.details.extra,
 });
+const phaseOf = (c: LiveCase) => {
+  const like = likeOf(c);
+  const phase = casePhase(like);
+  const stage = c.details.extra?.current_sla_stage;
+  // After submit/file, stop showing "Dispute pending" while Cloak still says eDSP1.
+  if (
+    (phase.key === "action" || phase.key === "respond") &&
+    requestSent(c.request, stage)
+  )
+    return { key: "amazon" as const, ...PHASES.amazon };
+  return phase;
+};
+const gateOf = (c: LiveCase, window: LiveWindow) =>
+  disputeGate(likeOf(c), window);
 const actionLabel: Record<string, string> = {
   save: "Draft saved",
   submit: "Sent to Cloak desk",
@@ -83,6 +83,7 @@ const actionLabel: Record<string, string> = {
   return: "Returned by desk",
   file: "Marked filed in Cloak",
   file_cloak: "Filed in Cloak",
+  retry_cloak: "Filed in Cloak",
 };
 
 export function NlLiveCases({
@@ -249,7 +250,7 @@ export function NlLiveCases({
               <LossCaseRow station={c.station_code} tid={c.details.tid || c.case_key} approximate={!c.details.tid || c.details.tid_approximate}
                 reason={[c.details.category || "Unspecified reason", c.details.sub_category].filter(Boolean).join(" · ")} value={money(c.amount)} date={(redisputeOf(c) ? c.redispute?.updated_at : c.recovery?.updated_at || c.request?.updated_at) || undefined} updatedBy={(redisputeOf(c) ? c.redispute?.updated_by_name : c.recovery?.updated_at ? c.recovery.updated_by_name : c.request?.updated_by_name) || undefined} historyCase={{month:c.month,caseKey:c.case_key}}
                 open={active === c.case_key} onTrack={() => setTracking({id:c.details.tid!,station:c.station_code})} onToggle={() => setActive(active===c.case_key?null:c.case_key)}
-                status={<>{c.period_closed ? <span className={styles.badge}>Closed · read-only</span> : null}<span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{showRedisputeBreakdown && redisputeOf(c) ? <span className={styles.done}>Redispute · {redisputeStatus({enabled:!!c.redispute?.enabled,workflow_status:c.redispute?.workflow_status||undefined,followup_status:c.redispute?.followup_status||"legacy"})}</span> : c.recoverable ? <span className={!caseUpdated(c)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!caseUpdated(c)?"Pending update":"Details updated"}</span>:null}{c.request && !filedInCloak(c.request,likeOf(c)) && (requestSent(c.request,c.details.extra?.current_sla_stage)||["draft","returned"].includes(c.request.status))?<span>{REQUEST_STATUS[c.request.status].label}</span>:null}</>}/>
+                status={<>{c.period_closed ? <span className={styles.badge}>Closed · read-only</span> : null}<span className={`${styles.badge} ${styles[phase.tone]}`}>{phase.label}</span>{showRedisputeBreakdown && redisputeOf(c) ? <span className={styles.done}>Redispute · {redisputeStatus({enabled:!!c.redispute?.enabled,workflow_status:c.redispute?.workflow_status||undefined,followup_status:c.redispute?.followup_status||"legacy"})}</span> : c.recoverable ? <span className={!caseUpdated(c)?styles.pending:styles.done}>{recoveryNeedsReview(c)?"Review needed":!caseUpdated(c)?"Pending update":"Details updated"}</span>:null}{c.request && (["draft","returned"].includes(c.request.status) || requestSent(c.request,c.details.extra?.current_sla_stage))?<span className={`${styles.badge} ${styles[REQUEST_STATUS[filedInCloak(c.request,likeOf(c))?"filed":c.request.status].tone]}`}>{REQUEST_STATUS[filedInCloak(c.request,likeOf(c))?"filed":c.request.status].label}</span>:null}</>}/>
               {active === c.case_key ? (
                 <>
 
@@ -421,24 +422,33 @@ function LiveDetail({
         }),
       });
       const j = await res.json();
-      if (!res.ok) throw Error(j.error);
-      setRequest(j.request);
-      setHistory((h) => [
-        {
-          id: String(Date.now()),
-          // Filing from OpsPulse is recorded as "file", with how it was filed in the desk note.
-          action: action === "file_cloak" ? "file" : action,
-          actor_name: j.request.updated_by_name,
-          created_at: j.request.updated_at,
-          snapshot: j.request,
-        },
-        ...h,
-      ]);
+      // Submit can save in OpsPulse and still fail Cloak filing (502 + request).
+      if (j.request) {
+        setRequest(j.request);
+        setHistory((h) => [
+          {
+            id: String(Date.now()),
+            action:
+              action === "file_cloak" || action === "retry_cloak" || j.request.status === "filed"
+                ? "file"
+                : action,
+            actor_name: j.request.updated_by_name,
+            created_at: j.request.updated_at,
+            snapshot: j.request,
+          },
+          ...h,
+        ]);
+      }
+      if (!res.ok) throw Error(j.error || "Could not save.");
       setDeskNote("");
-      setSuccess(`${actionLabel[action]}.`);
+      const filedOk =
+        j.request?.status === "filed" &&
+        (action === "submit" || action === "retry_cloak" || action === "file_cloak");
+      setSuccess(`${filedOk ? "Filed in Cloak" : actionLabel[action] || "Saved"}.`);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
+      router.refresh();
     } finally {
       setBusy(false);
     }
@@ -573,8 +583,8 @@ function LiveDetail({
               {gate.deadline
                 ? `Open until the end of ${gate.deadline}. `
                 : ""}
-              The Cloak desk files what you send here — you do not need a Cloak
-              login.
+              Submitting files the dispute in Cloak for you — you do not need a
+              Cloak login.
             </p>
           ) : (
             <p className={styles.notice}>{gate.reason}</p>
@@ -700,7 +710,13 @@ function LiveDetail({
                 title={submitError || undefined}
                 onClick={() => void send("submit", stationValues())}
               >
-                {busy ? "Saving…" : "Send to Cloak desk"}
+                {busy
+                  ? decision === "dispute"
+                    ? "Filing…"
+                    : "Saving…"
+                  : decision === "dispute"
+                    ? "Submit to Cloak"
+                    : "Send to Cloak desk"}
               </button>
               <button
                 type="button"
@@ -713,8 +729,21 @@ function LiveDetail({
               {submitError ? <span className={styles.hint}>{submitError}</span> : null}
             </div>
           ) : null}
-          {canDispute && sent && shownStatus === "submitted" ? (
+          {canDispute &&
+          status === "submitted" &&
+          shownStatus === "submitted" &&
+          (sent || !cloakBlock) ? (
             <div className={styles.toolbar}>
+              {!cloakBlock ? (
+                <button
+                  type="button"
+                  className={styles.primary}
+                  disabled={busy}
+                  onClick={() => void send("retry_cloak", {})}
+                >
+                  {busy ? "Filing…" : "Retry filing in Cloak"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.button}
@@ -724,7 +753,9 @@ function LiveDetail({
                 Withdraw to edit
               </button>
               <span className={styles.hint}>
-                Waiting for the Cloak desk to file it.
+                {cloakBlock
+                  ? cloakBlock
+                  : "Saved here, but Cloak filing did not finish. Retry filing, or withdraw to edit."}
                 {gate.open ? "" : " The window is closed, so a withdrawn request cannot be sent again."}
               </span>
             </div>

@@ -17,12 +17,21 @@ const reply = (body: unknown, status = 200) =>
     status,
     headers: { "Cache-Control": "private, no-store" },
   });
-const STATION_ACTIONS = ["save", "submit", "withdraw"];
+// retry_cloak = station re-runs auto-file when submit saved but Cloak filing failed.
+const STATION_ACTIONS = ["save", "submit", "withdraw", "retry_cloak"];
 // file = the desk filed it in Cloak by hand; file_cloak = OpsPulse files it in Cloak now.
 const DESK_ACTIONS = ["return", "file", "file_cloak"];
 
+type CloakFileResult = { note: string; proofKey: string; alreadyFiled: boolean };
+
 /** Sends a station's dispute to Cloak. Returns the desk note that records how it was filed. */
-async function fileInCloak(company: string, month: string, caseKey: string, version: number, details: NlCase["details"]) {
+async function fileInCloak(
+  company: string,
+  month: string,
+  caseKey: string,
+  version: number,
+  details: NlCase["details"],
+): Promise<CloakFileResult> {
   const current = await supabaseAdmin!
     .from("nl_dispute_requests")
     .select("*")
@@ -33,8 +42,14 @@ async function fileInCloak(company: string, month: string, caseKey: string, vers
   const request = current.data as DisputeRequest | null;
   if (current.error || (request?.version ?? 0) !== version)
     throw Error("Another person updated this dispute. Refresh before filing.");
-  const block = cloakFilingBlock(request, details.extra?.current_sla_stage);
+  const liveStage = details.extra?.current_sla_stage || null;
+  const requestStage = request!.source_stage || null;
+  // eDSP2 responses remain fileable after Cloak advances the case to NL2.
+  const stageForGate =
+    requestStage === "eDSP2" && liveStage === "NL2" ? "NL2" : liveStage || requestStage;
+  const block = cloakFilingBlock(request, stageForGate);
   if (block) throw Error(block);
+  const stage = requestStage || liveStage;
   const ids = request!.attachments.map((a) => a.id);
   const stored = ids.length
     ? await supabaseAdmin!
@@ -67,11 +82,47 @@ async function fileInCloak(company: string, month: string, caseKey: string, vers
     remarks: cloakRemarks(request!.remarks, request!.cctv_url),
     proof,
     revision: request!.source_stage === "eDSP2" ? "2" : "1",
-    stage: details.extra?.current_sla_stage,
+    stage: stage ?? undefined,
   });
-  return filed.alreadyFiled
-    ? "Already filed in Cloak — nothing was sent again."
-    : `Filed in Cloak from OpsPulse${filed.proofKey ? ` with proof ${filed.proofKey}` : " without a proof file"}.`;
+  return {
+    alreadyFiled: filed.alreadyFiled,
+    proofKey: filed.proofKey,
+    note: filed.alreadyFiled
+      ? "Already filed in Cloak — nothing was sent again."
+      : `Filed in Cloak from OpsPulse${filed.proofKey ? ` with proof ${filed.proofKey}` : " without a proof file"}.`,
+  };
+}
+
+/**
+ * Cloak's hourly pull eventually mirrors a filed dispute; until then OpsPulse would still
+ * show "Dispute pending". Write the same hand-off Cloak applies so the list updates now.
+ */
+async function syncCaseAfterCloakFile(
+  company: string,
+  month: string,
+  caseKey: string,
+  details: NlCase["details"],
+  request: Pick<DisputeRequest, "reason" | "remarks" | "cctv_url" | "source_stage">,
+  proofKey: string,
+) {
+  const fromStage = request.source_stage || details.extra?.current_sla_stage || null;
+  const nextStage =
+    fromStage === "eDSP1" ? "NL1" : fromStage === "eDSP2" ? "NL2" : fromStage;
+  const extra: Record<string, string> = { ...(details.extra ?? {}) };
+  extra.dispute_selected = "YES";
+  extra.dispute_reason = request.reason;
+  extra.partner_remarks = cloakRemarks(request.remarks, request.cctv_url);
+  extra.revision = request.source_stage === "eDSP2" ? "2" : "1";
+  if (proofKey) extra.dispute_proof = proofKey;
+  if (nextStage) extra.current_sla_stage = nextStage;
+  const nextDetails = { ...details, case_status: "in_progress", extra };
+  await supabaseAdmin!
+    .from("nl_loss_month_cases")
+    .update({ details: nextDetails })
+    .eq("company_id", company)
+    .eq("report", "nl")
+    .eq("month", month)
+    .eq("case_key", caseKey);
 }
 
 /** A case's dispute request and its full history. */
@@ -138,16 +189,48 @@ export async function POST(request: Request) {
     if ((action === "save" || action === "submit") && !gate.open)
       return reply({ error: gate.reason || "The dispute window is closed." }, 409);
     const text = (value: unknown) => (typeof value === "string" ? value : "");
-    let cloakNote = "";
-    if (action === "file_cloak") {
+    let cloakFile: CloakFileResult | null = null;
+    if (action === "file_cloak" || action === "retry_cloak") {
       try {
-        cloakNote = await fileInCloak(company, month, caseKey, body.version, details);
+        cloakFile = await fileInCloak(company, month, caseKey, body.version, details);
       } catch (e) {
         return reply(
           { error: e instanceof Error ? e.message : "The dispute could not be filed in Cloak." },
           e instanceof CloakError && e.code !== "STATE" ? 502 : 409,
         );
       }
+    }
+    const cloakNote = cloakFile?.note ?? "";
+    // retry_cloak only files; it must not rewrite the station's saved dispute fields.
+    if (action === "retry_cloak") {
+      const filed = await supabaseAdmin!.rpc("save_nl_dispute_request", {
+        p_company: company,
+        p_month: month,
+        p_case: caseKey,
+        p_version: body.version,
+        p_action: "file",
+        p_values: { desk_note: cloakNote },
+        p_actor: auth.userId,
+        p_name: auth.fullName || auth.email || "OpsPulse user",
+      });
+      if (filed.error)
+        return reply(
+          {
+            error:
+              "The dispute is filed in Cloak, but OpsPulse could not record it. It will show as filed after the next hourly check.",
+          },
+          409,
+        );
+      const request = filed.data as DisputeRequest;
+      await syncCaseAfterCloakFile(
+        company,
+        month,
+        caseKey,
+        details,
+        request,
+        cloakFile?.proofKey ?? "",
+      ).catch(() => undefined);
+      return reply({ request });
     }
     const values = desk
       ? { desk_note: cloakNote || text(input.desk_note) }
@@ -187,23 +270,64 @@ export async function POST(request: Request) {
         },
         409,
       );
-    if (action === "submit" && input.decision === "dispute") {
+    if (cloakNote) {
+      const request = result.data as DisputeRequest;
+      if (request.decision === "dispute")
+        await syncCaseAfterCloakFile(
+          company,
+          month,
+          caseKey,
+          details,
+          request,
+          cloakFile?.proofKey ?? "",
+        ).catch(() => undefined);
+      return reply({ request });
+    }
+    if (action === "submit" && text(input.decision) === "dispute") {
       try {
-        const note = await fileInCloak(company, month, caseKey, result.data.version, details);
+        const filedCloak = await fileInCloak(
+          company,
+          month,
+          caseKey,
+          result.data.version,
+          details,
+        );
         const filed = await supabaseAdmin!.rpc("save_nl_dispute_request", {
           p_company: company,
           p_month: month,
           p_case: caseKey,
           p_version: result.data.version,
           p_action: "file",
-          p_values: { desk_note: note },
+          p_values: { desk_note: filedCloak.note },
           p_actor: auth.userId,
           p_name: auth.fullName || auth.email || "OpsPulse user",
         });
-        if (filed.error) throw Error("Cloak filed the dispute, but OpsPulse could not record it. Refresh after the next sync.");
-        return reply({ request: filed.data });
+        if (filed.error)
+          throw Error(
+            "Cloak filed the dispute, but OpsPulse could not record it. Refresh after the next sync.",
+          );
+        const request = filed.data as DisputeRequest;
+        await syncCaseAfterCloakFile(
+          company,
+          month,
+          caseKey,
+          details,
+          request,
+          filedCloak.proofKey,
+        ).catch(() => undefined);
+        return reply({ request });
       } catch (e) {
-        return reply({ request: result.data, error: e instanceof Error ? `Saved in OpsPulse, but not filed in Cloak: ${e.message}` : "Saved in OpsPulse, but not filed in Cloak." }, 502);
+        return reply(
+          {
+            request: result.data,
+            retryable: true,
+            error:
+              e instanceof Error
+                ? `Saved in OpsPulse, but not filed in Cloak: ${e.message}`
+                : "Saved in OpsPulse, but not filed in Cloak.",
+          },
+          502,
+        );
       }
     }
     return reply({ request: result.data });

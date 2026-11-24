@@ -171,14 +171,18 @@ export async function loadNlLive(auth: AuthorizationContext, filters: NlFilters,
     : "";
   const monthRows = all
     .filter((r) => r.month === month)
-    .map((r) => ({
-      ...r,
-      phase: casePhase({
+    .map((r) => {
+      const phase = casePhase({
         case_status: r.status,
         nl_status: r.source_status,
         extra: { current_sla_stage: r.stage },
-      }).key,
-    }));
+      }).key;
+      // Station already sent this stage: treat as with Amazon until Cloak's hourly pull catches up.
+      const sent =
+        (phase === "action" || phase === "respond") &&
+        requestSent(requestByCase.get(r.case_key), r.stage);
+      return { ...r, phase: sent ? ("amazon" as PhaseKey) : phase };
+    });
   const reasons = [
     ...new Set(monthRows.map((r) => r.reason || "Unspecified")),
   ].sort();
