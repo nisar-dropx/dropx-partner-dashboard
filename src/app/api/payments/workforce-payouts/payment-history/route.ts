@@ -1,3 +1,4 @@
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -14,7 +15,6 @@ export const runtime = "nodejs";
 
 const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 type PayoutAudience = "workforce" | "helpers";
 
@@ -27,19 +27,7 @@ function errorResponse(error: string, status: number) {
   return Response.json({ error }, { status, headers: noStore });
 }
 
-function validDate(value: string) {
-  if (!DATE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
 
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const expectedEnd = new Date(`${periodStart}T00:00:00Z`);
-  expectedEnd.setUTCMonth(expectedEnd.getUTCMonth() + 1);
-  expectedEnd.setUTCDate(0);
-  return expectedEnd.toISOString().slice(0, 10) === periodEnd;
-}
 
 function maskedAccount(value: unknown) {
   const account = String(value ?? "").replace(/\s+/g, "");
@@ -83,7 +71,7 @@ export async function GET(request: Request) {
     const periodEnd = String(params.get("periodEnd") ?? "").trim();
     if (!UUID.test(workforceId)) return errorResponse("A valid Workforce profile is required.", 400);
     if (!UUID.test(stationId)) return errorResponse("A valid payout location is required.", 400);
-    if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) return errorResponse("Choose a valid payout date range.", 400);
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.some((locationId) => String(locationId).toLowerCase() === stationId)) {
       return errorResponse("This payout location is outside your account access.", 403);
     }

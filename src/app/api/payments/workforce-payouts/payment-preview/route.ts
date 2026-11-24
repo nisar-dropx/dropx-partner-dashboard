@@ -1,3 +1,4 @@
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { loadPayoutProcessingInstructions } from "@/lib/payout-processing-instructions";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -20,16 +21,8 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { periodStart, periodEnd } = body;
-    const start = typeof periodStart === "string" && /^\d{4}-\d{2}-01$/.test(periodStart)
-      ? new Date(`${periodStart}T00:00:00Z`) : null;
-    if (!start || Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== periodStart) {
-      return Response.json({ error: "Choose a complete payout month." }, { status: 400, headers });
-    }
-    const end = new Date(start);
-    end.setUTCMonth(end.getUTCMonth() + 1);
-    end.setUTCDate(0);
-    if (periodEnd !== end.toISOString().slice(0, 10) || !Array.isArray(body.rows) || !body.rows.length || body.rows.length > 50) {
-      return Response.json({ error: "Choose a complete payout month and up to 50 payout rows." }, { status: 400, headers });
+    if (typeof periodStart !== "string" || typeof periodEnd !== "string" || !validPayoutPublicationPeriod(periodStart, periodEnd) || !Array.isArray(body.rows) || !body.rows.length || body.rows.length > 50) {
+      return Response.json({ error: "Choose a valid payout date range and up to 50 payout rows." }, { status: 400, headers });
     }
     const rows: { workforce_id: string; station_id: string }[] = [];
     const scope = new Set(authorization.locationScopeIds.map((id) => String(id).toLowerCase()));

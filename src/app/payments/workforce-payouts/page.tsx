@@ -688,14 +688,14 @@ export default async function WorkforcePayoutsPage({ searchParams = {} }: { sear
   // Payout rows and every submitted row identity are already restricted to the
   // signed-in user's locations. Location scope must not turn a page editor into
   // a viewer; the mutation endpoints independently recheck the same boundary.
-  const canProcessPayments = period.mode === "monthly"
+  const canProcessPayments = validPayoutPublicationPeriod(period.fromDate, period.toDate)
     && canEdit
     && canUsePaymentActions
     && !authorization.readOnly;
   // Payment lifecycle is read-only worksheet data. Every authorised viewer
   // must see Paid / Partially Paid / Processing, while the sensitive action
   // identifiers below remain restricted by includeProcessingActionDetails.
-  const canLoadPaymentSummaries = period.mode === "monthly";
+  const canLoadPaymentSummaries = validPayoutPublicationPeriod(period.fromDate, period.toDate);
   const canManageMappingLocks = audience === "workforce"
     && canEdit
     && authorization.hasAllLocationAccess

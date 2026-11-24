@@ -1,3 +1,4 @@
+import { validPayoutPublicationPeriod, payoutPeriodMonths } from "@/lib/payout-publication-period";
 import { assertPaymentRelease } from "@/lib/payment-release-access";
 import { createHash } from "node:crypto";
 
@@ -15,7 +16,6 @@ export const maxDuration = 300;
 
 const noStore = { "Cache-Control": "private, no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
 type RedownloadItem = {
@@ -57,19 +57,7 @@ function sameOrigin(request: Request) {
   return !origin || origin === new URL(request.url).origin;
 }
 
-function validDate(value: string) {
-  if (!DATE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
 
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const expectedEnd = new Date(`${periodStart}T00:00:00Z`);
-  expectedEnd.setUTCMonth(expectedEnd.getUTCMonth() + 1);
-  expectedEnd.setUTCDate(0);
-  return expectedEnd.toISOString().slice(0, 10) === periodEnd;
-}
 
 function uniquePaymentItemIds(value: unknown) {
   if (!Array.isArray(value) || !value.length) return null;
@@ -165,12 +153,12 @@ function buildBatchWorkbook(items: RedownloadItem[], audience: PayoutAudience) {
   });
 }
 
-function batchFilename(periodStart: string, item: RedownloadItem, audience: PayoutAudience) {
+function batchFilename(periodStart: string, periodEnd: string, item: RedownloadItem, audience: PayoutAudience) {
   const valueDate = String(item.value_date ?? "").replaceAll("-", "");
   const batchId = String(item.batch_id ?? "").toLowerCase();
   const suffix = UUID.test(batchId) ? batchId : "batch";
   const prefix = audience === "helpers" ? "helper-payouts" : "workforce-payouts";
-  return `${prefix}-${periodStart.slice(0, 7)}-${valueDate}-${suffix}-redownload.xlsx`;
+  return `${prefix}-${periodStart}-to-${periodEnd}-${valueDate}-${suffix}-redownload.xlsx`;
 }
 
 export async function POST(request: Request) {
@@ -198,8 +186,8 @@ export async function POST(request: Request) {
     const periodStart = String(body.periodStart ?? "").trim();
     const periodEnd = String(body.periodEnd ?? "").trim();
     const paymentItemIds = uniquePaymentItemIds(body.paymentItemIds);
-    if (!completeCalendarMonth(periodStart, periodEnd)) {
-      return errorResponse("Bank-file re-download is available only for one complete calendar month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) {
+      return errorResponse("Choose a valid payout date range.", 400);
     }
     if (!paymentItemIds) return errorResponse("Select at least one unique Payment Processing item.", 400);
 
@@ -227,7 +215,9 @@ export async function POST(request: Request) {
     }
 
     const groups = new Map<string, RedownloadItem[]>();
-    await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id)), periodStart.slice(0, 7), audience);
+    for (const month of payoutPeriodMonths(periodStart, periodEnd)) {
+      await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id)), month, audience);
+    }
     items.forEach((item) => {
       const batchId = String(item.batch_id ?? "").trim().toLowerCase();
       if (!UUID.test(batchId) || !UUID.test(String(item.payment_item_id ?? ""))) {
@@ -249,7 +239,7 @@ export async function POST(request: Request) {
     if (orderedGroups.length === 1) {
       const batchItems = orderedGroups[0][1];
       const workbook = buildBatchWorkbook(batchItems, audience);
-      const filename = batchFilename(periodStart, batchItems[0], audience);
+      const filename = batchFilename(periodStart, periodEnd, batchItems[0], audience);
       return new Response(Buffer.from(workbook), {
         headers: {
           ...responseHeaders,
@@ -263,7 +253,7 @@ export async function POST(request: Request) {
 
     const archive = new JSZip();
     for (const [, batchItems] of orderedGroups) {
-      archive.file(batchFilename(periodStart, batchItems[0], audience), buildBatchWorkbook(batchItems, audience));
+      archive.file(batchFilename(periodStart, periodEnd, batchItems[0], audience), buildBatchWorkbook(batchItems, audience));
     }
     const zip = await archive.generateAsync({
       type: "uint8array",
@@ -271,7 +261,7 @@ export async function POST(request: Request) {
       compressionOptions: { level: 6 }
     });
     const prefix = audience === "helpers" ? "helper-payouts" : "workforce-payouts";
-    const filename = `${prefix}-${periodStart.slice(0, 7)}-${orderedGroups.length}-bank-files-redownload.zip`;
+    const filename = `${prefix}-${periodStart}-to-${periodEnd}-${orderedGroups.length}-bank-files-redownload.zip`;
     return new Response(Buffer.from(zip), {
       headers: {
         ...responseHeaders,

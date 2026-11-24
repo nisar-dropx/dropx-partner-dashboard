@@ -30,7 +30,8 @@ test("bulk re-download is authorized, exact-selection only, and read-only", () =
   assert.doesNotMatch(route, /bank processing requires all-location access/i);
   assert.match(route, /MAX_REQUEST_BYTES = 4 \* 1024 \* 1024/);
   assert.match(route, /uniquePaymentItemIds\(body\.paymentItemIds\)/);
-  assert.match(route, /completeCalendarMonth\(periodStart, periodEnd\)/);
+  assert.match(route, /validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
+  assert.match(route, /for \(const month of payoutPeriodMonths\(periodStart, periodEnd\)\)/);
   assert.match(route, /rpc\("workforce_get_payout_payment_redownload"/);
   assert.match(route, /returnedIds\.size !== paymentItemIds\.length/);
   assert.match(route, /UUID\.test\(locationId\) && allowed\.has\(locationId\)/);

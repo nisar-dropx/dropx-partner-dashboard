@@ -1,3 +1,4 @@
+import { verifySelectedPeriodBankPayments } from "./selected-period-bank-fixture.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -3238,5 +3239,6 @@ assert.equal(catalog.rows[0].authenticated_transition_execute, false);
 assert.equal(catalog.rows[0].redownload_execute, true);
 assert.equal(catalog.rows[0].authenticated_redownload_execute, false);
 
+await verifySelectedPeriodBankPayments(db,{audience:"workforce",company,actor,bank,station});
 await db.close();
 console.log("Workforce payout bank payment ledger verification passed.");

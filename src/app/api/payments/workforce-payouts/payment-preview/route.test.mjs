@@ -1,3 +1,4 @@
+import * as period from "../../../../../lib/payout-publication-period.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -11,7 +12,7 @@ const otherStation = "33333333-3333-4333-8333-333333333333";
 function setup(options = {}) {
   const calls = [];
   const auth = { locationScopeIds: [station], hasAllLocationAccess: false, readOnly: options.readOnly, companyId: "trusted-company" };
-  const deps = {
+  const deps = { "@/lib/payout-publication-period": period,
     "@/lib/access-surface": { currentAdminAccessSurface: () => "ops" },
     "@/lib/authorization": { getAuthorization: async () => options.signedOut ? null : auth, hasPermission: (_auth, code, action) => options.denied ? false : code === "ops_workforce_payouts" && (action === "access" || (action === "edit" && options.canEdit)) },
     "@/lib/company-scope": { requireCompanyId: (authorization) => authorization.companyId },
@@ -33,7 +34,7 @@ test("payment previews require page permission and reject out-of-scope locations
   }
 });
 test("payment previews reject invalid periods, identities and oversized batches", async () => {
-  for (const body of [{ periodStart: "2026-13-01" }, { periodEnd: "2026-10-30" }, { rows: Array(51).fill({ workforceId: worker, stationId: station }) }, { rows: [{ workforceId: "invalid", stationId: station }] }, { rows: [] }]) {
+  for (const body of [{ periodStart: "2026-13-01" }, { periodEnd: "2026-09-30" }, { rows: Array(51).fill({ workforceId: worker, stationId: station }) }, { rows: [{ workforceId: "invalid", stationId: station }] }, { rows: [] }]) {
     const s = setup();
     assert.equal((await s.post(s.request(body))).status, 400);
     assert.equal(s.calls.length, 0);
@@ -46,6 +47,15 @@ test("payment previews derive company from session and ignore submitted amounts 
   assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   assert.deepEqual(s.calls[0], { name: "workforce_preview_payout_payment_rows", args: { p_company_id: "trusted-company", p_period_start: "2026-10-01", p_period_end: "2026-10-31", p_rows: [{ workforce_id: worker, station_id: station }] } });
   assert.equal((await response.json()).rows[0].eligibility_code, "payout_dispute_open");
+});
+
+test("payment previews preserve exact half-month, daily and cross-month ranges", async () => {
+  for (const [start,end] of [["2026-10-01","2026-10-15"],["2026-10-16","2026-10-31"],["2026-10-05","2026-10-05"],["2026-10-28","2026-11-04"]]) {
+    const s=setup();
+    assert.equal((await s.post(s.request({periodStart:start,periodEnd:end}))).status,200);
+    assert.equal(s.calls[0].args.p_period_start,start);
+    assert.equal(s.calls[0].args.p_period_end,end);
+  }
 });
 test("preview failure is explicit and does not leak database errors", async () => {
   const s = setup({ failure: true });

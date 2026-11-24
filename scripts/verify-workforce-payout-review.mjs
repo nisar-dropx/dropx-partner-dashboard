@@ -95,7 +95,7 @@ assert.match(routeSource, /subjectTypes\.has\(["']helper["']\)/);
 assert.match(routeSource, /rpc\("workforce_publish_payout_notifications"/);
 assert.match(routeSource, /rpc\("helper_publish_payout_notifications"/);
 assert.match(tableSource, /`Publish Payment\$\{reviewSelectedRows\.length/);
-assert.match(tableSource, /const canViewPaymentHistory = calendarMonthEnd === periodEnd/);
+assert.match(tableSource, /const canViewPaymentHistory = validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
 assert.match(tableSource, /const canPublishPeriod = canEdit && validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
 assert.match(tableSource, /payoutPublicationPeriodLabel\(periodStart, periodEnd\)/);
 assert.match(routeSource, /validPayoutPublicationPeriod\(periodStart, periodEnd\)/);

@@ -501,14 +501,7 @@ export function WorkforcePayoutTable({ audience = "workforce", banks = [], canDe
   useEffect(() => {
     setPage(1);
   }, [locationFilterKey]);
-  const calendarMonthEnd = useMemo(() => {
-    if (!/^\d{4}-\d{2}-01$/.test(periodStart)) return "";
-    const date = new Date(`${periodStart}T00:00:00Z`);
-    date.setUTCMonth(date.getUTCMonth() + 1);
-    date.setUTCDate(0);
-    return date.toISOString().slice(0, 10);
-  }, [periodStart]);
-  const canViewPaymentHistory = calendarMonthEnd === periodEnd;
+  const canViewPaymentHistory = validPayoutPublicationPeriod(periodStart, periodEnd);
   const canPublishPeriod = canEdit && validPayoutPublicationPeriod(periodStart, periodEnd);
   const publicationPeriodLabel = payoutPublicationPeriodLabel(periodStart, periodEnd);
   const canPublish = canPublishPeriod && canPublishNotifications;

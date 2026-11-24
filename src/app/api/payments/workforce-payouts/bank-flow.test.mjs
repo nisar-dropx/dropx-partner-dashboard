@@ -47,7 +47,9 @@ test("bank-file creation is company-scoped, privileged, transport-bounded and id
   assert.match(bankFileRoute, /MAX_REQUEST_BYTES = 4 \* 1024 \* 1024/);
   assert.match(bankFileRoute, /new TextEncoder\(\)\.encode\(raw\)\.byteLength > MAX_REQUEST_BYTES/);
   assert.match(bankFileRoute, /Select at least one unique Workforce payout row/);
-  assert.match(bankFileRoute, /completeCalendarMonth\(periodStart, periodEnd\)/);
+  assert.match(bankFileRoute, /validPayoutPublicationPeriod\(periodStart, periodEnd\)/);
+  assert.match(bankFileRoute, /for \(const month of payoutPeriodMonths\(periodStart, periodEnd\)\)/);
+  assert.match(bankFileRoute, /payoutRows\.map\(row => row\.stationId\), month, audience/);
   assert.match(bankFileRoute, /new Set\(keys\)\.size !== keys\.length/);
   assert.match(bankFileRoute, /payoutRows\.map\(\(row\) => \(\{/);
   assert.match(bankFileRoute, /p_operation_id: operationId/);
@@ -384,7 +386,7 @@ test("selected processing rows can be cancelled atomically with one mandatory re
 test("the UI pays only eligible location rows and displays row-specific ledger balances", () => {
   assert.match(page, /"helper_preview_payout_payment_rows"[\s\S]{0,100}"workforce_preview_payout_payment_rows"/);
   assert.match(page, /`\$\{String\(preview\.workforce_id\)\.toLowerCase\(\)\}\|\$\{String\(preview\.station_id\)\.toLowerCase\(\)\}`/);
-  assert.match(page, /const canLoadPaymentSummaries = period\.mode === "monthly"/);
+  assert.match(page, /const canLoadPaymentSummaries = validPayoutPublicationPeriod\(period\.fromDate, period\.toDate\)/);
   assert.match(page, /loadError \|\| !canLoadPaymentSummaries/);
   assert.match(page, /includeProcessingActionDetails: canProcessPayments/);
   assert.match(page, /const \[reviewed, paymentEnriched\] = await Promise\.all/);
@@ -396,7 +398,7 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
     page.indexOf("const canProcessPayments"),
     page.indexOf("const canLoadPaymentSummaries")
   );
-  assert.match(paymentPermissionBlock, /period\.mode === "monthly"[\s\S]*?&& canEdit[\s\S]*?&& canUsePaymentActions[\s\S]*?&& !authorization\.readOnly/);
+  assert.match(paymentPermissionBlock, /validPayoutPublicationPeriod\(period\.fromDate, period\.toDate\)[\s\S]*?&& canEdit[\s\S]*?&& canUsePaymentActions[\s\S]*?&& !authorization\.readOnly/);
   assert.doesNotMatch(paymentPermissionBlock, /hasAllLocationAccess/);
   assert.match(page, /const canEdit = hasPermission\(authorization, pageCode, "edit"\)/);
   assert.match(page, /canPublishNotifications=\{canEdit\}/);

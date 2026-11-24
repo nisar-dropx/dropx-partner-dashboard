@@ -355,7 +355,7 @@ export function WorkforcePayoutPaymentHistoryButton({
     <div className="modal-backdrop payment-history-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <section aria-labelledby={titleId} aria-modal="true" className="modal-panel wide payment-history-modal bank-payment-history-modal" ref={modalRef} role="dialog">
         <div className="panel-head payment-history-head">
-          <div><h2 id={titleId}>Bank payment history</h2><p className="subtle">{subjectLabel} · {periodStart.slice(0, 7)}</p></div>
+          <div><h2 id={titleId}>Bank payment history</h2><p className="subtle">{subjectLabel} · {periodStart} to {periodEnd}</p></div>
           <button className="button secondary compact" onClick={() => setOpen(false)} ref={closeRef} type="button">Close</button>
         </div>
         <div className="payment-history-body">

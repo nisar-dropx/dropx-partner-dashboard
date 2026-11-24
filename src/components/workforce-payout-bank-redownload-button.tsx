@@ -98,7 +98,7 @@ export function WorkforcePayoutBankRedownloadButton({
       });
       if (!response.ok) throw new Error(await responseError(response));
       const blob = await response.blob();
-      const fallback = `${audience}-payouts-${periodStart.slice(0, 7)}-redownload.${blob.type === "application/zip" ? "zip" : "xlsx"}`;
+      const fallback = `${audience}-payouts-${periodStart}-to-${periodEnd}-redownload.${blob.type === "application/zip" ? "zip" : "xlsx"}`;
       const filename = attachmentFilename(response.headers.get("content-disposition"), fallback);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

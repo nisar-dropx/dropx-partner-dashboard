@@ -1,3 +1,4 @@
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { createHash } from "node:crypto";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
@@ -37,14 +38,6 @@ function validDate(value: string) {
   if (!DATE.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const expectedEnd = new Date(`${periodStart}T00:00:00Z`);
-  expectedEnd.setUTCMonth(expectedEnd.getUTCMonth() + 1);
-  expectedEnd.setUTCDate(0);
-  return expectedEnd.toISOString().slice(0, 10) === periodEnd;
 }
 
 function boundedText(value: unknown, maximum: number) {
@@ -308,7 +301,7 @@ export async function POST(request: Request) {
         if (action !== "cancelled") return errorResponse("Bulk status changes support cancellation only.", 400);
         const periodStart = String(body.periodStart ?? "").trim();
         const periodEnd = String(body.periodEnd ?? "").trim();
-        if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
+        if (!validPayoutPublicationPeriod(periodStart, periodEnd)) return errorResponse("Choose a valid payout date range.", 400);
         const paymentItemIds = body.paymentItemIds.map((value) => String(value ?? "").trim().toLowerCase());
         if (!paymentItemIds.length || paymentItemIds.some((value) => !UUID.test(value))) {
           return errorResponse("Select at least one valid processing payment.", 400);
@@ -364,7 +357,7 @@ export async function POST(request: Request) {
 
     const periodStart = String(body.periodStart ?? "").trim();
     const periodEnd = String(body.periodEnd ?? "").trim();
-    if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Choose one complete payout month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) return errorResponse("Choose a valid payout date range.", 400);
     const submittedWorkforceIds = Array.isArray(body.workforceIds)
       ? body.workforceIds.map((value) => String(value ?? "").trim().toLowerCase())
       : [String(body.workforceId ?? "").trim().toLowerCase()];

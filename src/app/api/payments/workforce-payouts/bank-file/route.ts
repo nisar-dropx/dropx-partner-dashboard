@@ -1,3 +1,4 @@
+import { validPayoutPublicationPeriod, payoutPeriodMonths } from "@/lib/payout-publication-period";
 import { createHash } from "node:crypto";
 import { assertPaymentRelease } from "@/lib/payment-release-access";
 
@@ -68,14 +69,6 @@ function validDate(value: string) {
   if (!Number.isInteger(year) || year < 1900 || year > 9999) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
-function completeCalendarMonth(periodStart: string, periodEnd: string) {
-  if (!validDate(periodStart) || !validDate(periodEnd) || !periodStart.endsWith("-01")) return false;
-  const end = new Date(`${periodStart}T00:00:00Z`);
-  end.setUTCMonth(end.getUTCMonth() + 1);
-  end.setUTCDate(0);
-  return end.toISOString().slice(0, 10) === periodEnd;
 }
 
 function uniquePayoutRows(value: unknown) {
@@ -211,7 +204,7 @@ function workbookResponse(result: Record<string, unknown>, audience: PayoutAudie
   const filePrefix = audience === "helpers" ? "helper-payouts" : "workforce-payouts";
   const periodStart = String(result.period_start ?? `${audience}-payout`);
   const batchSuffix = UUID.test(batchId) ? `-${batchId.slice(0, 8)}` : "";
-  const filename = `${filePrefix}-${periodStart.slice(0, 7)}-${valueDate.replaceAll("-", "")}${batchSuffix}.xlsx`;
+  const filename = `${filePrefix}-${periodStart}-to-${String(result.period_end)}-${valueDate.replaceAll("-", "")}${batchSuffix}.xlsx`;
   const skippedDisputeCount = Math.max(0, Math.trunc(Number(result.skipped_dispute_count) || 0));
   return new Response(Buffer.from(workbook), {
     headers: {
@@ -265,7 +258,9 @@ export async function GET(request: Request) {
     if (!immutableLocationsAreInScope(access.authorization, items.map((item) => item.location_id_snapshot))) {
       return errorResponse("This payment batch includes a location outside your location scope.", 403);
     }
-    await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id_snapshot)), String(batch.period_start).slice(0, 7), audience);
+    for (const month of payoutPeriodMonths(String(batch.period_start), String(batch.period_end))) {
+      await assertPaymentRelease(access.companyId, items.map(item => String(item.location_id_snapshot)), month, audience);
+    }
     return workbookResponse({
       batch_id: batch.id,
       period_start: batch.period_start,
@@ -314,7 +309,7 @@ export async function POST(request: Request) {
     const valueDate = String(body.valueDate ?? "").trim();
     const payoutRows = uniquePayoutRows(body.payoutRows);
     if (!UUID.test(operationId) || !UUID.test(bankId)) return errorResponse("A valid operation and bank are required.", 400);
-    if (!completeCalendarMonth(periodStart, periodEnd)) return errorResponse("Bank processing is available only for one complete calendar month.", 400);
+    if (!validPayoutPublicationPeriod(periodStart, periodEnd)) return errorResponse("Choose a valid payout date range.", 400);
     if (!validDate(valueDate)) return errorResponse("Choose a valid bank value date.", 400);
     if (!payoutRows) return errorResponse(
       audience === "helpers"
@@ -328,7 +323,9 @@ export async function POST(request: Request) {
       payoutRows.map((row) => row.stationId)
     );
     if (scopeError) return scopeError;
-    await assertPaymentRelease(access.companyId, payoutRows.map(row => row.stationId), periodStart.slice(0, 7), audience);
+    for (const month of payoutPeriodMonths(periodStart, periodEnd)) {
+      await assertPaymentRelease(access.companyId, payoutRows.map(row => row.stationId), month, audience);
+    }
 
     // Idempotency belongs to the user's normalized request, not to the live
     // calculation snapshot used by the first-execution safety gate. Keep this

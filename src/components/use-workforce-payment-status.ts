@@ -1,5 +1,6 @@
 "use client";
 
+import { validPayoutPublicationPeriod } from "@/lib/payout-publication-period";
 import { useEffect, useMemo, useState } from "react";
 import type { WorkforcePayoutRow } from "@/components/workforce-payout-table";
 import { chunkedValues, mapWithConcurrency } from "@/lib/bounded-concurrency";
@@ -20,9 +21,7 @@ export function useWorkforcePaymentStatus(sourceRows: WorkforcePayoutRow[], audi
     const missing = [...new Map(sourceRows.flatMap((row) => !row.paymentSummary && row.reviewSubjectId && row.locationId
       ? [[`${row.reviewSubjectId.toLowerCase()}|${row.locationId.toLowerCase()}`, { workforceId: row.reviewSubjectId, stationId: row.locationId }] as const]
       : [])).values()];
-    const end = new Date(`${periodStart}T00:00:00Z`);
-    if (!Number.isNaN(end.getTime())) { end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0); }
-    if (audience !== "workforce" || !periodStart.endsWith("-01") || Number.isNaN(end.getTime()) || end.toISOString().slice(0, 10) !== periodEnd || !missing.length) return;
+    if (audience !== "workforce" || !validPayoutPublicationPeriod(periodStart, periodEnd) || !missing.length) return;
     const controller = new AbortController();
     let cancelled = false;
     setState({ source: sourceRows, summaries: new Map(), loading: true, loaded: 0, total: missing.length, error: false });

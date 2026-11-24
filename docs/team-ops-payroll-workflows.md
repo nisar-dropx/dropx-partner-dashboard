@@ -8,9 +8,20 @@ The page, signed snapshot validation and Workforce/Helper database publication
 writers share ordered, valid-date semantics. Reviews, notifications, revisions,
 mapping unlock/relock and publication refresh retain the exact selected range.
 Location access, calculation freshness and dispute deadlines stay enforced.
-Calculation rules and bank-payment period rules are independent of publication.
+Bank previews, generation, history, cancellation, holds and re-download also
+accept the selected date range. Reference versions share the whole start-month
+namespace, so adjacent cycles cannot reuse a bank reference. Candidate checks
+reject a different overlapping period with paid/processing money at the same
+location (effective paid credits follow mapping transfers); exact-period delta
+payments retain existing balance rules. Both creators and previews share this
+check, and creators retain the company payment mutex. Finalization matches the
+stored instruction without adding new business-eligibility checks.
+Calculation rules remain unchanged; automatic monthly advance recovery is still
+part of full-month worksheets and is not added to partial-period calculations.
 Migration `20261124124400_publish_payout_selected_periods.sql` relaxes only
-publication/review lifecycle guards and their period constraints. Existing
+publication/review lifecycle guards and their period constraints. Migration
+`20261124132000_selected_period_bank_payments.sql` extends the bank lifecycle.
+Existing
 snapshots and recovery records are not rewritten.
 Tests cover real PostgreSQL publication writes for both half-month cycles,
 single-day and cross-month ranges, plus malformed/reversed dates, permissions,

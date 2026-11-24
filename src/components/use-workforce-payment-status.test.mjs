@@ -1,3 +1,4 @@
+import * as period from "../lib/payout-publication-period.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -16,7 +17,7 @@ function harness(fetcher) {
     useMemo(fn) { return fn(); },
     useEffect(fn, deps) { const index = cursor++; if (!slots[index] || deps.some((value, i) => value !== slots[index][i])) { slots[index] = deps; effects.push(fn); } }
   };
-  const deps = { react, "@/lib/bounded-concurrency": batching, "@/lib/workforce-payout-payment-summary": paymentState };
+  const deps = { "@/lib/payout-publication-period": period, react, "@/lib/bounded-concurrency": batching, "@/lib/workforce-payout-payment-summary": paymentState };
   const module = { exports: {} };
   new Function("require", "module", "exports", "fetch", compiled)((name) => deps[name], module, module.exports, fetcher);
   return {
@@ -63,13 +64,24 @@ test("leaving a worksheet aborts pending reads and discards late responses", asy
   await flush();
   assert.equal(h.render(rows).rows[0].paymentSummary, undefined);
 });
-test("daily ranges and Helpers never use the Workforce monthly preview endpoint", () => {
+test("Helpers never use the Workforce preview endpoint", () => {
   let calls = 0;
-  for (const [audience, end] of [["helpers", "2026-10-31"], ["workforce", "2026-10-15"]]) {
+  for (const [audience, end] of [["helpers", "2026-10-31"]]) {
     const h = harness(async () => { calls++; });
     h.render([base], audience, end); h.runEffects();
   }
   assert.equal(calls, 0);
+});
+
+test("selected-cycle status loading sends the exact range and completes progress", async () => {
+  let request;
+  const rows=[base];
+  const h=harness(async (_url,options)=>{request=JSON.parse(options.body);return {ok:true,json:async()=>({rows:[preview]})};});
+  h.render(rows,"workforce","2026-10-15");h.runEffects();
+  assert.equal(h.render(rows,"workforce","2026-10-15").loading,true);
+  await flush();
+  assert.equal(request.periodEnd,"2026-10-15");
+  assert.equal(h.render(rows,"workforce","2026-10-15").loaded,1);
 });
 
 test("progress counts only returned statuses across batches and stays incomplete on failure", async () => {

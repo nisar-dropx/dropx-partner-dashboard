@@ -1,3 +1,4 @@
+import { verifySelectedPeriodBankPayments } from "./selected-period-bank-fixture.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -1003,5 +1004,6 @@ const publicationColumn = await db.query(`
 `);
 assert.equal(publicationColumn.rows[0]?.is_nullable, "YES");
 
+await verifySelectedPeriodBankPayments(db,{audience:"helpers",company:"10000000-0000-4000-8000-000000000001",actor:"10000000-0000-4000-8000-000000000002",bank:"10000000-0000-4000-8000-000000000003",station:"10000000-0000-4000-8000-000000000005"});
 await db.close();
 console.log("Helper payout bank payment ledger and positive-balance eligibility verified.");
