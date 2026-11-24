@@ -219,9 +219,9 @@ async function getMonsCookies() {
 
   const roots = firefoxProfileRoots();
   console.log(
-    `[site-summary] cookies: ${Object.keys(vals).join(", ")} · sid last used ${ageLabelFromFirefoxMicros(sidMeta?.lastAccessed)}` +
-      (sidMeta?.profile ? ` · profile ${sidMeta.profile}` : "") +
-      (roots.length ? ` · scanned ${roots.length} Firefox root(s)` : " · no Firefox profiles found")
+    `[site-summary] cookies: ${Object.keys(vals).join(", ")} | sid last used ${ageLabelFromFirefoxMicros(sidMeta?.lastAccessed)}` +
+      (sidMeta?.profile ? ` | profile ${sidMeta.profile}` : "") +
+      (roots.length ? ` | scanned ${roots.length} Firefox root(s)` : " | no Firefox profiles found")
   );
   _monsCookies = vals;
   return vals;
@@ -627,7 +627,7 @@ async function pollOnce() {
 await mkdir(STATE_DIR, { recursive: true }).catch(() => null);
 
 if (debugAuth) {
-  console.log("DropX Site Summary Monitor — debug-auth");
+  console.log("DropX Site Summary Monitor - debug-auth");
   console.log(`Firefox roots: ${firefoxProfileRoots().join(" | ") || "(none)"}`);
   try {
     await getMonsCookies();
@@ -638,7 +638,7 @@ if (debugAuth) {
   process.exit(0);
 }
 
-console.log(`DropX Site Summary Monitor — stations: ${STATIONS.join(", ")} — threshold: ${THRESHOLD_S}s — interval: ${POLL_MS / 1000}s${dryRun ? " [DRY RUN]" : ""}`);
+console.log(`DropX Site Summary Monitor - stations: ${STATIONS.join(", ")} - threshold: ${THRESHOLD_S}s - interval: ${POLL_MS / 1000}s${dryRun ? " [DRY RUN]" : ""}`);
 if (TESTING_GROUP) console.log(`  Testing mode: all alerts → ${TESTING_GROUP}`);
 
 if (runOnce) {
