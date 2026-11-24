@@ -94,12 +94,12 @@ const HEADER_ALIASES: Record<HeaderField, readonly string[]> = {
   assigned: ["assigned", "assigned_count", "assigned count"],
   completed: ["completed", "completed_count", "completed count"],
   createdAt: [
+    "created_at",
+    "created at",
     "sheet_create_date_time",
     "sheet create date time",
     "sheet_created_at",
-    "sheet created at",
-    "created_at",
-    "created at"
+    "sheet created at"
   ],
   hubName: ["hub_name", "hub name", "hub", "station", "station name"],
   providerId: [
@@ -122,7 +122,7 @@ const HEADER_ALIASES: Record<HeaderField, readonly string[]> = {
     "updated_at",
     "updated at"
   ],
-  vendorName: ["ODH Vendor", "odh_vendor", "vendor_name", "vendor name"]
+  vendorName: ["ODH Vendor", "odh_vendor", "ODH", "vendor_name", "vendor name"]
 };
 
 const REQUIRED_HEADERS: readonly HeaderField[] = [
@@ -173,9 +173,13 @@ function excelSerialMilliseconds(serial: number) {
   return Date.UTC(1899, 11, 30) + serial * 24 * 60 * 60 * 1000;
 }
 
-function parseCalendarDate(value: unknown) {
+function parseCalendarDate(value: unknown, timestampCell = false) {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
+    // SheetJS decodes Excel timestamps into the runtime's local timezone.
+    // Preserve their displayed calendar date; rounding would move afternoon
+    // timestamps into tomorrow and can incorrectly cross a payroll cycle.
+    if (timestampCell) return dateText(value.getFullYear(), value.getMonth() + 1, value.getDate());
     // SheetJS represents a date-only Excel cell as a Date and may shift its UTC
     // value by the workbook timezone (for India, just before the prior UTC day
     // ends). The create column is a business date, so recover its nearest day.
@@ -268,8 +272,9 @@ function headerIndexes(row: readonly unknown[]): HeaderIndexes {
   const keys = row.map(headerKey);
   const indexes: HeaderIndexes = {};
   for (const [field, aliases] of Object.entries(HEADER_ALIASES) as Array<[HeaderField, readonly string[]]>) {
-    const accepted = new Set(aliases.map(headerKey));
-    const index = keys.findIndex((candidate) => accepted.has(candidate));
+    // Prefer the explicit source field even when an older alias appears earlier
+    // in the workbook (created_at is column Y in the current Flipkart export).
+    const index = aliases.map((alias) => keys.indexOf(headerKey(alias))).find((index) => index >= 0) ?? -1;
     if (index >= 0) indexes[field] = index;
   }
   return indexes;
@@ -395,7 +400,8 @@ export function parseFlipkartProductionMatrix(
     const rowIssues: FlipkartProductionIssue[] = [];
     const providerEmployeeId = normalizeFlipkartProviderId(rowValue(row, indexes, "providerId"));
     const sheetId = normalizeIdentity(rowValue(row, indexes, "sheetId"));
-    const workDate = parseCalendarDate(rowValue(row, indexes, "createdAt"));
+    const workDate = parseCalendarDate(rowValue(row, indexes, "createdAt"),
+      headerKey(rows[headerIndex][indexes.createdAt!]) === "createdat");
     const updatedAtMs = parseTimestampMilliseconds(rowValue(row, indexes, "updatedAt"));
     const metric = flipkartMetricForSheetType(rowValue(row, indexes, "sheetType"));
     const stationCode = stationCodeFromFlipkartHub(
@@ -409,7 +415,7 @@ export function parseFlipkartProductionMatrix(
 
     if (!providerEmployeeId) rowIssues.push({ field: "casper_employee_id", message: "Casper employee ID must be stored as safe text or an integer.", rowNumber });
     if (!sheetId) rowIssues.push({ field: "sheet_id", message: "Sheet ID is required and must be stored safely.", rowNumber });
-    if (!workDate) rowIssues.push({ field: "sheet_create_date_time", message: "Sheet create date is invalid.", rowNumber });
+    if (!workDate) rowIssues.push({ field: String(rows[headerIndex][indexes.createdAt!]), message: "Production created date is invalid.", rowNumber });
     if (updatedAtMs === null) rowIssues.push({ field: "sheet_update_date_time", message: "Sheet update date and time is invalid.", rowNumber });
     if (!metric) rowIssues.push({ field: "sheet_type", message: "Sheet type must be BP_RUNSHEET or BP_PICKUPSHEET.", rowNumber });
     if (!stationCode) rowIssues.push({ field: "hub_name", message: "Hub name does not end with a permitted station code.", rowNumber });

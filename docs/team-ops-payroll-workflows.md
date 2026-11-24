@@ -1,5 +1,17 @@
 # Team Ops, People and payroll workflows (October 2026)
 
+## Flipkart RD production export — 24 November 2026
+
+Flipkart production imports prefer `created_at` (column Y in the RD export) for
+the work date and `casper_employee_id` for the provider ID, regardless of earlier
+alias columns. Excel timestamps retain the displayed calendar day. Older exports
+without `created_at` retain the sheet-create-date fallback. `ODH` is accepted as
+the vendor-name column alongside `ODH Vendor`; the company vendor check remains.
+BP_RUNSHEET completed counts are deliveries; BP_PICKUPSHEET completed counts are
+customer returns. Existing station access, full-cycle and newest-sheet checks
+remain. Verified the supplied 2,798-row export for 1–15 November: 585 daily rows,
+19,678 deliveries and 2,164 customer returns, with zero parser issues.
+
 ## Manually paid advance imports — 23 November 2026
 
 Canonical matching follows All People category precedence: Workforce first,

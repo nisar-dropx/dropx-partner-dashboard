@@ -33,6 +33,33 @@ const HEADERS = [
   "completed"
 ];
 
+test("current RD export uses created_at, Casper employee ID and ODH vendor", () => {
+  const headers = [...HEADERS, "created_at", "ODH", "provider_employee_id"];
+  const result = parseFlipkartProductionMatrix(workbookRows([
+    headers,
+    [1,"Worker","001234","31/10/2026","02/11/2026 10:00:00","RUN-1","BP_RUNSHEET","HUB_PHN",12,10,"01/11/2026","DROPX LOGISTICS","WRONG-ID"],
+    [2,"Worker","001234","31/10/2026","02/11/2026 10:00:00","PICK-1","BP_PICKUPSHEET","HUB_PHN",3,2,"01/11/2026","DROPX LOGISTICS","WRONG-ID"]
+  ]), {expectedVendorNames:["DROPX_LOGISTICS"],rejectInvalidRows:true,requireBothSheetTypes:true});
+  assert.equal(result.cycle.startDate,"2026-11-01");
+  assert.equal(result.daily[0].workDate,"2026-11-01");
+  assert.equal(result.daily[0].providerEmployeeId,"001234");
+  assert.equal(result.daily[0].delivery,10);
+  assert.equal(result.daily[0].customerReturn,2);
+  assert.throws(()=>parseFlipkartProductionMatrix(workbookRows([
+    headers,[1,"Worker","001234","31/10/2026","02/11/2026","RUN-1","BP_RUNSHEET","HUB_PHN",12,10,"","DROPX LOGISTICS","WRONG-ID"]
+  ]),{rejectInvalidRows:true}),/date is invalid/i,"Do not silently use sheet date when created_at is blank");
+});
+
+test("created_at Excel timestamps keep their displayed day across the cycle boundary", () => {
+  const result = parseFlipkartProductionMatrix(workbookRows([
+    [...HEADERS,"created_at","ODH"],
+    [1,"Worker","001234","31/10/2026","16/11/2026","RUN-1","BP_RUNSHEET","HUB_PHN",1,1,new Date(2026,10,1,0,15),"DROPX LOGISTICS"],
+    [2,"Worker","001234","31/10/2026","16/11/2026","PICK-1","BP_PICKUPSHEET","HUB_PHN",1,1,new Date(2026,10,15,23,45),"DROPX LOGISTICS"]
+  ]),{rejectInvalidRows:true});
+  assert.deepEqual(result.rows.map(r=>r.workDate),["2026-11-01","2026-11-15"]);
+  assert.equal(result.cycle.key,"2026-11-H1");
+});
+
 test("parses header aliases, sheet types and hub station suffixes", () => {
   const rows = workbookRows([
     ["Flipkart cycle report"],
