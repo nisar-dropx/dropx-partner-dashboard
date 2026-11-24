@@ -195,6 +195,7 @@ define(
   [
     "/performance?view=daily",
     "/performance?view=sls",
+    "/performance/live",
     "/performance/review-status",
     "/performance/cortex",
     "/?view=hourly",
