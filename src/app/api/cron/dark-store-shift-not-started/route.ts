@@ -141,8 +141,11 @@ export async function GET(request: Request) {
       .is("deleted_at", null);
     if (clErr) { results.push(`slot ${slot}: DB error — ${clErr.message}`); continue; }
 
-    // Locations that have a checklist (started, any status)
-    const startedLocations = new Set((checklists ?? []).map((c) => c.location_id as string));
+    // Same as store ops: submitted / accepted / cancelled counts as done.
+    const statusByLocation = new Map<string, string>();
+    for (const row of checklists ?? []) {
+      statusByLocation.set(row.location_id as string, String(row.status ?? ""));
+    }
 
     // Deduplicate by WA group JID — multiple locations may share one group
     const sentToGroup = new Set<string>();
@@ -151,8 +154,9 @@ export async function GET(request: Request) {
       const group = groupByLocation.get(locationId);
       if (!group) continue;
 
-      if (startedLocations.has(locationId)) {
-        results.push(`${group.groupName} ${slot}: started`);
+      const status = statusByLocation.get(locationId);
+      if (status === "submitted" || status === "accepted" || status === "cancelled") {
+        results.push(`${group.groupName} ${slot}: shift operations ${status}`);
         continue;
       }
 
@@ -169,7 +173,10 @@ export async function GET(request: Request) {
       const groupShort = toGroup.replace(/[^a-z0-9]/gi, "").slice(-8);
       const testSuffix = testMode ? `-t${Math.floor(Date.now() / 60000) % 10000}` : forceMode ? "-f" : "";
       const clientRef = `ssns-${groupShort}-${dateShort}-${slot.replace(":", "")}${testSuffix}`;
-      const text = `Shift operations in Ops Pulse for ${slot} hrs shift not yet started. Why?`;
+      const reason = !status ? "not started" : status === "open" ? "started but not submitted" : `status ${status}`;
+      const text = !status
+        ? `Shift operations in Ops Pulse for ${slot} hrs shift not yet started. Why?`
+        : `Shift operations in Ops Pulse for ${slot} hrs shift not completed. Why?`;
       const label = `${group.groupName} ${slot}`;
 
       sendTasks.push(
@@ -178,7 +185,7 @@ export async function GET(request: Request) {
           body: { to: toGroup, text, client_ref: clientRef },
           timeoutMs: 45_000
         })
-          .then(() => { sent++; results.push(`${label}: not started — sent`); })
+          .then(() => { sent++; results.push(`${label}: ${reason} — sent`); })
           .catch((err) => {
             const msg = err instanceof WorkerError ? err.message : String(err);
             results.push(`${label}: send failed — ${msg}`);

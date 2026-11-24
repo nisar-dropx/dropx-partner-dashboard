@@ -374,9 +374,9 @@ export function parseExpiryDueRows(ocrText: string, businessDate: string): {
 
 export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: string, businessDate: string): Analysis {
   const rules = candidate.rules.length ? candidate.rules : [
-    "Check the Expiration column against today in Asia/Kolkata.",
-    "Check the quantity for every current or past-date row.",
-    "Pass only when there are no current or past-date rows with quantity above 0."
+    "Check the Expiration / Shrink column against today in Asia/Kolkata.",
+    "Treat same-day 23:59 shrink as still valid for today; only earlier calendar dates are overdue.",
+    "Pass when there are no past-date rows with quantity above 0 (today 23:59 is accepted)."
   ];
   const parsed = parseExpiryDueRows(ocrText, businessDate);
   if (!parsed.looksLike && !parsed.dates.length && parsed.totalExpired === null) {
@@ -392,13 +392,21 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
     });
   }
 
+  // Amazon shrink/expiration at today 23:59 is end-of-day — not overdue until the next business date.
+  const overdueRows = parsed.dueRows.filter((row) => row.date < businessDate);
+  const overdueDates = [...new Set(overdueRows.map((row) => row.date))].sort();
+  const pastCalendarDates = parsed.dates.filter((date) => date < businessDate);
+  const sameDayOrFutureOnly =
+    (parsed.dueRows.length > 0 && overdueRows.length === 0)
+    || (parsed.dates.length > 0 && pastCalendarDates.length === 0 && overdueRows.length === 0);
+
   // Explicit empty summary from Amazon / Ops text tables.
-  if (parsed.totalExpired === 0 && !parsed.dueRows.some((row) => (row.quantity ?? 0) > 0)) {
+  if (parsed.totalExpired === 0 && !overdueRows.some((row) => (row.quantity ?? 0) > 0)) {
     return analysis({
       matched: candidate,
       checks: [
         check(rules[0], "pass", `Total Expired Items is 0 for ${businessDate}.`),
-        check(rules[1], "pass", "No expired quantity remaining."),
+        check(rules[1], "pass", "No overdue expired quantity remaining."),
         check(rules[2], "pass", "Expiry clearance confirmed.")
       ],
       fields: fieldsOf(field("Business Date", businessDate), field("Total Expired Items", 0)),
@@ -406,14 +414,32 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
     });
   }
 
-  const dueRows = parsed.dueRows;
-  const dueDates = [...new Set(dueRows.map((row) => row.date))].sort();
-  const positiveDue = dueRows.some((row) => (row.quantity ?? 0) > 0)
-    || (parsed.totalExpired !== null && parsed.totalExpired > 0);
-  const qtyUnclear = dueDates.length > 0
+  // Excel / Ihm snapshots often show only today's 23:59 shrink — treat as received/clear for today.
+  if (sameDayOrFutureOnly && !(parsed.totalExpired !== null && parsed.totalExpired > 0 && pastCalendarDates.length > 0)) {
+    return analysis({
+      matched: candidate,
+      checks: [
+        check(rules[0], "pass", `Read dates for ${businessDate}; visible shrink/expiration is today 23:59 or later.`),
+        check(rules[1], "pass", "No past-date overdue rows — same-day 23:59 is accepted."),
+        check(rules[2], "pass", "Expiry report received for today.")
+      ],
+      fields: fieldsOf(
+        field("Business Date", businessDate),
+        field("Earliest Expiration Date", parsed.dates[0] ?? null),
+        field("Latest Expiration Date", parsed.dates.length ? parsed.dates[parsed.dates.length - 1] : null),
+        parsed.totalExpired !== null ? field("Total Expired Items", parsed.totalExpired) : null
+      ),
+      summary: `Expiry report received for ${businessDate}; remaining rows are same-day 23:59 or future.`
+    });
+  }
+
+  const positiveDue = overdueRows.some((row) => (row.quantity ?? 0) > 0)
+    || (parsed.totalExpired !== null && parsed.totalExpired > 0 && (pastCalendarDates.length > 0 || overdueRows.length > 0))
+    || (parsed.totalExpired !== null && parsed.totalExpired > 0 && !parsed.dates.length && !parsed.dueRows.length);
+  const qtyUnclear = overdueDates.length > 0
     && !positiveDue
     && parsed.totalExpired === null
-    && dueRows.every((row) => row.quantity === null);
+    && overdueRows.every((row) => row.quantity === null);
   const earliest = parsed.dates[0] ?? null;
   const latest = parsed.dates.length ? parsed.dates[parsed.dates.length - 1] : null;
   const checks: AnalysisCheck[] = [
@@ -428,32 +454,32 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
     ),
     check(
       rules[1],
-      !dueDates.length && !(parsed.totalExpired && parsed.totalExpired > 0)
+      !overdueDates.length && !positiveDue
         ? "pass"
         : positiveDue
           ? "fail"
           : qtyUnclear
             ? "unclear"
             : "pass",
-      !dueDates.length && !(parsed.totalExpired && parsed.totalExpired > 0)
-        ? "No current or past-date rows visible."
+      !overdueDates.length && !positiveDue
+        ? "No past-date overdue rows visible (today 23:59 is not overdue)."
         : positiveDue
-          ? `Current/past-date rows still show quantity above 0 (${dueDates.join(", ") || `total ${parsed.totalExpired}`}).`
+          ? `Past-date rows still show quantity above 0 (${overdueDates.join(", ") || `total ${parsed.totalExpired}`}).`
           : qtyUnclear
-            ? `Current/past dates visible (${dueDates.join(", ")}) but quantity could not be confirmed as 0.`
-            : "Current/past-date rows show quantity 0."
+            ? `Past dates visible (${overdueDates.join(", ")}) but quantity could not be confirmed as 0.`
+            : "Past-date rows show quantity 0."
     ),
     check(
       rules[2],
-      !dueDates.length && !(parsed.totalExpired && parsed.totalExpired > 0)
+      !overdueDates.length && !positiveDue
         ? "pass"
         : positiveDue
           ? "fail"
           : qtyUnclear
             ? "unclear"
             : "pass",
-      !dueDates.length && !positiveDue && !qtyUnclear
-        ? "No current/past-date stock remaining on the visible rows."
+      !overdueDates.length && !positiveDue && !qtyUnclear
+        ? "No past-date stock remaining on the visible rows."
         : "Expiry clearance is not confirmed."
     )
   ];
@@ -464,12 +490,12 @@ export function analyseExpiryRemoved(candidate: ScrapableCandidate, ocrText: str
       field("Business Date", businessDate),
       field("Earliest Expiration Date", earliest),
       field("Latest Expiration Date", latest),
-      field("Current/past dates visible", dueDates.length ? dueDates.join(", ") : "none"),
+      field("Past dates visible", overdueDates.length ? overdueDates.join(", ") : "none"),
       parsed.totalExpired !== null ? field("Total Expired Items", parsed.totalExpired) : null
     ),
-    summary: !dueDates.length && !(parsed.totalExpired && parsed.totalExpired > 0)
+    summary: !overdueDates.length && !positiveDue
       ? `Expiry dashboard clear for ${businessDate}; visible dates start at ${earliest ?? "n/a"}.`
-      : `Expiry dashboard still shows current/past dates: ${dueDates.join(", ") || `total ${parsed.totalExpired}`}.`
+      : `Expiry dashboard still shows past dates: ${overdueDates.join(", ") || `total ${parsed.totalExpired}`}.`
   });
 }
 

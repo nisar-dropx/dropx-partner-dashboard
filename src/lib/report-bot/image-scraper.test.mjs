@@ -110,7 +110,7 @@ describe("expiry scraper", () => {
     assert.equal(result.verdict, "fail");
   });
 
-  test("reads Excel snapshot rows with shrink and unit columns", () => {
+  test("reads Excel snapshot with today 23:59 shrink as received/pass", () => {
     const ocr = `
       DU-AA-35_EXPIRATION_AUDIT_SNAPSHOT
       Bin Name Product Expiration Shrink Quantity Unit ASIN
@@ -118,16 +118,27 @@ describe("expiry scraper", () => {
       AMB-G01J Fresh Onion 11/25/2026 23:59 11/24/2026 23:59 12 unit B08B4367
     `;
     const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
-    assert.equal(result.verdict, "fail");
-    assert.match(result.extracted_summary, /2026-11-24/);
+    assert.equal(result.verdict, "pass");
+    assert.match(result.extracted_summary, /2026-11-24|same-day|received/i);
   });
 
-  test("reads Ihm web dashboard and fails on due shrink/expiration qty", () => {
+  test("reads Ihm web dashboard and passes when only today 23:59 / future shrink remains", () => {
     const ocr = `
       Ihm Inventory Expiration Audit Dashboard TEZ-HYDERABAD-TTG9
       Bin Name Product Name Expiration Shrink Quantity Unit ASIN
       CHL-A08E4 Sid's Farm High Protein Milk 2026-11-25 23:59 2026-11-24 23:59 15 unit B0FGDFKV7C
       CHL-B02B2 Fresh Chinese Cabbage 2026-11-25 23:59 2026-11-24 23:59 1 unit B0ABC
+    `;
+    const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
+    assert.equal(result.verdict, "pass");
+  });
+
+  test("still fails when a past shrink date has quantity", () => {
+    const ocr = `
+      DU-AA-45_EXPIRATION_AUDIT_SNAPSHOT
+      Bin Name Product Expiration Shrink Quantity Unit ASIN
+      CHL-B HERITAGE 11/23/2026 23:59 11/23/2026 23:59 8 unit B0H7
+      AMB-I Fresh Onion 11/25/2026 23:59 11/24/2026 23:59 12 unit B08B
     `;
     const result = analyseExpiryRemoved(expiry, ocr, "2026-11-24");
     assert.equal(result.verdict, "fail");
