@@ -176,16 +176,16 @@ function buildCookieHeader(vals) {
   return Object.entries(vals).map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-function siteSummaryHeaders(cookies) {
+function siteSummaryHeaders(cookies, { jsonBody = false } = {}) {
   const st = cookies["__Host-mons-st"] || "";
   return {
     Cookie: buildCookieHeader(cookies),
-    Accept: "application/json, text/plain, */*",
-    "Content-Type": "application/json",
+    Accept: "application/json",
     Origin: GC_BASE,
     Referer: `${GC_BASE}/siteSummary`,
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-    // Midway / Mons apps expect the session token as CSRF as well as cookie.
+    ...(jsonBody ? { "Content-Type": "application/json" } : {}),
+    // Midway / Mons apps often expect the session token as CSRF as well as cookie.
     ...(st
       ? {
           "anti-csrftoken-a2z": st,
@@ -195,27 +195,40 @@ function siteSummaryHeaders(cookies) {
   };
 }
 
+async function parseSiteSummaryResponse(storeId, r) {
+  const text = await r.text();
+  const looksHtml = /^\s*</.test(text) || /<!DOCTYPE|<html/i.test(text);
+  if (r.status === 401 || r.status === 403 || looksHtml) {
+    _monsCookies = null;
+    throw new Error(
+      `Auth failed (${r.status}${looksHtml ? ", HTML login/SPA" : ""}) for store ${storeId} — reopen ${GC_BASE}/siteSummary in Firefox, confirm the page loads data, then retry. ${text.slice(0, 160).replace(/\s+/g, " ")}`
+    );
+  }
+  if (!r.ok) throw new Error(`Site Summary API ${r.status} for ${storeId}: ${text.slice(0, 400)}`);
+  try {
+    const data = JSON.parse(text || "{}");
+    return data.procurementListSummaries ?? data.summaries ?? [];
+  } catch (err) {
+    throw new Error(
+      `Site Summary API returned non-JSON for store ${storeId}: ${err instanceof Error ? err.message : String(err)} · ${text.slice(0, 160)}`
+    );
+  }
+}
+
 // ── API call ──────────────────────────────────────────────────────────────────
 async function fetchSiteSummary(storeId, cookies) {
   const url = `${GC_BASE}/api/v1/searchactiveprocurementlistsummaries/${storeId}/search`;
-  const headers = siteSummaryHeaders(cookies);
 
-  // Browser uses POST with an empty JSON body; fall back to GET for older paths.
-  let r = await fetch(url, { method: "POST", headers, body: "{}" });
-  if (r.status === 405 || r.status === 404) {
-    r = await fetch(url, { method: "GET", headers });
+  // Original working shape is GET. Only try POST if GET is rejected as a method.
+  let r = await fetch(url, { method: "GET", headers: siteSummaryHeaders(cookies) });
+  if (r.status === 405) {
+    r = await fetch(url, {
+      method: "POST",
+      headers: siteSummaryHeaders(cookies, { jsonBody: true }),
+      body: "{}"
+    });
   }
-
-  if (r.status === 401 || r.status === 403) {
-    _monsCookies = null;
-    const body = (await r.text().catch(() => "")).slice(0, 240);
-    throw new Error(
-      `Auth failed (${r.status}) for store ${storeId} — reopen ${GC_BASE}/siteSummary in Firefox and leave it logged in. ${body}`
-    );
-  }
-  if (!r.ok) throw new Error(`Site Summary API ${r.status} for ${storeId}: ${await r.text()}`);
-  const data = await r.json();
-  return data.procurementListSummaries ?? data.summaries ?? [];
+  return parseSiteSummaryResponse(storeId, r);
 }
 
 // ── Acceptance time computation ───────────────────────────────────────────────
