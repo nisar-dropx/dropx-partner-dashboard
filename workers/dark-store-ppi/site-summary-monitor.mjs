@@ -46,9 +46,14 @@ if (existsSync(envPath)) {
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const runOnce  = args.includes("--once");
-const dryRun   = args.includes("--dry-run");
-const argStore = args[args.indexOf("--store") + 1];
+const runOnce = args.includes("--once");
+const dryRun = args.includes("--dry-run");
+const storeFlagIdx = args.indexOf("--store");
+const argStore = storeFlagIdx >= 0 ? String(args[storeFlagIdx + 1] ?? "").trim() : "";
+if (storeFlagIdx >= 0 && (!argStore || argStore.startsWith("--"))) {
+  console.error("Usage: node site-summary-monitor.mjs [--once] [--dry-run] [--store TTB3]");
+  process.exit(1);
+}
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const THRESHOLD_S    = Math.max(1, Number(process.env.ACCEPTANCE_THRESHOLD_SECONDS ?? 15));
@@ -138,14 +143,31 @@ let _monsCookies = null;
 
 async function getMonsCookies() {
   if (_monsCookies) return _monsCookies;
+
+  // Manual overrides (same names as fetch.mjs) — useful when Firefox copy is locked/stale.
+  const envSid = process.env.GC_MONS_SID || process.env.SM_MONS_SID || "";
+  const envUbid = process.env.GC_MONS_UBID || process.env.SM_MONS_UBID || "";
+  const envSt = process.env.GC_MONS_ST || process.env.SM_MONS_ST || "";
+  const envSidp = process.env.GC_MONS_SIDP || process.env.SM_MONS_SIDP || "";
+
   const host = "eu.store-management.f3.amazon.dev";
-  const names = ["__Host-mons-sid", "__Host-mons-ubid", "__Host-mons-st"];
+  const names = ["__Host-mons-sid", "__Host-mons-ubid", "__Host-mons-st", "__Host-mons-sidp"];
   const vals = {};
   for (const name of names) {
     const v = await readFirefoxCookie(host, name);
     if (v) vals[name] = v;
   }
-  if (!vals["__Host-mons-sid"]) throw new Error("__Host-mons-sid not found in Firefox cookies — open eu.store-management.f3.amazon.dev in Firefox first");
+  if (envSid) vals["__Host-mons-sid"] = envSid;
+  if (envUbid) vals["__Host-mons-ubid"] = envUbid;
+  if (envSt) vals["__Host-mons-st"] = envSt;
+  if (envSidp) vals["__Host-mons-sidp"] = envSidp;
+
+  if (!vals["__Host-mons-sid"]) {
+    throw new Error("__Host-mons-sid not found in Firefox cookies — open https://eu.store-management.f3.amazon.dev/siteSummary in Firefox, log in, then retry");
+  }
+  console.log(
+    `[site-summary] cookies: ${Object.keys(vals).join(", ")}${vals["__Host-mons-st"] ? "" : " (missing st — CSRF may fail)"}`
+  );
   _monsCookies = vals;
   return vals;
 }
@@ -154,21 +176,42 @@ function buildCookieHeader(vals) {
   return Object.entries(vals).map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
+function siteSummaryHeaders(cookies) {
+  const st = cookies["__Host-mons-st"] || "";
+  return {
+    Cookie: buildCookieHeader(cookies),
+    Accept: "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    Origin: GC_BASE,
+    Referer: `${GC_BASE}/siteSummary`,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    // Midway / Mons apps expect the session token as CSRF as well as cookie.
+    ...(st
+      ? {
+          "anti-csrftoken-a2z": st,
+          "x-amz-csrf-token": st
+        }
+      : {})
+  };
+}
+
 // ── API call ──────────────────────────────────────────────────────────────────
 async function fetchSiteSummary(storeId, cookies) {
   const url = `${GC_BASE}/api/v1/searchactiveprocurementlistsummaries/${storeId}/search`;
-  const r = await fetch(url, {
-    headers: {
-      "Cookie": buildCookieHeader(cookies),
-      "Accept": "application/json",
-      "Origin": GC_BASE,
-      "Referer": `${GC_BASE}/siteSummary`,
-    }
-  });
+  const headers = siteSummaryHeaders(cookies);
+
+  // Browser uses POST with an empty JSON body; fall back to GET for older paths.
+  let r = await fetch(url, { method: "POST", headers, body: "{}" });
+  if (r.status === 405 || r.status === 404) {
+    r = await fetch(url, { method: "GET", headers });
+  }
+
   if (r.status === 401 || r.status === 403) {
-    // st token may have rotated — clear cache so next call re-reads from Firefox
     _monsCookies = null;
-    throw new Error(`Auth failed (${r.status}) for store ${storeId} — cookies may have expired, reopen eu.store-management.f3.amazon.dev in Firefox`);
+    const body = (await r.text().catch(() => "")).slice(0, 240);
+    throw new Error(
+      `Auth failed (${r.status}) for store ${storeId} — reopen ${GC_BASE}/siteSummary in Firefox and leave it logged in. ${body}`
+    );
   }
   if (!r.ok) throw new Error(`Site Summary API ${r.status} for ${storeId}: ${await r.text()}`);
   const data = await r.json();
