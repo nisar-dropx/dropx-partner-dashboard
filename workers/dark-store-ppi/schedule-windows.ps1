@@ -5,7 +5,7 @@
 # On tabgafoo that is often C:\ppi-worker or D:\ppi-worker.
 
 $workerDir = "C:\ppi-worker"
-$nodeExe   = (Get-Command node -ErrorAction Stop).Source
+$null = Get-Command node -ErrorAction Stop
 $script    = Join-Path $workerDir "fetch.mjs"
 $monitor   = Join-Path $workerDir "site-summary-monitor.mjs"
 $logFile   = Join-Path $workerDir "run.log"
@@ -18,65 +18,84 @@ if (-not (Test-Path $monitor)) {
   throw "Missing $monitor - copy site-summary-monitor.mjs into $workerDir first."
 }
 
+# Current-user tasks only - no admin / AtLogOn elevation needed on WorkSpaces.
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+
 # No -RunLevel Highest so it works without admin
 $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
   -MultipleInstances IgnoreNew `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
   -Hidden
+
+function Register-DropXTask {
+  param(
+    [Parameter(Mandatory = $true)][string]$TaskName,
+    [Parameter(Mandatory = $true)]$Action,
+    [Parameter(Mandatory = $true)]$Trigger,
+    [Parameter(Mandatory = $true)]$Settings
+  )
+  try {
+    Register-ScheduledTask `
+      -TaskName $TaskName `
+      -Action $Action `
+      -Trigger $Trigger `
+      -Settings $Settings `
+      -Principal $principal `
+      -Force | Out-Null
+    Write-Host "OK  $TaskName"
+    return $true
+  } catch {
+    Write-Host "FAIL $TaskName - $($_.Exception.Message)"
+    return $false
+  }
+}
 
 # PPI every 30 minutes
 $wrapperArg = "/c node `"$script`" >> `"$logFile`" 2>&1"
 $actionPPI = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArg -WorkingDirectory $workerDir
 $trigger30 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 30) -Once -At (Get-Date)
-
-Register-ScheduledTask `
-  -TaskName "DropX-DarkStore-PPI" `
-  -Action $actionPPI `
-  -Trigger $trigger30 `
-  -Settings $settings `
-  -Force | Out-Null
-
-Write-Host "PPI task registered: runs every 30 minutes."
-Write-Host "Log file: $logFile"
+Register-DropXTask -TaskName "DropX-DarkStore-PPI" -Action $actionPPI -Trigger $trigger30 -Settings $settings | Out-Null
+Write-Host "  Log: $logFile"
 
 # Inbound every 60 minutes
 $wrapperArgInbound = "/c node `"$script`" --inbound >> `"$logFile`" 2>&1"
 $actionInbound = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArgInbound -WorkingDirectory $workerDir
 $trigger60 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 60) -Once -At (Get-Date)
+Register-DropXTask -TaskName "DropX-DarkStore-Inbound" -Action $actionInbound -Trigger $trigger60 -Settings $settings | Out-Null
 
-Register-ScheduledTask `
-  -TaskName "DropX-DarkStore-Inbound" `
-  -Action $actionInbound `
-  -Trigger $trigger60 `
-  -Settings $settings `
-  -Force | Out-Null
-
-Write-Host "Inbound task registered: runs every 60 minutes."
-
-# Site Summary monitor: long-running loop (no open PowerShell window needed).
-# Starts at user logon and keeps polling every POLL_INTERVAL_SECONDS (default 60).
-# Firefox must stay logged into Site Summary so Mons cookies stay fresh.
-$wrapperArgSite = "/c node `"$monitor`" >> `"$siteLog`" 2>&1"
+# Site Summary: --once every 1 minute (same permission model as PPI; no AtLogOn / long-running process).
+# MultipleInstances IgnoreNew prevents overlap if a poll is still running.
+$wrapperArgSite = "/c node `"$monitor`" --once >> `"$siteLog`" 2>&1"
 $actionSite = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $wrapperArgSite -WorkingDirectory $workerDir
-$triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+$trigger1 = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 1) -Once -At (Get-Date)
 $settingsSite = New-ScheduledTaskSettingsSet `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
   -MultipleInstances IgnoreNew `
-  -RestartCount 3 `
-  -RestartInterval (New-TimeSpan -Minutes 1) `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
   -Hidden
-
-Register-ScheduledTask `
-  -TaskName "DropX-DarkStore-SiteSummary" `
-  -Action $actionSite `
-  -Trigger $triggerLogon `
-  -Settings $settingsSite `
-  -Force | Out-Null
-
-Write-Host "Site Summary monitor registered: starts at logon and stays running."
-Write-Host "Log file: $siteLog"
-Write-Host "Done."
+$siteOk = Register-DropXTask -TaskName "DropX-DarkStore-SiteSummary" -Action $actionSite -Trigger $trigger1 -Settings $settingsSite
+Write-Host "  Log: $siteLog"
 Write-Host ""
-Write-Host "Start Site Summary now:  Start-ScheduledTask 'DropX-DarkStore-SiteSummary'"
-Write-Host "Check Site Summary log:  Get-Content '$siteLog' -Tail 40"
-Write-Host "Stop Site Summary:       Stop-ScheduledTask 'DropX-DarkStore-SiteSummary'"
+
+if ($siteOk) {
+  Start-ScheduledTask -TaskName "DropX-DarkStore-SiteSummary"
+  Start-Sleep -Seconds 3
+  Write-Host "Started DropX-DarkStore-SiteSummary. Recent log:"
+  if (Test-Path $siteLog) {
+    Get-Content $siteLog -Tail 20
+  } else {
+    Write-Host "(log not written yet - wait one minute and run: Get-Content '$siteLog' -Tail 40)"
+  }
+} else {
+  Write-Host "Site Summary task was NOT registered. Run PowerShell as the logged-in WorkSpaces user (no admin needed for this version)."
+}
+
+Write-Host ""
+Write-Host "Useful commands:"
+Write-Host "  Start-ScheduledTask 'DropX-DarkStore-SiteSummary'"
+Write-Host "  Get-ScheduledTask 'DropX-DarkStore-SiteSummary' | Get-ScheduledTaskInfo"
+Write-Host "  Get-Content '$siteLog' -Tail 40"
+Write-Host "  Stop-ScheduledTask 'DropX-DarkStore-SiteSummary'"
