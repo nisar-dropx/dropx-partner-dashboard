@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Clock, Info, Loader2, RefreshCw } from "lucide-react";
-import { EddScopeFilters } from "@/app/ops-pulse/edd/edd-scope-filters";
-import { emptyEddScope, scopedStationCodes, type EddScope } from "@/lib/ops-pulse/edd-scope";
+import { DsScopeFilters } from "@/app/ops-pulse/operations/ds-scope-filters";
+import { emptyDsScope, scopedDsStationCodes, type DsScope } from "@/lib/ops-pulse/ds-scope";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
 import type {
   DsLiveInsight,
@@ -95,7 +96,7 @@ function sortValue(row: DsLiveStore, key: SortKey): string | number {
 
 export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
   const [data, setData] = useState(initial);
-  const [scope, setScope] = useState<EddScope>(emptyEddScope());
+  const [scope, setScope] = useState<DsScope>(emptyDsScope());
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "stationCode", direction: "asc" });
   const [page, setPage] = useState(1);
@@ -109,10 +110,19 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
     setData(initial);
   }, [initial]);
 
-  const codes = useMemo(() => data.stores.map((row) => row.stationCode), [data.stores]);
+  const storeMetas = data.storeMetas?.length
+    ? data.storeMetas
+    : data.stores.map((row) => ({
+        code: row.stationCode,
+        name: row.stationName,
+        city: row.city,
+        state: row.state,
+        regionKey: row.regionKey
+      }));
+
   const scopedCodes = useMemo(
-    () => new Set(scopedStationCodes(codes, data.clusters, scope)),
-    [codes, data.clusters, scope]
+    () => new Set(scopedDsStationCodes(storeMetas, data.managers ?? [], scope)),
+    [storeMetas, data.managers, scope]
   );
 
   const scopedStores = useMemo(
@@ -120,19 +130,15 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
     [data.stores, scopedCodes]
   );
 
-  // Status chips: options present after scope; keep a selected zero-match chip so it can be cleared.
   const statusFilterKeys = useMemo(() => {
-    const keys = (Object.keys(FILTERS) as FilterKey[]).filter((key) => {
+    return (Object.keys(FILTERS) as FilterKey[]).filter((key) => {
       if (key === "all") return true;
       if (key === filter) return true;
       return scopedStores.some(FILTERS[key].test);
     });
-    return keys;
   }, [scopedStores, filter]);
 
-  const filtered = useMemo(() => {
-    return scopedStores.filter(FILTERS[filter].test);
-  }, [scopedStores, filter]);
+  const filtered = useMemo(() => scopedStores.filter(FILTERS[filter].test), [scopedStores, filter]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -277,12 +283,11 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
       </section>
 
       <div className={s.scopeRow}>
-        <EddScopeFilters
-          codes={codes}
-          clusters={data.clusters}
+        <DsScopeFilters
+          stores={storeMetas}
+          managers={data.managers ?? []}
           value={scope}
           onChange={setScope}
-          stationNames={data.stationNames}
         />
       </div>
 
@@ -387,6 +392,17 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
             <span>{detailBusy ? "Loading…" : store ? ageLabel(("siteFetchedAt" in store ? store.siteFetchedAt : null) || store.ppiFetchedAt) : "Select a store"}</span>
           </div>
 
+          {selected ? (
+            <div className={s.actions} style={{ marginBottom: 8 }}>
+              <Link className={s.link} href={`/operations/ppi?station=${encodeURIComponent(selected)}&date=${encodeURIComponent(data.businessDate)}`}>
+                Open PPI
+              </Link>
+              <Link className={s.link} href={`/operations/site-summary?station=${encodeURIComponent(selected)}`}>
+                Open Site Summary
+              </Link>
+            </div>
+          ) : null}
+
           {data.insights.length ? (
             <ul className={s.insights}>
               {data.insights.map((insight) => {
@@ -452,18 +468,26 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
 
               <div className={s.detailSection}>
                 <h4>Site Summary · pending acceptance</h4>
-                {detail.siteOrders.length ? (
+                {detail.siteOrders.filter((o) => {
+                  const status = String(o.status ?? "").toUpperCase();
+                  return status === "OFFERED" || status === "UNASSIGNED";
+                }).length ? (
                   <table className={s.miniTable}>
                     <thead><tr><th>OID</th><th>Associate</th><th>Items</th><th>Clock</th></tr></thead>
                     <tbody>
-                      {detail.siteOrders.map((o) => (
+                      {detail.siteOrders
+                        .filter((o) => {
+                          const status = String(o.status ?? "").toUpperCase();
+                          return status === "OFFERED" || status === "UNASSIGNED";
+                        })
+                        .map((o) => (
                         <tr key={o.oid}>
                           <td>{o.oid}</td>
                           <td>{o.picker || "—"}</td>
                           <td>{count(o.items)}</td>
                           <td>
                             <span className={`${s.badge} ${o.elapsedSeconds >= detail.slaSeconds ? s.badgeBad : s.badgeGood}`}>
-                              {fmtClock(o.elapsedSeconds)}
+                              {fmtClock(o.elapsedSeconds)} / {fmtClock(o.acceptanceTargetSeconds ?? detail.slaSeconds)}
                             </span>
                           </td>
                         </tr>

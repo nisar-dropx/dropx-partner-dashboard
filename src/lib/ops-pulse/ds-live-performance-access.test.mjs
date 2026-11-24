@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canViewDsLivePerformance } from "./ds-live-performance-access.ts";
+import { canViewDsLivePerformance, canViewDsOperations } from "./ds-live-performance-access.ts";
 
 const auth = (partial) => ({
   isMasterOwner: false,
@@ -8,6 +8,7 @@ const auth = (partial) => ({
   roleName: null,
   effectiveRoleCodes: [],
   designationName: null,
+  permissions: {},
   ...partial
 });
 
@@ -28,4 +29,14 @@ test("DS Live allowed for FSD and Admin", () => {
   assert.equal(canViewDsLivePerformance(auth({ roleCode: "OPERATIONS_ADMIN" })), true);
   assert.equal(canViewDsLivePerformance(auth({ isMasterOwner: true })), true);
   assert.equal(canViewDsLivePerformance(auth({ roleCode: "OWNER" })), true);
+});
+
+test("Settings page grant unlocks Operations pages without FSD role", () => {
+  const granted = auth({
+    roleCode: "OPERATIONS_STM",
+    permissions: { ds_ppi: { canView: true } }
+  });
+  assert.equal(canViewDsOperations(granted, "ds_ppi"), true);
+  assert.equal(canViewDsOperations(granted, "ds_live_performance"), false);
+  assert.equal(canViewDsOperations(granted, "ds_site_summary"), false);
 });

@@ -53,8 +53,8 @@ test("publication sends the explicit WhatsApp choice without changing the payout
   assert.doesNotMatch(source, /async function sendNotification\(\)[\s\S]{0,2200}window\.confirm/);
 });
 
-test("every monthly viewer receives payment status while bank action details stay permission-gated", () => {
-  assert.match(pageSource, /const canLoadPaymentSummaries = period\.mode === ["']monthly["'];/);
+test("every selected-period viewer receives payment status while bank action details stay permission-gated", () => {
+  assert.match(pageSource, /const canLoadPaymentSummaries = validPayoutPublicationPeriod\(period\.fromDate, period\.toDate\)/);
   assert.match(pageSource, /loadWorkforcePayoutBanks\(companyId, canProcessPayments\)/);
   assert.match(pageSource, /loadError \|\| !canLoadPaymentSummaries[\s\S]*?withPayoutPaymentSummaries\([\s\S]*?includeProcessingActionDetails: canProcessPayments/);
   assert.match(pageSource, /includeProcessingActionDetails[\s\S]*?\? loadPayoutProcessingInstructions\(/);

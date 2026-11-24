@@ -4,7 +4,11 @@ type RoleLike = {
   roleName?: string | null;
   effectiveRoleCodes?: string[];
   designationName?: string | null;
+  permissions?: Record<string, { canView?: boolean; canAdd?: boolean; canEdit?: boolean }>;
 };
+
+export const DS_OPERATIONS_PAGE_CODES = ["ds_live_performance", "ds_ppi", "ds_site_summary"] as const;
+export type DsOperationsPageCode = (typeof DS_OPERATIONS_PAGE_CODES)[number];
 
 function roleTokens(authorization: RoleLike) {
   const tokens = new Set<string>();
@@ -21,11 +25,8 @@ function roleTokens(authorization: RoleLike) {
   return tokens;
 }
 
-/**
- * Dark Store Live performance is limited to FSD and Admin (incl. company owners).
- * Not seeded to Review Desk users.
- */
-export function canViewDsLivePerformance(authorization: RoleLike | null) {
+/** FSD / Admin / Owner role gate shared by Dark Store Operations pages. */
+export function hasDsOperationsRole(authorization: RoleLike | null) {
   if (!authorization) return false;
   if (authorization.isMasterOwner || authorization.roleCode === "OWNER") return true;
 
@@ -47,4 +48,20 @@ export function canViewDsLivePerformance(authorization: RoleLike | null) {
     .replace(/[^A-Z0-9]+/g, " ")
     .trim()} `;
   return phrase.includes(" FULL STACK ");
+}
+
+/**
+ * Dark Store Operations pages: FSD/Admin/Owner by default, or an explicit Settings
+ * page grant (so managers can be enabled later without another code change).
+ */
+export function canViewDsOperations(authorization: RoleLike | null, pageCode: DsOperationsPageCode = "ds_live_performance") {
+  if (!authorization) return false;
+  if (hasDsOperationsRole(authorization)) return true;
+  const grant = authorization.permissions?.[pageCode];
+  return Boolean(grant?.canView || grant?.canAdd || grant?.canEdit);
+}
+
+/** @deprecated Prefer canViewDsOperations — kept for existing imports. */
+export function canViewDsLivePerformance(authorization: RoleLike | null) {
+  return canViewDsOperations(authorization, "ds_live_performance");
 }

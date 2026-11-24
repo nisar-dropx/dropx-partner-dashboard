@@ -2,8 +2,8 @@ import "server-only";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
-import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
-import { loadFlashClusters, type LoadFlashCluster } from "@/lib/ops-pulse/load-flash-access";
+import { buildDsStoreMeta, dsRegionKey, type DsManagerOption, type DsStoreMeta } from "@/lib/ops-pulse/ds-scope";
+import { loadDsManagerOptions } from "@/lib/ops-pulse/load-ds-manager-options";
 
 /** PPI feed older than this is called out as stale (VM polls ~30 min). */
 export const DS_PPI_STALE_MS = 75 * 60 * 1000;
@@ -14,6 +14,7 @@ export type DsLivePicker = {
   username: string;
   orderCount: number;
   unitCount: number;
+  totalPptSeconds: number | null;
   avgPptSeconds: number | null;
 };
 
@@ -21,6 +22,7 @@ export type DsLiveHour = {
   hour: number;
   orderCount: number;
   unitCount: number;
+  totalPptSeconds: number | null;
   avgPptSeconds: number | null;
 };
 
@@ -50,6 +52,24 @@ export type DsLiveSiteOrder = {
   elapsedSeconds: number;
   pctComplete: number | null;
   status: string | null;
+  acceptanceSeconds: number | null;
+  pickingSeconds: number | null;
+  packRackSeconds: number | null;
+  totalSeconds: number | null;
+  acceptanceTargetSeconds: number | null;
+  pickingTargetSeconds: number | null;
+  packRackTargetSeconds: number | null;
+  totalTargetSeconds: number | null;
+};
+
+export type DsLiveAssociates = {
+  waitingForOrders: number;
+  onBreak: number;
+  offered: number;
+  picking: number;
+  packingRacking: number;
+  otherActivities: number;
+  total: number;
 };
 
 /** Compact board row — no heavy nested arrays (detail is loaded on demand). */
@@ -57,6 +77,8 @@ export type DsLiveStore = {
   stationCode: string;
   stationName: string;
   city: string | null;
+  state: string | null;
+  regionKey: string;
   orderCount: number;
   unitCount: number;
   pickerCount: number;
@@ -70,6 +92,7 @@ export type DsLiveStore = {
   breachingCount: number;
   worstElapsedSeconds: number | null;
   slaSeconds: number;
+  associates: DsLiveAssociates;
   inboundOpen: number;
   inboundAvgPct: number | null;
   inboundReconcilePending: number;
@@ -107,7 +130,8 @@ export type DsLiveNetwork = {
   stores: DsLiveStore[];
   insights: DsLiveInsight[];
   stationNames: Record<string, string>;
-  clusters: LoadFlashCluster[];
+  storeMetas: DsStoreMeta[];
+  managers: DsManagerOption[];
 };
 
 type DailyRow = {
@@ -115,6 +139,7 @@ type DailyRow = {
   username: string;
   order_count: number;
   unit_count: number;
+  total_ppt_ms: number | null;
   avg_ppt_seconds: number | null;
   fetched_at: string;
 };
@@ -124,6 +149,7 @@ type HourlyRow = {
   hour: number;
   order_count: number;
   unit_count: number;
+  total_ppt_ms: number | null;
   avg_ppt_seconds: number | null;
 };
 
@@ -155,6 +181,13 @@ type SnapshotRow = {
   breaching_count: number;
   worst_elapsed_seconds: number | null;
   sla_seconds: number;
+  waiting_for_orders?: number | null;
+  on_break?: number | null;
+  offered_associates?: number | null;
+  picking_associates?: number | null;
+  packing_racking?: number | null;
+  other_activities?: number | null;
+  total_associates?: number | null;
 };
 
 type SiteOrderRow = {
@@ -165,7 +198,45 @@ type SiteOrderRow = {
   elapsed_seconds: number;
   pct_complete: number | null;
   status: string | null;
+  acceptance_seconds?: number | null;
+  picking_seconds?: number | null;
+  pack_rack_seconds?: number | null;
+  total_seconds?: number | null;
+  acceptance_target_seconds?: number | null;
+  picking_target_seconds?: number | null;
+  pack_rack_target_seconds?: number | null;
+  total_target_seconds?: number | null;
 };
+
+function emptyAssociates(): DsLiveAssociates {
+  return {
+    waitingForOrders: 0,
+    onBreak: 0,
+    offered: 0,
+    picking: 0,
+    packingRacking: 0,
+    otherActivities: 0,
+    total: 0
+  };
+}
+
+function associatesFromSnapshot(snap: SnapshotRow | null | undefined): DsLiveAssociates {
+  if (!snap) return emptyAssociates();
+  return {
+    waitingForOrders: Number(snap.waiting_for_orders ?? 0),
+    onBreak: Number(snap.on_break ?? 0),
+    offered: Number(snap.offered_associates ?? 0),
+    picking: Number(snap.picking_associates ?? 0),
+    packingRacking: Number(snap.packing_racking ?? 0),
+    otherActivities: Number(snap.other_activities ?? 0),
+    total: Number(snap.total_associates ?? 0)
+  };
+}
+
+function pptSecondsFromMs(ms: number | null | undefined): number | null {
+  if (ms == null || !Number.isFinite(Number(ms))) return null;
+  return Math.round((Number(ms) / 1000) * 100) / 100;
+}
 
 type FetchRunRow = {
   station_code: string;
@@ -258,7 +329,8 @@ function emptyNetwork(businessDate: string, insightDetail: string): DsLiveNetwor
     stores: [],
     insights: [{ tone: "info", title: "No stores in scope", detail: insightDetail, filter: "all" }],
     stationNames: {},
-    clusters: []
+    storeMetas: [],
+    managers: []
   };
 }
 
@@ -276,31 +348,38 @@ export async function loadDsLivePerformance(
     : todayKolkata();
   const now = Date.now();
   const codes = scope.locations.map((l) => l.station_code);
-  const nameByCode = new Map(scope.locations.map((l) => [l.station_code, { name: l.station_name || l.station_code, city: l.city ?? null, id: l.id }]));
-  const stationNames = Object.fromEntries([...nameByCode].map(([code, meta]) => [code, meta.name]));
-
-  const stationOptions: EddStationOption[] = scope.locations.map((l) => ({
-    code: l.station_code,
-    label: l.station_code,
+  const nameByCode = new Map(scope.locations.map((l) => [l.station_code, {
     name: l.station_name || l.station_code,
-    locationId: l.id
-  }));
+    city: l.city ?? null,
+    state: l.state ?? null,
+    id: l.id
+  }]));
+  const stationNames = Object.fromEntries([...nameByCode].map(([code, meta]) => [code, meta.name]));
+  const storeMetas = buildDsStoreMeta(scope.locations.map((l) => ({
+    code: l.station_code,
+    name: l.station_name,
+    city: l.city,
+    state: l.state
+  })));
 
   if (!codes.length) {
     return emptyNetwork(businessDate, "No NOW stores are available for your access.");
   }
 
   const db = scope.db;
-  const clustersPending = loadFlashClusters(scope.companyId, stationOptions);
+  const managersPending = loadDsManagerOptions(
+    scope.companyId,
+    scope.locations.map((l) => ({ locationId: l.id, code: l.station_code }))
+  );
 
   // Board queries only — keep columns narrow and avoid order-level tables.
   const [dailyRes, inboundRes, snapshotsRes, runsRes] = await Promise.all([
-    db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,avg_ppt_seconds,fetched_at")
+    db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,total_ppt_ms,avg_ppt_seconds,fetched_at")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).in("station_code", codes),
     db.from("ds_inbound_shipments").select("id,station_code,pct_completion,status")
       .eq("company_id", scope.companyId).in("station_code", codes)
       .or("status.is.null,status.neq.complete"),
-    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds")
+    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
       .eq("company_id", scope.companyId).in("station_code", codes),
     db.from("ds_fetch_runs").select("station_code,run_type,status,finished_at,started_at")
       .eq("company_id", scope.companyId).in("station_code", codes).eq("run_type", "ppi")
@@ -334,8 +413,9 @@ export async function loadDsLivePerformance(
     }
   }
 
+  const regionByCode = new Map(storeMetas.map((s) => [s.code, s.regionKey]));
   const stores: DsLiveStore[] = codes.map((code) => {
-    const meta = nameByCode.get(code) ?? { name: code, city: null, id: "" };
+    const meta = nameByCode.get(code) ?? { name: code, city: null, state: null, id: "" };
     const pickersDaily = daily.filter((r) => r.station_code === code);
     const orderCount = pickersDaily.reduce((s, r) => s + Number(r.order_count ?? 0), 0);
     const unitCount = pickersDaily.reduce((s, r) => s + Number(r.unit_count ?? 0), 0);
@@ -355,6 +435,8 @@ export async function loadDsLivePerformance(
       stationCode: code,
       stationName: meta.name,
       city: meta.city,
+      state: meta.state,
+      regionKey: regionByCode.get(code) ?? "Unmapped",
       orderCount,
       unitCount,
       pickerCount: pickersDaily.filter((r) => Number(r.order_count ?? 0) > 0).length,
@@ -368,6 +450,7 @@ export async function loadDsLivePerformance(
       breachingCount: Number(snap?.breaching_count ?? 0),
       worstElapsedSeconds: snap?.worst_elapsed_seconds == null ? null : Number(snap.worst_elapsed_seconds),
       slaSeconds: Number(snap?.sla_seconds ?? 15),
+      associates: associatesFromSnapshot(snap),
       inboundOpen: storeInbound.length,
       inboundAvgPct: inboundPcts.length
         ? Math.round((inboundPcts.reduce((a, b) => a + b, 0) / inboundPcts.length) * 10) / 10
@@ -385,7 +468,7 @@ export async function loadDsLivePerformance(
     .sort()
     .at(-1) ?? null;
 
-  const clusters = await clustersPending;
+  const managers = await managersPending;
 
   return {
     businessDate,
@@ -402,7 +485,8 @@ export async function loadDsLivePerformance(
     stores,
     insights: buildInsights(stores),
     stationNames,
-    clusters
+    storeMetas,
+    managers
   };
 }
 
@@ -426,9 +510,9 @@ export async function loadDsLiveStoreDetail(
   const db = scope.db;
 
   const [dailyRes, hourlyRes, ordersRes, inboundRes, snapRes, siteOrdersRes, runRes] = await Promise.all([
-    db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,avg_ppt_seconds,fetched_at")
+    db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,total_ppt_ms,avg_ppt_seconds,fetched_at")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).eq("station_code", code),
-    db.from("ds_ppi_hourly").select("station_code,hour,order_count,unit_count,avg_ppt_seconds")
+    db.from("ds_ppi_hourly").select("station_code,hour,order_count,unit_count,total_ppt_ms,avg_ppt_seconds")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).eq("station_code", code).order("hour"),
     db.from("ds_ppi_orders").select("station_code,procurement_list_id,username,completed_at,unit_count,ppt_seconds")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).eq("station_code", code)
@@ -436,11 +520,11 @@ export async function loadDsLiveStoreDetail(
     db.from("ds_inbound_shipments").select("id,station_code,amazon_shipment_ref_id,status,pct_completion,total_units,estimated_arrival_time,receive_time")
       .eq("company_id", scope.companyId).eq("station_code", code)
       .or("status.is.null,status.neq.complete").limit(30),
-    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds")
+    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
       .eq("company_id", scope.companyId).eq("station_code", code).maybeSingle(),
-    db.from("ds_site_summary_orders").select("station_code,oid,picker,items,elapsed_seconds,pct_complete,status")
+    db.from("ds_site_summary_orders").select("station_code,oid,picker,items,elapsed_seconds,pct_complete,status,acceptance_seconds,picking_seconds,pack_rack_seconds,total_seconds,acceptance_target_seconds,picking_target_seconds,pack_rack_target_seconds,total_target_seconds")
       .eq("company_id", scope.companyId).eq("station_code", code)
-      .order("elapsed_seconds", { ascending: false }).limit(20),
+      .order("elapsed_seconds", { ascending: false }).limit(80),
     db.from("ds_fetch_runs").select("station_code,run_type,status,finished_at,started_at")
       .eq("company_id", scope.companyId).eq("station_code", code).eq("run_type", "ppi")
       .order("started_at", { ascending: false }).limit(1)
@@ -488,6 +572,8 @@ export async function loadDsLiveStoreDetail(
     stationCode: code,
     stationName: location.station_name || code,
     city: location.city ?? null,
+    state: location.state ?? null,
+    regionKey: dsRegionKey(location.city, location.state),
     orderCount,
     unitCount,
     pickerCount: daily.filter((r) => Number(r.order_count ?? 0) > 0).length,
@@ -501,6 +587,7 @@ export async function loadDsLiveStoreDetail(
     breachingCount: Number(snap?.breaching_count ?? 0),
     worstElapsedSeconds: snap?.worst_elapsed_seconds == null ? null : Number(snap.worst_elapsed_seconds),
     slaSeconds: Number(snap?.sla_seconds ?? 15),
+    associates: associatesFromSnapshot(snap),
     inboundOpen: inbound.length,
     inboundAvgPct: inboundPcts.length
       ? Math.round((inboundPcts.reduce((a, b) => a + b, 0) / inboundPcts.length) * 10) / 10
@@ -513,6 +600,7 @@ export async function loadDsLiveStoreDetail(
         username: r.username,
         orderCount: Number(r.order_count ?? 0),
         unitCount: Number(r.unit_count ?? 0),
+        totalPptSeconds: pptSecondsFromMs(r.total_ppt_ms),
         avgPptSeconds: r.avg_ppt_seconds == null ? null : Number(r.avg_ppt_seconds)
       }))
       .sort((a, b) => b.orderCount - a.orderCount || b.unitCount - a.unitCount),
@@ -520,6 +608,7 @@ export async function loadDsLiveStoreDetail(
       hour: Number(r.hour),
       orderCount: Number(r.order_count ?? 0),
       unitCount: Number(r.unit_count ?? 0),
+      totalPptSeconds: pptSecondsFromMs(r.total_ppt_ms),
       avgPptSeconds: r.avg_ppt_seconds == null ? null : Number(r.avg_ppt_seconds)
     })),
     recentOrders: orders.map((r) => ({
@@ -545,7 +634,23 @@ export async function loadDsLiveStoreDetail(
       items: Number(r.items ?? 0),
       elapsedSeconds: Number(r.elapsed_seconds ?? 0),
       pctComplete: r.pct_complete == null ? null : Number(r.pct_complete),
-      status: r.status
+      status: r.status,
+      // Prefer stage-specific acceptance; only fall back to elapsed for pending acceptance rows.
+      acceptanceSeconds: r.acceptance_seconds != null
+        ? Number(r.acceptance_seconds)
+        : (() => {
+            const status = String(r.status ?? "").toUpperCase();
+            return status === "OFFERED" || status === "UNASSIGNED"
+              ? Number(r.elapsed_seconds ?? 0)
+              : null;
+          })(),
+      pickingSeconds: r.picking_seconds == null ? null : Number(r.picking_seconds),
+      packRackSeconds: r.pack_rack_seconds == null ? null : Number(r.pack_rack_seconds),
+      totalSeconds: r.total_seconds == null ? null : Number(r.total_seconds),
+      acceptanceTargetSeconds: r.acceptance_target_seconds == null ? Number(snap?.sla_seconds ?? 15) : Number(r.acceptance_target_seconds),
+      pickingTargetSeconds: r.picking_target_seconds == null ? null : Number(r.picking_target_seconds),
+      packRackTargetSeconds: r.pack_rack_target_seconds == null ? null : Number(r.pack_rack_target_seconds),
+      totalTargetSeconds: r.total_target_seconds == null ? null : Number(r.total_target_seconds)
     }))
   };
 }

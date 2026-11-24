@@ -299,30 +299,214 @@ function orderOid(summary) {
   return (stripped || raw).slice(-12);
 }
 
-function computeAcceptance(summaries) {
+function clockFieldSeconds(summary, keys) {
+  for (const key of keys) {
+    const raw = summary?.[key];
+    if (raw == null || raw === "") continue;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw > 1e11 ? raw / 1000 : raw > 1e6 ? raw / 1000 : raw;
+    }
+    const text = String(raw).trim();
+    const parts = text.replace(/^\//, "").trim().split(":").map(Number);
+    if (parts.length >= 2 && parts.every((n) => Number.isFinite(n))) {
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+  }
+  return null;
+}
+
+function mapActiveOrders(summaries) {
   const nowS = Date.now() / 1000;
-  const pending = [];
+  const rows = [];
   for (const s of summaries) {
-    if (s.status !== "OFFERED" && s.status !== "UNASSIGNED") continue;
-    const assignedAt = assignmentEpochSeconds(s.procurementListAssignmentTime ?? s.assignmentTime ?? 0);
-    if (assignedAt == null) continue;
-    const elapsedS = Math.max(0, nowS - assignedAt);
     const oid = orderOid(s);
-    if (!oid) continue; // skip rows without a stable key — avoid collapsing onto "unknown"
-    const picker = s.associateInfo?.associateId ?? s.associateInfo?.login ?? "Unassigned";
+    if (!oid) continue;
+    const assignedAt = assignmentEpochSeconds(
+      s.procurementListAssignmentTime ?? s.assignmentTime ?? s.procurementListCreatedTime ?? 0
+    );
+    const acceptanceFromClock = clockFieldSeconds(s, ["acceptanceTimeSeconds", "acceptanceElapsedSeconds", "elapsedAcceptanceSeconds"]);
+    const acceptanceS = acceptanceFromClock ?? (assignedAt != null ? Math.max(0, nowS - assignedAt) : null);
+    const pickingS = clockFieldSeconds(s, ["pickingTimeSeconds", "pickingElapsedSeconds", "elapsedPickingSeconds"]);
+    const packS = clockFieldSeconds(s, ["packRackTimeSeconds", "packingTimeSeconds", "elapsedPackRackSeconds"]);
+    const totalS = clockFieldSeconds(s, ["totalTimeSeconds", "elapsedTotalSeconds", "totalElapsedSeconds"])
+      ?? ([acceptanceS, pickingS, packS].filter((n) => n != null).reduce((a, b) => a + b, 0) || null);
+    const picker = s.associateInfo?.associateId ?? s.associateInfo?.login ?? s.associateId ?? "Unassigned";
     const items = Number(s.totalItems ?? s.itemsToPick ?? 0);
     const pct = Number(s.percentComplete ?? s.pctComplete ?? s.completionPercentage ?? NaN);
-    pending.push({
+    const status = String(s.status ?? "").toUpperCase();
+    rows.push({
       oid,
       picker: String(picker),
-      elapsedS,
+      elapsedS: acceptanceS ?? 0,
+      acceptanceS,
+      pickingS,
+      packS,
+      totalS,
+      acceptanceTarget: THRESHOLD_S,
+      pickingTarget: Number(s.pickingTargetSeconds ?? s.pickingSlaSeconds ?? 0) || null,
+      packTarget: Number(s.packRackTargetSeconds ?? s.packingSlaSeconds ?? 0) || null,
+      totalTarget: Number(s.totalTargetSeconds ?? s.totalSlaSeconds ?? 0) || null,
       items,
       pctComplete: Number.isFinite(pct) ? pct : null,
-      status: String(s.status ?? "")
+      status
     });
   }
-  pending.sort((a, b) => b.elapsedS - a.elapsedS);
-  return pending;
+  rows.sort((a, b) => (b.acceptanceS ?? b.elapsedS) - (a.acceptanceS ?? a.elapsedS));
+  return rows;
+}
+
+function computeAcceptance(summaries) {
+  return mapActiveOrders(summaries).filter((o) => o.status === "OFFERED" || o.status === "UNASSIGNED");
+}
+
+function emptyAssociates() {
+  return {
+    waiting_for_orders: 0,
+    on_break: 0,
+    offered_associates: 0,
+    picking_associates: 0,
+    packing_racking: 0,
+    other_activities: 0,
+    total_associates: 0,
+    source: "none"
+  };
+}
+
+function normalizeAssociateLabel(label) {
+  return String(label ?? "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function parseAssociateBanner(payload) {
+  const out = emptyAssociates();
+  if (!payload || typeof payload !== "object") return out;
+  const buckets = payload.associateStatusCounts
+    ?? payload.associateStatuses
+    ?? payload.statuses
+    ?? payload.metrics
+    ?? payload;
+  const set = (key, value) => {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) out[key] = Math.round(n);
+  };
+  if (Array.isArray(buckets)) {
+    for (const row of buckets) {
+      const label = normalizeAssociateLabel(row.label ?? row.name ?? row.status ?? row.key);
+      const count = row.count ?? row.value ?? row.total;
+      if (label.includes("waiting")) set("waiting_for_orders", count);
+      else if (label.includes("break")) set("on_break", count);
+      else if (label === "offered" || label.includes("offered")) set("offered_associates", count);
+      else if (label.includes("picking") && !label.includes("pack")) set("picking_associates", count);
+      else if (label.includes("pack") || label.includes("rack")) set("packing_racking", count);
+      else if (label.includes("other")) set("other_activities", count);
+      else if (label.includes("total")) set("total_associates", count);
+    }
+  } else {
+    set("waiting_for_orders", buckets.waitingForOrders ?? buckets.waiting_for_orders ?? buckets.WAITING_FOR_ORDERS);
+    set("on_break", buckets.onBreak ?? buckets.on_break ?? buckets.ON_BREAK);
+    set("offered_associates", buckets.offered ?? buckets.offeredAssociates ?? buckets.OFFERED);
+    set("picking_associates", buckets.picking ?? buckets.pickingAssociates ?? buckets.PICKING);
+    set("packing_racking", buckets.packingAndRacking ?? buckets.packing_racking ?? buckets.PACKING_AND_RACKING);
+    set("other_activities", buckets.otherActivities ?? buckets.other_activities ?? buckets.OTHER);
+    set("total_associates", buckets.totalAssociates ?? buckets.total_associates ?? buckets.TOTAL);
+  }
+  if (
+    out.waiting_for_orders || out.on_break || out.offered_associates || out.picking_associates
+    || out.packing_racking || out.other_activities || out.total_associates
+  ) {
+    out.source = "api";
+  }
+  return out;
+}
+
+function parseAssociateBannerFromHtml(html) {
+  const out = emptyAssociates();
+  if (!html) return out;
+  const patterns = [
+    ["waiting_for_orders", /Waiting\s+for\s+Orders[^0-9]{0,40}(\d+)/i],
+    ["on_break", /On\s+Break[^0-9]{0,40}(\d+)/i],
+    ["offered_associates", /Offered[^0-9]{0,40}(\d+)/i],
+    ["picking_associates", /Picking[^0-9A-Za-z]{0,40}(\d+)/i],
+    ["packing_racking", /Packing\s*(?:&|and)?\s*Racking[^0-9]{0,40}(\d+)/i],
+    ["other_activities", /Other\s+Activities[^0-9]{0,40}(\d+)/i],
+    ["total_associates", /Total\s+Associates[^0-9]{0,40}(\d+)/i]
+  ];
+  for (const [key, re] of patterns) {
+    const m = html.match(re);
+    if (m) out[key] = Number(m[1]);
+  }
+  if (
+    out.waiting_for_orders || out.on_break || out.offered_associates || out.picking_associates
+    || out.packing_racking || out.other_activities || out.total_associates
+  ) {
+    out.source = "html";
+  }
+  return out;
+}
+
+function deriveAssociatesFromOrders(orders) {
+  const out = emptyAssociates();
+  const pickers = new Set();
+  let offered = 0;
+  let picking = 0;
+  let packing = 0;
+  for (const o of orders) {
+    if (o.picker && o.picker !== "Unassigned") pickers.add(o.picker);
+    if (o.status === "OFFERED" || o.status === "UNASSIGNED") offered += 1;
+    else if (o.status.includes("PICK")) picking += 1;
+    else if (o.status.includes("PACK") || o.status.includes("RACK")) packing += 1;
+  }
+  out.offered_associates = offered;
+  out.picking_associates = picking;
+  out.packing_racking = packing;
+  out.total_associates = pickers.size || offered + picking + packing;
+  out.source = "orders";
+  return out;
+}
+
+async function fetchAssociateBanner(storeId, cookies) {
+  const candidates = [
+    `${GC_BASE}/api/v1/associatestatus/${storeId}`,
+    `${GC_BASE}/api/v1/associatesummary/${storeId}`,
+    `${GC_BASE}/api/v1/siteSummaryAssociateStatus/${storeId}`,
+    `${GC_BASE}/api/v1/searchactiveassociatesummaries/${storeId}/search`
+  ];
+  for (const url of candidates) {
+    try {
+      let r = await fetch(url, { method: "GET", headers: siteSummaryHeaders(cookies) });
+      if (r.status === 405) {
+        r = await fetch(url, {
+          method: "POST",
+          headers: siteSummaryHeaders(cookies, { jsonBody: true }),
+          body: "{}"
+        });
+      }
+      if (!r.ok) continue;
+      const text = await r.text();
+      if (!text || text.trim().startsWith("<")) continue;
+      const data = JSON.parse(text);
+      const parsed = parseAssociateBanner(data);
+      if (parsed.source === "api") return parsed;
+    } catch {
+      // try next candidate
+    }
+  }
+  try {
+    const pageUrl = `${GC_BASE}/siteSummary?storeId=${encodeURIComponent(storeId)}`;
+    const r = await fetch(pageUrl, { method: "GET", headers: siteSummaryHeaders(cookies) });
+    if (r.ok) {
+      const html = await r.text();
+      const parsed = parseAssociateBannerFromHtml(html);
+      if (parsed.source === "html") return parsed;
+    }
+  } catch {
+    // fall through
+  }
+  return emptyAssociates();
 }
 
 // ── Supabase ingest (portal Live Performance) ─────────────────────────────────
@@ -355,7 +539,7 @@ async function sbDelete(table, filter) {
   if (!r.ok) throw new Error(`Supabase delete ${table}: ${r.status} ${await r.text()}`);
 }
 
-async function persistSiteSummary(stationCode, summaries, pending) {
+async function persistSiteSummary(stationCode, summaries, pending, activeOrders, associates) {
   if (!SUPABASE_KEY) {
     console.warn(`[${stationCode}] SUPABASE_SERVICE_KEY missing — skip Live Performance upsert`);
     return;
@@ -363,6 +547,9 @@ async function persistSiteSummary(stationCode, summaries, pending) {
   const fetchedAt = new Date().toISOString();
   const breaching = pending.filter((o) => o.elapsedS >= THRESHOLD_S);
   const worst = pending[0]?.elapsedS ?? null;
+  const assoc = associates?.source && associates.source !== "none"
+    ? associates
+    : deriveAssociatesFromOrders(activeOrders);
   await sbUpsert("ds_site_summary_snapshots", [{
     company_id: COMPANY_ID,
     station_code: stationCode,
@@ -372,29 +559,54 @@ async function persistSiteSummary(stationCode, summaries, pending) {
     breaching_count: breaching.length,
     worst_elapsed_seconds: worst,
     sla_seconds: THRESHOLD_S,
+    waiting_for_orders: assoc.waiting_for_orders,
+    on_break: assoc.on_break,
+    offered_associates: assoc.offered_associates,
+    picking_associates: assoc.picking_associates,
+    packing_racking: assoc.packing_racking,
+    other_activities: assoc.other_activities,
+    total_associates: assoc.total_associates,
     payload_json: {
       active: summaries.length,
       pending: pending.length,
       breaching: breaching.length,
-      threshold_s: THRESHOLD_S
+      threshold_s: THRESHOLD_S,
+      associates_source: assoc.source,
+      associates: {
+        waiting_for_orders: assoc.waiting_for_orders,
+        on_break: assoc.on_break,
+        offered: assoc.offered_associates,
+        picking: assoc.picking_associates,
+        packing_racking: assoc.packing_racking,
+        other: assoc.other_activities,
+        total: assoc.total_associates
+      }
     }
   }], "company_id,station_code");
 
-  const orderRows = pending.map((o) => ({
+  const orderRows = activeOrders.map((o) => ({
     company_id: COMPANY_ID,
     station_code: stationCode,
     oid: o.oid,
     picker: o.picker,
     items: o.items,
-    elapsed_seconds: Math.round(o.elapsedS * 100) / 100,
+    elapsed_seconds: Math.round((o.acceptanceS ?? o.elapsedS ?? 0) * 100) / 100,
     pct_complete: o.pctComplete,
     status: o.status,
+    acceptance_seconds: o.acceptanceS == null ? null : Math.round(o.acceptanceS * 100) / 100,
+    picking_seconds: o.pickingS == null ? null : Math.round(o.pickingS * 100) / 100,
+    pack_rack_seconds: o.packS == null ? null : Math.round(o.packS * 100) / 100,
+    total_seconds: o.totalS == null ? null : Math.round(o.totalS * 100) / 100,
+    acceptance_target_seconds: o.acceptanceTarget ?? THRESHOLD_S,
+    picking_target_seconds: o.pickingTarget,
+    pack_rack_target_seconds: o.packTarget,
+    total_target_seconds: o.totalTarget,
     fetched_at: fetchedAt
   }));
   if (orderRows.length) {
     await sbUpsert("ds_site_summary_orders", orderRows, "company_id,station_code,oid");
   }
-  // Drop OIDs that are no longer pending for this store.
+  // Drop OIDs that are no longer active for this store.
   const keep = orderRows.map((r) => r.oid).filter(Boolean);
   if (keep.length) {
     const listed = keep.map((oid) => `"${String(oid).replace(/"/g, "")}"`).join(",");
@@ -576,13 +788,20 @@ async function pollOnce() {
 
     try {
       const summaries = await fetchSiteSummary(storeId, cookies);
-      const pending   = computeAcceptance(summaries);
+      const activeOrders = mapActiveOrders(summaries);
+      const pending = activeOrders.filter((o) => o.status === "OFFERED" || o.status === "UNASSIGNED");
       const breaching = pending.filter(o => o.elapsedS >= THRESHOLD_S);
+      let associates = emptyAssociates();
+      try {
+        associates = await fetchAssociateBanner(storeId, cookies);
+      } catch (assocErr) {
+        console.warn(`[${station}] Associate banner unavailable — ${assocErr.message}`);
+      }
 
-      console.log(`[${station}] ${summaries.length} active orders, ${pending.length} pending acceptance, ${breaching.length} over ${THRESHOLD_S}s SLA`);
+      console.log(`[${station}] ${summaries.length} active orders, ${pending.length} pending acceptance, ${breaching.length} over ${THRESHOLD_S}s SLA, associates=${associates.source}`);
 
       try {
-        await persistSiteSummary(station, summaries, pending);
+        await persistSiteSummary(station, summaries, pending, activeOrders, associates);
       } catch (persistErr) {
         console.error(`[${station}] Live Performance upsert failed — ${persistErr.message}`);
       }

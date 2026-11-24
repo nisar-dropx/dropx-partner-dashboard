@@ -27,7 +27,11 @@ const nav = load("src/lib/ops-pulse/navigation.ts", {
   "@/lib/authorization": { hasPermission: fail, isCompanyOwner: fail },
   "@/lib/ops-pulse/cod-pending-access": { canAccessDailyCodPending: fail },
   "@/lib/ops-pulse/last-mile-report-bot-access": { canAccessLastMileReportBot: fail },
-  "@/lib/ops-pulse/ds-live-performance-access": { canViewDsLivePerformance: () => false },
+  "@/lib/ops-pulse/ds-live-performance-access": {
+    DS_OPERATIONS_PAGE_CODES: ["ds_live_performance", "ds_ppi", "ds_site_summary"],
+    canViewDsOperations: () => false,
+    canViewDsLivePerformance: () => false,
+  },
 });
 const model = load("src/lib/ops-pulse/demo/catalog.ts");
 const surface = load("src/lib/ops-pulse/demo/surface.ts");

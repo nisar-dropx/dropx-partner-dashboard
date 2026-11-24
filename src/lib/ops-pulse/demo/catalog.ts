@@ -195,7 +195,9 @@ define(
   [
     "/performance?view=daily",
     "/performance?view=sls",
-    "/performance/live",
+    "/operations/live",
+    "/operations/ppi",
+    "/operations/site-summary",
     "/performance/review-status",
     "/performance/cortex",
     "/?view=hourly",

@@ -15,7 +15,7 @@ export function PerformanceWorkspaceTabs({
 }) {
   if (darkStore) {
     return <nav className="performance-tabs performance-workspace-tabs">
-      {canViewLive ? <Link className={active === "live" ? "active" : ""} href="/performance/live">Live performance</Link> : null}
+      {canViewLive ? <Link className={active === "live" ? "active" : ""} href="/operations/live">Live performance</Link> : null}
       {canViewReviews ? <Link className={active === "reviews" ? "active" : ""} href="/performance?view=reviews">Review desk</Link> : null}
       {canViewReviewStatus ? <Link className={active === "status" ? "active" : ""} href="/performance/review-status">Review status</Link> : null}
     </nav>;

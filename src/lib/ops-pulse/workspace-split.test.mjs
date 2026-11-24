@@ -5,11 +5,42 @@ import ts from 'typescript';
 function compile(path,mocks){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>{if(n in mocks)return mocks[n];throw Error(n);},m.exports,m);return m.exports;}
 let preference='amazon_now';
 const ctx=compile('./operating-context.ts',{'next/headers':{cookies:()=>({get:k=>k==='dropx-ops-mode'?{value:preference}:undefined})},'@/lib/ops-pulse/cod':{locationModelName:l=>l.model,providerName:l=>l.provider}});
-const nav=compile('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet'}},'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>true},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:()=>false},'@/lib/ops-pulse/ds-live-performance-access':{canViewDsLivePerformance:()=>false}});
+const nav=compile('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet'}},'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>true},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:()=>false},'@/lib/ops-pulse/ds-live-performance-access':{DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary'],canViewDsOperations:()=>true,canViewDsLivePerformance:()=>true}});
 const lm={id:'l',station_code:'LM',model:'EDSP',provider:'Amazon'},ds={id:'d',station_code:'DS',model:'NOW',provider:'Amazon'};
 test('workspace selection cannot use a cookie to grant another business location',()=>{preference='amazon_now';const r=ctx.resolveOperatingContext([lm]);assert.equal(r.mode,'amazon_edsp');assert.deepEqual(r.modeLocations,[lm]);assert.deepEqual(r.availableModes.map(x=>x.code),['amazon_edsp']);});
 test('dual access offers both workspaces, excluding HO and hidden locations',()=>{const r=ctx.resolveOperatingContext([lm,ds,{...ds,id:'h',is_ho:true},{...ds,id:'x',hide_from_location_list:true}]);assert.equal(r.mode,'amazon_now');assert.deepEqual(r.modeLocations,[ds]);assert.equal(r.availableModes.length,2);});
-test('DS has unit costs, Store Health Review Desk, and no last-mile specialist workflows',()=>{const menus=nav.opsNavItemsForMode('amazon_now');assert(menus.some(x=>x.href==='/cpu'));const performance=menus.find(x=>x.code==='performance');assert(performance);assert.equal(performance.label,'Performance');assert(performance.children?.some(c=>c.code==='performance_review'&&String(c.href).includes('view=reviews')));assert(performance.children?.some(c=>c.code==='performance_review_status'&&String(c.href).includes('review-status')));assert(!menus.some(x=>x.code==='performance_review'));assert(!menus.some(x=>x.code==='performance_review_status'));const shiftMenu=menus.find(x=>x.code==='si_handover');assert(shiftMenu);assert.equal(shiftMenu.label,'Activities & Handover');assert(shiftMenu.children?.some(c=>c.code==='si_handover'&&c.label==='Shift operations'&&String(c.href).includes('view=start')));assert(shiftMenu.children?.some(c=>c.code==='store_ops'&&c.label==='Store operations'&&String(c.href).includes('/store-ops')));assert(shiftMenu.children?.some(c=>c.label==='Shift report'&&String(c.href).includes('tab=shift')));assert(shiftMenu.children?.some(c=>c.label==='Store report'&&String(c.href).includes('tab=store')));assert(!shiftMenu.children?.some(c=>c.label==='Activities report'));assert(menus.some(x=>x.code==='si_handover_master'||(x.children||[]).some(c=>c.code==='si_handover_master')));assert(menus.some(x=>x.code==='store_ops_master'||(x.children||[]).some(c=>c.code==='store_ops_master')));for(const code of ['ops_rostering','business_documents','payments','ops_reports','master_data','users'])assert(menus.some(x=>x.code===code));for(const code of ['cod','fleet','capacity'])assert(!menus.some(x=>x.code===code));assert(!performance.children?.some(c=>['daily','sls'].some(part=>String(c.href).includes(`view=${part}`))));});
+test('DS has unit costs, Store Health Review Desk, and no last-mile specialist workflows',()=>{
+  const catalog=nav.opsNavCatalogForMode('amazon_now');
+  const operations=catalog.find(x=>x.label==='Operations');
+  assert(operations);
+  assert(operations.children?.some(c=>c.code==='ds_live_performance'&&c.href==='/operations/live'));
+  assert(operations.children?.some(c=>c.code==='ds_ppi'&&c.href==='/operations/ppi'));
+  assert(operations.children?.some(c=>c.code==='ds_site_summary'&&c.href==='/operations/site-summary'));
+  const menus=nav.opsNavItemsForMode('amazon_now',{roleCode:'FSD'});
+  assert(menus.some(x=>x.href==='/cpu'));
+  assert(menus.some(x=>x.label==='Operations'));
+  const performance=menus.find(x=>x.code==='performance');
+  assert(performance);
+  assert.equal(performance.label,'Performance');
+  assert(performance.children?.some(c=>c.code==='performance_review'&&String(c.href).includes('view=reviews')));
+  assert(performance.children?.some(c=>c.code==='performance_review_status'&&String(c.href).includes('review-status')));
+  assert(!performance.children?.some(c=>c.code==='ds_live_performance'));
+  assert(!menus.some(x=>x.code==='performance_review'));
+  assert(!menus.some(x=>x.code==='performance_review_status'));
+  const shiftMenu=menus.find(x=>x.code==='si_handover');
+  assert(shiftMenu);
+  assert.equal(shiftMenu.label,'Activities & Handover');
+  assert(shiftMenu.children?.some(c=>c.code==='si_handover'&&c.label==='Shift operations'&&String(c.href).includes('view=start')));
+  assert(shiftMenu.children?.some(c=>c.code==='store_ops'&&c.label==='Store operations'&&String(c.href).includes('/store-ops')));
+  assert(shiftMenu.children?.some(c=>c.label==='Shift report'&&String(c.href).includes('tab=shift')));
+  assert(shiftMenu.children?.some(c=>c.label==='Store report'&&String(c.href).includes('tab=store')));
+  assert(!shiftMenu.children?.some(c=>c.label==='Activities report'));
+  assert(menus.some(x=>x.code==='si_handover_master'||(x.children||[]).some(c=>c.code==='si_handover_master')));
+  assert(menus.some(x=>x.code==='store_ops_master'||(x.children||[]).some(c=>c.code==='store_ops_master')));
+  for(const code of ['ops_rostering','business_documents','payments','ops_reports','master_data','users'])assert(menus.some(x=>x.code===code));
+  for(const code of ['cod','fleet','capacity'])assert(!menus.some(x=>x.code===code));
+  assert(!performance.children?.some(c=>['daily','sls'].some(part=>String(c.href).includes(`view=${part}`))));
+});
 test('both workspaces lead to the same complete approvals queue',()=>{const approvals=mode=>nav.opsNavItemsForMode(mode).find(x=>x.code==='payments').children.find(x=>x.code==='payment_approvals');assert.deepEqual(approvals('amazon_edsp'),approvals('amazon_now'));assert.equal(approvals('amazon_now').href,'/payments/approvals');});
 
 
