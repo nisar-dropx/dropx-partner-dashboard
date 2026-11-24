@@ -70,6 +70,7 @@ function withSharedModules(base) {
   return {
     ...base,
     "./mapping-summary-access": moduleAt("src/lib/mapping-summary-access.ts", {}),
+    "@/lib/ops-pulse/ds-live-performance-access": moduleAt("src/lib/ops-pulse/ds-live-performance-access.ts", {}),
     "@/lib/session-user": moduleAt("src/lib/session-user.ts", base),
     "@/lib/access-cache": moduleAt("src/lib/access-cache.ts", base)
   };
