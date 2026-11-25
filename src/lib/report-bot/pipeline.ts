@@ -274,6 +274,17 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
     if (!submission) break;
     processed += 1;
     try {
+      // Claims that hang (image download / OCR) never reach settleSubmissionFailure, so
+      // attempts climb past the normal budget. Drop those before they block newer photos.
+      if (submission.attempts > MAX_SUBMISSION_ATTEMPTS) {
+        must(await db.from("report_bot_submissions").update({
+          status: "failed",
+          status_reason: "Abandoned after repeated analysis attempts without a result.",
+          locked_until: null,
+          updated_at: nowIso()
+        }).eq("id", submission.id), "Abandon exhausted submission");
+        continue;
+      }
       const group = must(await db.from("report_bot_groups").select("id,group_name,location_id,is_enabled,mode,workspace, station:stations(station_code,station_name)").eq("id", submission.group_id).single(), "Load group") as unknown as GroupRow & { station: { station_code: string; station_name: string | null } | null; mode?: GroupMode };
       if (!group.is_enabled) {
         must(await db.from("report_bot_submissions").update({ status: "skipped", status_reason: "Group was disabled before the image was analysed.", locked_until: null, updated_at: nowIso() }).eq("id", submission.id), "Skip submission");
