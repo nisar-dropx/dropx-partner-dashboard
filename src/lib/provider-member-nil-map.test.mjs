@@ -106,10 +106,28 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await link('2026-11-01');
     assert.equal((await db.query('select count(*)::int n from provider_member_nil_maps where station_id=$1',[station])).rows[0].n,0,'remapping clears even a previously dated Nill record without overlap blocks');
     assert.equal((await db.query("select count(*)::int n from provider_member_nil_map_events where action='mapping_linked' and remark='Temporary'")).rows[0].n,1,'the replaced Nill remark remains in history');
+    const optionalEnd=readFileSync(new URL('../../supabase/migrations/20261125100607_provider_nil_map_optional_end.sql',import.meta.url),'utf8');
+    await db.exec(optionalEnd);await db.exec(optionalEnd);
+    await db.query('delete from field_executive_provider_mappings');
+    await assert.rejects(dated(null,null),/requires Effective from/);
+    await assert.rejects(dated('2026-11-10','2026-11-09'),/Effective to is optional/);
+    await dated('2026-11-01',null);
+    assert.equal((await db.query('select effective_to from provider_member_nil_maps where station_id=$1',[station])).rows[0].effective_to,null,'blank To remains ongoing');
+    await dated('2026-11-01','2026-11-15');
+    await link('2026-11-16');
+    assert.equal((await db.query('select count(*)::int n from provider_member_nil_maps where station_id=$1',[station])).rows[0].n,0,'real mapping still replaces Nill');
     const security=(await db.query(`select has_function_privilege('authenticated','provider_set_member_nil_map(uuid,uuid,uuid,uuid,text,boolean,uuid[])','execute') can_call,
       has_table_privilege('authenticated','provider_member_nil_maps','insert') can_insert,
       (select relrowsecurity from pg_class where oid='provider_member_nil_maps'::regclass) rls`)).rows[0];
     assert.deepEqual(security,{can_call:false,can_insert:false,rls:true});
     assert.equal((await db.query("select has_table_privilege('service_role','auth.users','select') allowed")).rows[0].allowed,false,'saving does not require private auth table access');
   } finally {await db.close();}
+});
+
+test('Nill applicability follows From and an optional To',async()=>{
+ const {providerNilMapApplies:applies}=await import('./provider-first-mapping-view.ts');
+ assert.equal(applies('2026-11-10','','2026-11','2026-11-09'),false);
+ assert.equal(applies('2026-11-10','','2026-11','2026-11-10'),true);
+ assert.equal(applies('2026-11-10','','2026-12','2026-12-31'),true);
+ assert.equal(applies('2026-11-01','2026-11-15','2026-11','2026-11-16'),false);
 });

@@ -1247,6 +1247,8 @@ export function providerFirstRowIssue(
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
   if (row.nilMapped) {
     if (row.workforceId || row.mappingId) return "Clear the existing associate link before using Nill Map.";
+    if (!row.nilFrom) return "Nill Map requires Effective from.";
+    if (row.nilTo && row.nilTo < row.nilFrom) return "Effective to cannot be before Effective from.";
     return null;
   }
   if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
@@ -1369,4 +1371,11 @@ export function verifiedProviderIdentityWorker<T extends {id:string;location_id:
  const matches=candidates.filter(w=>w.location_id===stationId&&w.provider_employee_id===providerMemberId&&Boolean(w.dropx_id));
  if(matches.length!==1||historicalOwnerIds.some(id=>id!==matches[0].id))return null;
  return matches[0];
+}
+
+/** Current month follows today; other month views show overlapping periods. */
+export function providerNilMapApplies(from: string, to: string, month: string, today: string): boolean {
+  if (!from) return true;
+  if (!month || month === today.slice(0, 7)) return from <= today && (!to || to >= today);
+  return from.slice(0, 7) <= month && (!to || to.slice(0, 7) >= month);
 }

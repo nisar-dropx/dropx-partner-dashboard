@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useEffect, useRef, useMemo, useState } from "react";
 import workspace from "./id-mapping-workspace.module.css";
-import { providerFirstValidationStatus } from "@/lib/provider-first-mapping-view";
+import { providerNilMapApplies, providerFirstValidationStatus } from "@/lib/provider-first-mapping-view";
 import { facetRows } from "@/lib/dependent-filters";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Download, FileSpreadsheet, FileText, X } from "lucide-react";
@@ -50,7 +50,7 @@ export type ProviderFirstWorker = ProviderFirstWorkerView;
 export type ProviderFirstMappingRow = ProviderFirstMappingRowView;
 
 function signature(row: ProviderFirstMappingRow) {
-  return [Boolean(row.nilMapped), row.nilRemark ?? "", row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
+  return [Boolean(row.nilMapped), row.nilRemark ?? "", row.nilFrom ?? "", row.nilTo ?? "", row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
 function previousIsoDate(value: string) {
@@ -79,6 +79,8 @@ function appendRow(
 ) {
   const prefix = `rows[${position}]`;
   formData.set(`${prefix}[nil_map_remark]`, row.nilRemark ?? "");
+  formData.set(`${prefix}[nil_map_from]`, row.nilFrom ?? "");
+  formData.set(`${prefix}[nil_map_to]`, row.nilTo ?? "");
   formData.set(`${prefix}[nil_map_action]`, !row.workforceId && (row.nilMapped || previousNilMapped) ? (row.nilMapped ? "mark" : "clear") : "");
   formData.set(`${prefix}[client_key]`, providerMemberKey(row.stationId, row.providerMemberId));
   formData.set(`${prefix}[id]`, row.workforceId);
@@ -400,7 +402,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           row.providerMemberId, row.providerMemberName, row.stationLabel, row.providerId, row.dropxId, row.dropxName,
           row.nilMapped ? "Nill mapped" : row.identityLinked ? "ID linked · pay setup pending" : row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
           ...paymentKeys.map((key) => row.paymentValues?.[key] ?? ""),
-          row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo, (row.outboundMonths ?? []).join(", "), row.nilRemark ?? ""
+          row.productionThresholdMinimumUnits, row.nilMapped ? row.nilFrom ?? "" : row.effectiveFrom, row.nilMapped ? row.nilTo ?? "" : row.effectiveTo, (row.outboundMonths ?? []).join(", "), row.nilRemark ?? ""
         ].map((value) => String(value ?? ""));
       });
       const fileBase = `provider-member-mapping-${new Date().toISOString().slice(0, 10)}`;
@@ -452,6 +454,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     setSaveNotice(null);
     setRows((current) => current.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
+      if (row.nilMapped) return { ...row, ...("effectiveFrom" in change ? { nilFrom: change.effectiveFrom } : { nilTo: change.effectiveTo }) };
       const next = { ...row, ...change };
       // A new assignment is entered explicitly. Dates must not turn an old
       // closed period into the edit target or overwrite the user's rates.
@@ -816,7 +819,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
         if (typeof saved.nilMapped === "boolean") {
-          canonicalByIndex.set(snapshot.index, { ...snapshot.row, nilMapped: saved.nilMapped, nilRemark: saved.nilRemark ?? "", nilFrom: saved.nilFrom ?? snapshot.row.nilFrom ?? "", nilTo: saved.nilTo ?? snapshot.row.nilTo ?? "" });
+          canonicalByIndex.set(snapshot.index, { ...snapshot.row, nilMapped: saved.nilMapped && providerNilMapApplies(saved.nilFrom ?? snapshot.row.nilFrom ?? "", saved.nilTo ?? snapshot.row.nilTo ?? "", initialOutboundMonth, mappingLookupToday()), nilRemark: saved.nilRemark ?? "", nilFrom: saved.nilFrom ?? snapshot.row.nilFrom ?? "", nilTo: saved.nilTo ?? snapshot.row.nilTo ?? "" });
           continue;
         }
         if (saved.cleared) {
@@ -1201,12 +1204,14 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           : "";
         const rowKey = providerMemberKey(row.stationId,row.providerMemberId);
         const rowStatus = providerFirstValidationStatus(row,selectedWorker,selectedPaymentMethod);
+        const periodFrom = row.nilMapped ? row.nilFrom : row.effectiveFrom;
+        const periodTo = row.nilMapped ? row.nilTo : row.effectiveTo;
         return <details className={workspace.mapping} key={rowKey} open={expandedMappings.has(rowKey)}>
           <summary onClick={event=>{event.preventDefault();setExpandedMappings(current=>{const next=new Set(current);next.has(rowKey)?next.delete(rowKey):next.add(rowKey);return next;});}}>
             <span className={workspace.chevron}><ChevronRight size={15} aria-hidden="true" /></span>
             <span><strong>{row.providerMemberName || "Provider ID"}</strong><small>{row.providerMemberId} · {row.stationLabel}</small></span>
             <span><strong>{row.nilMapped ? "Nill mapped" : row.dropxName || "No associate linked"}</strong><small>{row.nilMapped ? "No registration / no payout mapping" : row.dropxId || "Select an associate to configure pay"}</small></span>
-            <span><strong>{selectedPaymentMethod?.name || "No payment method"}</strong><small>{row.effectiveFrom ? `${formatDashboardDate(row.effectiveFrom)} – ${row.effectiveTo ? formatDashboardDate(row.effectiveTo) : "Ongoing"}` : "Dates not set"}</small></span>
+            <span><strong>{selectedPaymentMethod?.name || "No payment method"}</strong><small>{periodFrom ? `${formatDashboardDate(periodFrom)} – ${periodTo ? formatDashboardDate(periodTo) : "Ongoing"}` : "Dates not set"}</small></span>
             <span className={workspace.badge} data-tone={errors[index] || (rowStatus!=="ready" && rowStatus!=="nil_mapped") ? "warning" : dirtyRows[index] ? "" : "success"}>{errors[index] ? "Save failed" : dirtyRows[index] ? "Unsaved" : rowStatus==="nil_mapped" ? "Nill mapped" : rowStatus==="ready" ? "Ready" : rowStatus==="unmapped" ? "Not linked" : "Needs attention"}</span>
           </summary>
         <div className={`mapping-row-card provider-first-row ${dirtyRows[index] ? "unsaved-row" : ""}`}>
@@ -1220,7 +1225,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear disabled={!canEditRow || row.nilMapped} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} /><label className="provider-first-nil-map"><input type="checkbox" checked={Boolean(row.nilMapped)} disabled={!canEditRow || Boolean(row.workforceId || row.mappingId)} onChange={(event) => update(index, { nilMapped: event.target.checked })} /> Nill Map</label>{row.nilMapped ? <span className="provider-first-selected-detail">Nill Map stays active until you clear it or save an associate mapping. No dates required.</span> : null}{row.nilMapped ? <label className="provider-first-nil-remark">Remark <span className="subtle">(optional)</span><textarea className="worksheet-input" rows={2} maxLength={2000} disabled={!canEditRow} value={row.nilRemark ?? ""} onChange={(event) => update(index, { nilRemark: event.target.value })} placeholder="Enter remark" /></label> : null}{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping period. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear disabled={!canEditRow || row.nilMapped} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} /><label className="provider-first-nil-map"><input type="checkbox" checked={Boolean(row.nilMapped)} disabled={!canEditRow || Boolean(row.workforceId || row.mappingId)} onChange={(event) => update(index, { nilMapped: event.target.checked })} /> Nill Map</label>{row.nilMapped ? <span className="provider-first-selected-detail">Effective from is required. Leave Effective to blank to keep Nill Map until remapped.</span> : null}{row.nilMapped ? <label className="provider-first-nil-remark">Remark <span className="subtle">(optional)</span><textarea className="worksheet-input" rows={2} maxLength={2000} disabled={!canEditRow} value={row.nilRemark ?? ""} onChange={(event) => update(index, { nilRemark: event.target.value })} placeholder="Enter remark" /></label> : null}{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping period. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect allowClear={false} disabled={!canEditRow || !row.workforceId} maxOptions={Math.max(50, paymentOptions.length)} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>
@@ -1228,7 +1233,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
               <input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="1" onChange={(event) => update(index, { productionThresholdMinimumUnits: event.target.value })} placeholder="Enter minimum units" step="1" type="number" value={row.productionThresholdMinimumUnits} />
               <span className="provider-first-selected-detail">Combined across {productionThresholdConfig.component_codes.map((code) => components.find((component) => component.code === code)?.label ?? code).join(" + ")}</span>
             </label> : null}
-            {!row.nilMapped ? <div className="mapping-period-row"><label>Effective from<input aria-label="Effective from" className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input aria-label="Effective to" className="worksheet-input" disabled={!canEditRow || !row.workforceId} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label><p className="mapping-period-help">{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</p></div> : null}
+            <div className="mapping-period-row"><label>Effective from<input aria-label="Effective from" className="worksheet-input" disabled={!canEditRow || (!row.workforceId && !row.nilMapped)} onChange={(event) => updateEffectivePeriod(index, { effectiveFrom: event.target.value })} required type="date" value={row.nilMapped ? row.nilFrom ?? "" : row.effectiveFrom} /></label><label>Effective to <span className="subtle">(optional)</span><input aria-label="Effective to" className="worksheet-input" disabled={!canEditRow || (!row.workforceId && !row.nilMapped)} onChange={(event) => updateEffectivePeriod(index, { effectiveTo: event.target.value })} type="date" min={row.nilMapped ? row.nilFrom || undefined : undefined} value={row.nilMapped ? row.nilTo ?? "" : row.effectiveTo} /></label><p className="mapping-period-help">{row.nilMapped ? "Nill Map starts on Effective from. Effective to is optional; leave it blank to keep Nill Map until you change the mapping." : <>{!baselineRows[index].workforceId && !row.paymentMethodId ? "Choose the payment method, rates and start date. Previous payment details are in History. " : ""}Set an end date to plan another payment method with + Add payment period. The final period can stay ongoing.</>}</p></div>
             {copiedPayment ? <div className="mapping-period-help" role="status"><strong>Previous payment details loaded.</strong> Method and rates copied from {paymentMethodById.get(copiedPayment.paymentMethodId)?.name ?? "previous payment method"} · {copiedPayment.locationLabel} · {copiedPayment.effectiveFrom} to {copiedPayment.effectiveTo || "Ongoing"}. Review the rates and choose dates for this assignment before saving. Previous dates were not copied.</div> : previousPayment ? <div className="mapping-period-help">Previous payment details are available from {previousPayment.effectiveFrom} to {previousPayment.effectiveTo || "Ongoing"}. Use them below to copy the method and rates; enter dates for this assignment.</div> : null}
             {resumePeriod ? <div className="mapping-period-help" role="status"><strong>Resuming this location.</strong> The previous exact mapping ran from {resumePeriod.previousEffectiveFrom} to {resumePeriod.previousEffectiveTo}. Effective from defaults to {resumePeriod.effectiveFrom}, the first available day (and never before date of join). Saving creates a new period; the earlier mapping and payout history stay unchanged.</div> : null}
             {row.identityLinked && row.workforceId === baselineRows[index].workforceId && !row.mappingId ? <div className="mapping-period-help"><strong>Identity linked · payment setup pending.</strong> The saved Amazon ID belongs to {row.dropxId}. Choose a payment scheme and effective dates to configure payouts.</div> : null}

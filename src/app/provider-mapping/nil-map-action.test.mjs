@@ -18,7 +18,7 @@ function action(options={}) {
   new Function('require','module','exports',compiled)(name=>modules[name]??{},module,module.exports);
   const form=(overrides={})=>{
     const data=new FormData();data.set('row_count','1');
-    for(const [key,value] of Object.entries({client_key:'member-key',nil_map_action:'mark',id:'',mapping_id:'',provider_id:'provider',station_id:'station',provider_member_id:'MEMBER01',...overrides}))data.set(`rows[0][${key}]`,value);
+    for(const [key,value] of Object.entries({client_key:'member-key',nil_map_action:'mark',nil_map_from:'2026-11-01',nil_map_to:'',id:'',mapping_id:'',provider_id:'provider',station_id:'station',provider_member_id:'MEMBER01',...overrides}))data.set(`rows[0][${key}]`,value);
     return data;
   };
   return {save:module.exports.saveProviderFirstMappingsInline,calls,form};
@@ -26,7 +26,7 @@ function action(options={}) {
 test('Nill Map action derives company and actor from session without asking for a worker',async()=>{
   const a=action();const result=await a.save(a.form());
   assert.equal(result.ok,true,result.message);assert.equal(result.savedRows[0].nilMapped,true);
-  assert.deepEqual(a.calls,[{name:'provider_set_member_nil_map',args:{p_company:'trusted-company',p_actor:'trusted-actor',p_provider:'provider',p_station:'station',p_member:'MEMBER01',p_nil:true,p_locations:['station'],p_remark:''}}]);
+  assert.deepEqual(a.calls,[{name:'provider_set_member_nil_map',args:{p_company:'trusted-company',p_actor:'trusted-actor',p_provider:'provider',p_station:'station',p_member:'MEMBER01',p_nil:true,p_locations:['station'],p_remark:'',p_effective_from:'2026-11-01',p_effective_to:null}}]);
 });
 
 test('Nill Map remarks are saved, returned and bounded',async()=>{
@@ -46,8 +46,10 @@ test('clearing uses the same scoped server action, while DB failures do not ackn
   const b=action({failure:true});const failed=await b.save(b.form());assert.equal(failed.ok,false);assert.equal(failed.savedRows.length,0);
 });
 
-test('Nill Map does not require dates and ignores legacy date inputs',async()=>{
- for(const dates of [{nil_map_from:''},{nil_map_to:''},{nil_map_to:'2026-10-01'},{nil_map_from:'2026-02-30'}]) {
-  const a=action();assert.equal((await a.save(a.form(dates))).ok,true);assert.equal(a.calls.length,1);assert.equal('p_effective_from' in a.calls[0].args,false);
+test('Nill Map requires From, accepts optional To, and validates a supplied end',async()=>{
+ for(const dates of [{nil_map_from:''},{nil_map_from:'2026-02-30'},{nil_map_to:'2026-10-31'},{nil_map_to:'invalid'}]) {
+  const a=action();assert.equal((await a.save(a.form(dates))).ok,false);assert.equal(a.calls.length,0);
  }
+ const a=action();assert.equal((await a.save(a.form())).ok,true);assert.equal(a.calls[0].args.p_effective_to,null);
+ const b=action();assert.equal((await b.save(b.form({nil_map_to:'2026-11-15'}))).ok,true);assert.equal(b.calls[0].args.p_effective_to,'2026-11-15');
 });

@@ -3,16 +3,17 @@
 ## Provider-member Nill Map — 25 November 2026
 
 Unregistered provider members can be marked **Nill Map** below the DropX ID
-selector without an associate, payment method or dates. The optional Remark remains
+selector without an associate or payment method. Use the existing Effective from
+and Effective to controls: From is required, To is optional and cannot precede From. The optional Remark remains
 editable. Nill Map stays active until explicitly cleared or replaced by a real
-associate mapping; it does not expire. Payment date controls are hidden while Nill
-Map is checked and remain unchanged for normal associate mappings. Persisted Nill
+associate mapping when To is blank; a supplied To limits the Nill period.
+The shared date controls edit Nill dates while checked and normal mapping dates otherwise. Persisted Nill
 rows leave Not linked and are available under Nill mapped. Draft/failed saves stay
 visible. Scoped service-only RPCs validate tenant, provider, location and source
 identity under the company payment mutex. Real mappings automatically clear the
-marker and retain its remark in audit. Older dated API callers are compatible, but
-their dates no longer limit Nill status or block remapping. Historical date columns
-and audit records are preserved. Migration: `20261125094016_provider_nil_map_until_remapped.sql`.
+marker and retain its remark in audit. Nill dates are validated in the client, server and service-only RPC.
+A new real mapping clears the marker without a Nill-date overlap block. Historical date columns
+and audit records are preserved. Migration: `20261125100607_provider_nil_map_optional_end.sql`.
 
 ## Selected-period payout publication — 24 November 2026
 

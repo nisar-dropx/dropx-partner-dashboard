@@ -2109,14 +2109,18 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         if (allowedLocationIds && !allowedLocationIds.has(stationId)) throw new Error(`Row ${index + 1}: This provider member is outside your allocated locations.`);
         const remark = rowValue(formData, index, "nil_map_remark") ?? '';
         if (remark.length > 2000) throw new Error(`Row ${index + 1}: Remark must be 2000 characters or fewer.`);
+        const nilFrom = rowValue(formData, index, "nil_map_from") ?? '';
+        const nilTo = rowValue(formData, index, "nil_map_to") ?? '';
+        const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+        if (nilAction === 'mark' && (!validDate(nilFrom) || (nilTo && (!validDate(nilTo) || nilTo < nilFrom)))) throw new Error(`Row ${index + 1}: Effective from is required. Effective to is optional and cannot be before Effective from.`);
         const { error } = await supabaseAdmin.rpc("provider_set_member_nil_map", {
           p_company: companyId, p_actor: authorization.userId,
           p_provider: rowRequired(formData, index, "provider_id", "Provider"), p_station: stationId,
           p_member: rowRequired(formData, index, "provider_member_id", "Provider Member ID"),
-          p_nil: nilAction === 'mark', p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null, p_remark: remark
+          p_nil: nilAction === 'mark', p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null, p_remark: remark, p_effective_from: nilAction === 'mark' ? nilFrom : null, p_effective_to: nilAction === 'mark' && nilTo ? nilTo : null
         });
         if (error) throw new Error(error.message);
-        savedRows.push({ clientKey: currentClientKey, nilMapped: nilAction === 'mark', nilRemark: nilAction === 'mark' ? remark : '', mappingId: '', workforceId: '',
+        savedRows.push({ clientKey: currentClientKey, nilMapped: nilAction === 'mark', nilRemark: nilAction === 'mark' ? remark : '', nilFrom: nilAction === 'mark' ? nilFrom : '', nilTo: nilAction === 'mark' ? nilTo : '', mappingId: '', workforceId: '',
           profileStationId: '', profileLocationLabel: '', paymentMethodId: '', paymentValues: {},
           productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '', effectiveTo: '' });
         continue;
