@@ -109,19 +109,13 @@ let sentRefs = new Lru(1000); // client_ref -> result, so a retried /send never 
 const sendInFlight = new Map();
 /** Waiters for WhatsApp server ack (status ≥ SERVER_ACK) keyed by message id. */
 const pendingAcks = new Map();
+/** Group delivery waiters — only resolve on positive evidence (echo / participant receipt). */
+const pendingGroupDeliveries = new Map();
 /** Recent status updates so a fast SERVER_ACK before waitForServerAck registers is not missed. */
 const recentMessageStatus = new Lru(500);
-const SEND_ACK_TIMEOUT_MS = Math.max(5_000, Number(process.env.SEND_ACK_TIMEOUT_MS || 20_000));
-/**
- * Baileys never emits messages.update SERVER_ACK for group sends (receipts go to
- * message-receipt.update only when a participant is set; type=sender without a
- * participant is dropped). If WhatsApp rejects the post, handleBadAck emits ERROR
- * quickly — so after this grace with no ERROR, treat the group send as accepted.
- */
-const GROUP_ACK_FALLBACK_MS = Math.min(
-  SEND_ACK_TIMEOUT_MS - 1_000,
-  Math.max(3_000, Number(process.env.GROUP_ACK_FALLBACK_MS || 8_000))
-);
+/** Recent confirmed group deliveries so a fast echo/receipt is not missed. */
+const recentGroupDeliveries = new Lru(500);
+const SEND_ACK_TIMEOUT_MS = Math.max(5_000, Number(process.env.SEND_ACK_TIMEOUT_MS || 25_000));
 const SERVER_ACK = proto.WebMessageInfo.Status.SERVER_ACK;
 const ERROR_STATUS = proto.WebMessageInfo.Status.ERROR;
 let config = normalizeConfig(null);
@@ -130,15 +124,29 @@ function noteMessageStatus(messageId, status) {
   if (!messageId || status == null) return;
   recentMessageStatus.set(messageId, status);
   const waiter = pendingAcks.get(messageId);
-  if (!waiter) return;
+  if (waiter) {
+    if (status === ERROR_STATUS) {
+      waiter.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+    } else if (status >= SERVER_ACK) {
+      waiter.resolve(status);
+    }
+  }
   if (status === ERROR_STATUS) {
-    waiter.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
-  } else if (status >= SERVER_ACK) {
-    waiter.resolve(status);
+    const groupWaiter = pendingGroupDeliveries.get(messageId);
+    if (groupWaiter) {
+      groupWaiter.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+    }
   }
 }
 
-function waitForServerAck(messageId, seedStatus = null, { groupFallback = false } = {}) {
+function noteGroupDelivery(messageId, groupJid) {
+  if (!messageId || !groupJid || !GROUP_JID.test(groupJid)) return;
+  recentGroupDeliveries.set(messageId, groupJid);
+  const waiter = pendingGroupDeliveries.get(messageId);
+  if (waiter && waiter.groupJid === groupJid) waiter.resolve(true);
+}
+
+function waitForServerAck(messageId, seedStatus = null) {
   if (seedStatus === ERROR_STATUS) {
     return Promise.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
   }
@@ -152,31 +160,58 @@ function waitForServerAck(messageId, seedStatus = null, { groupFallback = false 
       pendingAcks.delete(messageId);
       reject(Object.assign(new Error("WhatsApp did not acknowledge the message in time. Check that the bot is still in the group and allowed to post."), { status: 504 }));
     }, SEND_ACK_TIMEOUT_MS);
-    const fallbackTimer = groupFallback
-      ? setTimeout(() => {
-          pendingAcks.get(messageId)?.resolve(SERVER_ACK);
-        }, GROUP_ACK_FALLBACK_MS)
-      : null;
     pendingAcks.set(messageId, {
       resolve(status) {
         clearTimeout(timer);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
         pendingAcks.delete(messageId);
         resolve(status);
       },
       reject(error) {
         clearTimeout(timer);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
         pendingAcks.delete(messageId);
         reject(error);
       }
     });
-    // Re-check in case the update landed between the known read and waiter registration.
     const again = recentMessageStatus.get(messageId);
     if (again === ERROR_STATUS) {
       pendingAcks.get(messageId)?.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
     } else if (again != null && again >= SERVER_ACK) {
       pendingAcks.get(messageId)?.resolve(again);
+    }
+  });
+}
+
+/**
+ * Group sends: Baileys never emits messages.update SERVER_ACK for groups.
+ * Require a fromMe upsert echo for this group, or a participant receipt — never
+ * "no ERROR for N seconds", which caused phantom portal "sent" rows.
+ */
+function waitForGroupDelivery(messageId, groupJid) {
+  if (recentGroupDeliveries.get(messageId) === groupJid) return Promise.resolve(true);
+  const known = recentMessageStatus.get(messageId);
+  if (known === ERROR_STATUS) {
+    return Promise.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingGroupDeliveries.delete(messageId);
+      reject(Object.assign(new Error("WhatsApp did not confirm the message in the group. It may not have been delivered — check the bot is still a member and allowed to post."), { status: 504 }));
+    }, SEND_ACK_TIMEOUT_MS);
+    pendingGroupDeliveries.set(messageId, {
+      groupJid,
+      resolve(value) {
+        clearTimeout(timer);
+        pendingGroupDeliveries.delete(messageId);
+        resolve(value);
+      },
+      reject(error) {
+        clearTimeout(timer);
+        pendingGroupDeliveries.delete(messageId);
+        reject(error);
+      }
+    });
+    if (recentGroupDeliveries.get(messageId) === groupJid) {
+      pendingGroupDeliveries.get(messageId)?.resolve(true);
     }
   });
 }
@@ -462,6 +497,7 @@ async function startSocket({ method, phone = null }) {
     for (const msg of messages ?? []) {
       const groupId = msg?.key?.remoteJid;
       if (groupId && GROUP_JID.test(groupId)) {
+        if (msg?.key?.fromMe && msg?.key?.id) noteGroupDelivery(msg.key.id, groupId);
         if (config.groups.includes(groupId)) {
           const entry = chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) });
           if (entry) {
@@ -512,12 +548,19 @@ async function startSocket({ method, phone = null }) {
     }
   });
 
-  // Group sends: Baileys routes participant receipts here instead of messages.update status.
+  // Group fan-out: only participant-backed receipts count as delivery (not bare fromMe).
   sock.ev.on("message-receipt.update", (updates) => {
     for (const update of updates ?? []) {
       const id = update?.key?.id;
-      if (!id || update.key.fromMe === false) continue;
-      noteMessageStatus(id, SERVER_ACK);
+      const remoteJid = update?.key?.remoteJid;
+      if (!id || update.key.fromMe === false || !remoteJid) continue;
+      const participant = update.key.participant || update.receipt?.userJid;
+      if (GROUP_JID.test(remoteJid) && participant) {
+        noteGroupDelivery(id, remoteJid);
+        noteMessageStatus(id, SERVER_ACK);
+      } else if (!GROUP_JID.test(remoteJid)) {
+        noteMessageStatus(id, SERVER_ACK);
+      }
     }
   });
 
@@ -608,8 +651,10 @@ async function sendToGroup(body) {
       const messageId = sent?.key?.id ?? null;
       if (!messageId) throw Object.assign(new Error("WhatsApp did not return a message id."), { status: 502 });
       if (sent.status != null) noteMessageStatus(messageId, sent.status);
-      // Socket write alone is not delivery. Wait for server ack (or group fallback) before logging success.
-      await waitForServerAck(messageId, sent.status ?? null, { groupFallback: !isDirect });
+      // Socket write alone is not delivery. Direct chats wait for SERVER_ACK;
+      // groups wait for upsert echo or a participant receipt (never a blind timeout).
+      if (isDirect) await waitForServerAck(messageId, sent.status ?? null);
+      else await waitForGroupDelivery(messageId, body.to);
       botMessageIds.set(messageId, true);
       const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
       chatLog.add(body.to, {

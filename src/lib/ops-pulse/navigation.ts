@@ -251,7 +251,8 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
         darkStoreReportBot,
         { code: "ds_live_performance", label: "Live performance", href: "/operations/live" },
         { code: "ds_ppi", label: "PPI", href: "/operations/ppi" },
-        { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" }
+        { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" },
+        { code: "ds_cold_chain_alerts", label: "Cold chain alerts", href: "/operations/cold-chain" }
       ]
     },
     {

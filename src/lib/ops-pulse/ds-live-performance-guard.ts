@@ -35,7 +35,7 @@ export async function requireDsOperationsApi(
   }
   const allowed =
     pageCode === "any"
-      ? (["ds_live_performance", "ds_ppi", "ds_site_summary"] as const).some((code) =>
+      ? (["ds_live_performance", "ds_ppi", "ds_site_summary", "ds_cold_chain_alerts"] as const).some((code) =>
           canViewDsOperations(authorization, code)
         )
       : canViewDsOperations(authorization, pageCode);

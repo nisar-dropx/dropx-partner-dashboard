@@ -7,7 +7,7 @@ type RoleLike = {
   permissions?: Record<string, { canView?: boolean; canAdd?: boolean; canEdit?: boolean }>;
 };
 
-export const DS_OPERATIONS_PAGE_CODES = ["ds_live_performance", "ds_ppi", "ds_site_summary"] as const;
+export const DS_OPERATIONS_PAGE_CODES = ["ds_live_performance", "ds_ppi", "ds_site_summary", "ds_cold_chain_alerts"] as const;
 export type DsOperationsPageCode = (typeof DS_OPERATIONS_PAGE_CODES)[number];
 
 function roleTokens(authorization: RoleLike) {

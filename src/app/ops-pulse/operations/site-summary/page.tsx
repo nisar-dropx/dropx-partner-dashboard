@@ -18,6 +18,7 @@ export default async function DarkStoreSiteSummaryPage({
   const canViewLive = canViewDsOperations(authorization, "ds_live_performance");
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
+  const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
   const station = String(searchParams?.station ?? "").trim().toUpperCase();
   const date = String(searchParams?.date ?? "").trim();
 
@@ -47,7 +48,7 @@ export default async function DarkStoreSiteSummaryPage({
           subtitle="Associate status and active orders from the Site Summary monitor — Actual / Target clocks highlight SLA breaches."
           action={<span className="status-pill good">Live feed · IST</span>}
         />
-        <DsOperationsTabs active="site" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} />
+        <DsOperationsTabs active="site" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} />
         {error ? (
           <section className="panel message-panel error">
             <div className="panel-body">
