@@ -430,7 +430,9 @@ async function startSocket({ method, phone = null }) {
     logger: baileysLogger,
     browser: Browsers.ubuntu(DEVICE_NAME),
     printQRInTerminal: false,
-    markOnlineOnConnect: false,
+    // Companion must look online or WhatsApp often accepts local group sends
+    // without fan-out / receipts (Site Summary ✅ while war rooms stay empty).
+    markOnlineOnConnect: true,
     syncFullHistory: false,
     // Allow RECENT history sync (last ~50 messages per group on reconnect, like WhatsApp Web).
     // Block INITIAL_BOOTSTRAP and FULL which send thousands of messages and cause decrypt floods.
@@ -633,6 +635,14 @@ async function sendToGroup(body) {
         // Always refresh metadata: a stale announce=false would skip the admin check
         // and WhatsApp would drop the post while our chat log still showed "sent".
         const metadata = await session.sock.groupMetadata(body.to);
+        const mine = myIds(session.sock);
+        const member = metadata.participants?.some((participant) =>
+          [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value)))
+        );
+        if (!member) {
+          session.groups.delete(body.to);
+          throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
+        }
         group = {
           subject: metadata.subject ?? group.subject ?? "",
           size: Array.isArray(metadata.participants) ? metadata.participants.length : group.size,
@@ -640,7 +650,6 @@ async function sendToGroup(body) {
         };
         session.groups.set(body.to, group);
         if (group.announce) {
-          const mine = myIds(session.sock);
           const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
           if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
         }
@@ -649,6 +658,7 @@ async function sendToGroup(body) {
       const quoted = quotedId
         ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
         : undefined;
+      await session.sock.sendPresenceUpdate("available").catch(() => {});
       await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
       const mentions = cleanMentions(body.mentions);
@@ -680,9 +690,11 @@ async function sendToGroup(body) {
       await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
       const messageId = sent?.key?.id ?? null;
       if (!messageId) throw Object.assign(new Error("WhatsApp did not return a message id."), { status: 502 });
+      // Needed so Baileys can satisfy retry/resend queries (getMessage) for this outbound id.
+      messageCache.set(messageId, sent);
       if (sent.status != null) noteMessageStatus(messageId, sent.status);
       // Socket write alone is not delivery. Direct chats wait for SERVER_ACK;
-      // groups wait for upsert echo or a participant receipt (never a blind timeout).
+      // groups wait for a real receipt/status (never a local fromMe upsert).
       if (isDirect) await waitForServerAck(messageId, sent.status ?? null);
       else await waitForGroupDelivery(messageId, body.to);
       botMessageIds.set(messageId, true);
