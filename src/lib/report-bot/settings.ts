@@ -18,6 +18,8 @@ export type ReportBotSettings = {
   ai_fallback_model: string | null;
   approval_mode: "manual" | "auto";
   auto_send_min_confidence: number;
+  /** When true, unclear OCR stays in Waiting/Review. Default false auto-closes them. */
+  queue_unclear_ocr_reviews: boolean;
   reply_delay_min_seconds: number;
   reply_delay_max_seconds: number;
   group_min_gap_seconds: number;
@@ -49,6 +51,7 @@ function normalizeSettings(row: Record<string, unknown>): ReportBotSettings {
   return {
     ...(row as ReportBotSettings),
     auto_send_min_confidence: Number(row.auto_send_min_confidence ?? 0.85),
+    queue_unclear_ocr_reviews: row.queue_unclear_ocr_reviews === true,
     correlation_window_minutes: Number(row.correlation_window_minutes ?? 10),
     inbound_retention_days: Number(row.inbound_retention_days ?? 30)
   };

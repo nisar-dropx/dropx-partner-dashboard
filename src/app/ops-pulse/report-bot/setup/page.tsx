@@ -340,9 +340,17 @@ function SettingsForm({ workspace, settings, canEdit }: { workspace: ReportBotWo
                   <option value="auto">Send confident results automatically</option>
                 </select>
               </Field>
-              <Field label="Auto-send when at least" hint="0.85 means the AI is 85% sure. Unclear results always wait for review.">
+              <Field label="Auto-send when at least" hint="0.85 means the AI is 85% sure. Unclear OCR is controlled by the switch below.">
                 <input className={s.input} name="auto_send_min_confidence" type="number" step="0.01" min="0.5" max="1" defaultValue={settings.auto_send_min_confidence} required />
               </Field>
+              <div className={s.span3}>
+                <Toggle
+                  name="queue_unclear_ocr_reviews"
+                  label="Queue unclear OCR for review"
+                  hint="Off by default: wrong-screen or unreadable cycle/expiry/stowing/DG photos are analysed and closed with no Waiting item and no Review draft. Turn on only if a person should check those drafts."
+                  defaultChecked={settings.queue_unclear_ocr_reviews}
+                />
+              </div>
               <Field label="Gap between bot messages" hint="Seconds, per group.">
                 <input className={s.input} name="group_min_gap_seconds" type="number" min="0" max="3600" defaultValue={settings.group_min_gap_seconds} required />
               </Field>

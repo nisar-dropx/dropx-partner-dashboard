@@ -16,6 +16,7 @@ import {
   randomDelaySeconds,
   reviewStatusFor,
   senderLabel,
+  shouldAutoCloseUnclearOcr,
   shouldCompleteRequest,
   sniffImageType,
   type GroupMode
@@ -314,7 +315,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     category: reportType?.category,
     highRiskActions: analysis.open_actions.some((action) => action.high_risk)
   });
-  const feedback = decision === "silent" ? null : composeFeedback(settings, {
+  const unclearOcrAutoClose = shouldAutoCloseUnclearOcr(analysis, settings);
+  const feedback = decision === "silent" || unclearOcrAutoClose ? null : composeFeedback(settings, {
     verdict: analysis.verdict,
     feedback: analysis.feedback || reportType?.feedback_hint || "",
     report: reportType?.name ?? "Report",
@@ -323,7 +325,10 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     date: displayDate(businessDate),
     checks: analysis.checks
   });
-  const reviewStatus = reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
+  const reviewStatus = unclearOcrAutoClose
+    ? "dismissed"
+    : reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
+  const unclearCloseReason = "Unclear OCR auto-closed — no Waiting/Review draft; send a clearer screenshot if still due.";
 
   const inserted = must(await db.from("report_bot_review_items").insert({
     company_id: settings.company_id,
@@ -343,11 +348,11 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     ai_result: analysis,
     ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
     ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
-    status_reason: decision === "silent"
-      ? (analysis.source === "scraper" && analysis.is_report && analysis.verdict !== "not_report"
-        ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
-        : "Not an operational report.")
-      : null,
+    status_reason: unclearOcrAutoClose
+      ? unclearCloseReason
+      : decision === "silent"
+        ? "Not an operational report."
+        : null,
     updated_at: nowIso()
   }).select("id").single(), "Create review item") as { id: string };
 
@@ -372,12 +377,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     // Scraper pass on completion reports: stop reminders and leave the Waiting queue
     // without requiring a human click (feedback is optional noise once cleared).
     const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
-    const scraperUnclearSilent = decision === "silent"
-      && analysis.source === "scraper"
-      && analysis.is_report
-      && analysis.verdict !== "not_report";
     const autoSend = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
-    const submissionStatus = decision === "silent" || scraperPassClose
+    const submissionStatus = decision === "silent" || scraperPassClose || unclearOcrAutoClose
       ? "ignored"
       : autoSend
         ? "queued_to_send"
@@ -386,8 +387,8 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
       status: submissionStatus,
       status_reason: scraperPassClose
         ? "Passed by image scrape — reminders stopped for today."
-        : scraperUnclearSilent
-          ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
+        : unclearOcrAutoClose
+          ? unclearCloseReason
           : decision === "silent" ? "Not a report image." : null,
       report_type_id: reportType?.id ?? null,
       request_id: request?.id ?? null,
@@ -396,15 +397,17 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
       ai_result: analysis,
       verdict: analysis.verdict,
       confidence: analysis.confidence,
-      feedback_text: scraperPassClose ? null : feedback,
+      feedback_text: scraperPassClose || unclearOcrAutoClose ? null : feedback,
       review_id: inserted.id,
       locked_until: null,
       updated_at: nowIso()
     }).eq("id", imageRow.submission_id).in("status", ["queued", "awaiting_approval"]);
-    if (scraperPassClose) {
+    if (scraperPassClose || unclearOcrAutoClose) {
       await db.from("report_bot_review_items").update({
         review_status: "dismissed",
-        status_reason: "Passed by image scrape — reminders stopped for today.",
+        status_reason: scraperPassClose
+          ? "Passed by image scrape — reminders stopped for today."
+          : unclearCloseReason,
         feedback_draft: null,
         updated_at: nowIso()
       }).eq("id", inserted.id);

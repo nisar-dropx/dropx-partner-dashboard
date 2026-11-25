@@ -21,6 +21,7 @@ import {
   retryDelayMinutes,
   reviewStatusFor,
   senderLabel,
+  shouldAutoCloseUnclearOcr,
   shouldCompleteRequest,
   sniffImageType,
   type GroupMode,
@@ -348,18 +349,22 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       const autoOk = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
       const complete = shouldCompleteRequest(analysis, reportType);
       const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
-      const scraperUnclearSilent = decision === "silent"
-        && analysis.source === "scraper"
-        && analysis.is_report
-        && analysis.verdict !== "not_report";
-      const status = decision === "silent" || scraperPassClose ? "ignored" : autoOk ? "queued_to_send" : "awaiting_approval";
+      const unclearOcrAutoClose = shouldAutoCloseUnclearOcr(analysis, settings);
+      const status = decision === "silent" || scraperPassClose || unclearOcrAutoClose
+        ? "ignored"
+        : autoOk
+          ? "queued_to_send"
+          : "awaiting_approval";
+      const closeReason = scraperPassClose
+        ? "Passed by image scrape — reminders stopped for today."
+        : unclearOcrAutoClose
+          ? "Unclear OCR auto-closed — no Waiting/Review draft; send a clearer screenshot if still due."
+          : decision === "silent"
+            ? "Not a report image."
+            : null;
       must(await db.from("report_bot_submissions").update({
         status,
-        status_reason: scraperPassClose
-          ? "Passed by image scrape — reminders stopped for today."
-          : scraperUnclearSilent
-            ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
-          : decision === "silent" ? "Not a report image." : null,
+        status_reason: closeReason,
         request_id: request?.id ?? null,
         report_type_id: reportType?.id ?? null,
         ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
@@ -367,12 +372,14 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         ai_result: analysis,
         verdict: analysis.verdict,
         confidence: analysis.confidence,
-        feedback_text: scraperPassClose ? null : feedback,
+        feedback_text: scraperPassClose || unclearOcrAutoClose ? null : feedback,
         locked_until: null,
         updated_at: nowIso()
       }).eq("id", submission.id), "Save analysis");
       // Best-effort review row for the legacy image path (inbound table may already have one).
-      const reviewStatus = scraperPassClose ? "dismissed" : reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
+      const reviewStatus = scraperPassClose || unclearOcrAutoClose
+        ? "dismissed"
+        : reviewStatusFor(groupMode, decision, Boolean(feedback?.trim()));
       const reviewInsert = await db.from("report_bot_review_items").insert({
         company_id: settings.company_id,
         group_id: submission.group_id,
@@ -385,11 +392,11 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         reason: analysis.extracted_summary,
         extracted_facts: analysis.extracted_fields,
         open_actions: analysis.open_actions,
-        feedback_draft: scraperPassClose ? null : feedback,
+        feedback_draft: scraperPassClose || unclearOcrAutoClose ? null : feedback,
         ai_result: analysis,
         ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
         ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
-        status_reason: scraperPassClose ? "Passed by image scrape — reminders stopped for today." : null,
+        status_reason: closeReason && (scraperPassClose || unclearOcrAutoClose) ? closeReason : null,
         updated_at: nowIso()
       });
       if (reviewInsert.error && !/does not exist|schema cache/i.test(reviewInsert.error.message)) {
@@ -404,7 +411,7 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
           updated_at: nowIso()
         }).eq("id", request.id).in("status", ["pending", "overdue", "received", "missed"]), "Mark request received");
       }
-      if (autoOk && feedback && !scraperPassClose) await queueFeedback(settings, submission, feedback, null);
+      if (autoOk && feedback && !scraperPassClose && !unclearOcrAutoClose) await queueFeedback(settings, submission, feedback, null);
     } catch (error) {
       if (await settleSubmissionFailure(submission, error)) break;
     }

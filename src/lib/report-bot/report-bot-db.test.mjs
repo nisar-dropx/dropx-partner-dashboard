@@ -213,6 +213,33 @@ test("TCC3 pilot migration adds per-group mode, inbound events, review items and
   }
 });
 
+const queueUnclearOcr = await readFile(
+  new URL("../../../supabase/migrations/20261125100000_report_bot_queue_unclear_ocr.sql", import.meta.url),
+  "utf8"
+);
+
+test("unclear OCR queue switch defaults off and is safe to rerun", async () => {
+  const db = await setup();
+  try {
+    await db.exec(queueUnclearOcr);
+    await db.exec(queueUnclearOcr);
+    await db.query("insert into public.report_bot_settings (company_id) values ($1)", [COMPANY_A]);
+    await db.query(
+      "insert into public.report_bot_settings (company_id, queue_unclear_ocr_reviews) values ($1, true)",
+      [COMPANY_B]
+    );
+    const rows = (
+      await db.query(
+        "select company_id, queue_unclear_ocr_reviews as q from public.report_bot_settings order by company_id"
+      )
+    ).rows;
+    assert.equal(rows[0].q, false, "existing companies keep auto-close default");
+    assert.equal(rows[1].q, true, "operators can opt into Waiting/Review drafts");
+  } finally {
+    await db.close();
+  }
+});
+
 test("claims are per company, never hand the same row out twice, and expire", async () => {
   const db = await setup();
   try {

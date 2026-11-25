@@ -124,6 +124,7 @@ export async function saveBotSettings(form: FormData) {
       ai_fallback_model: fallbackModel,
       approval_mode: approval,
       auto_send_min_confidence: threshold,
+      queue_unclear_ocr_reviews: form.get("queue_unclear_ocr_reviews") === "on",
       reply_delay_min_seconds: delayMin,
       reply_delay_max_seconds: delayMax,
       group_min_gap_seconds: boundedInt(form, "group_min_gap_seconds", "Gap between messages", 0, 3600),

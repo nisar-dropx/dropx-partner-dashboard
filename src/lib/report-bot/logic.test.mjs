@@ -7,6 +7,7 @@ import {
   decideGroupDelivery,
   effectiveGroupModeForReview,
   isTestingGroupName,
+  shouldAutoCloseUnclearOcr,
   dueReminderSteps,
   extractJsonText,
   findCorrelationBundle,
@@ -118,18 +119,22 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery(base, { ...auto, approval_mode: "manual" }), "needs_approval");
   assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "auto_send", "OCR scrape bypasses AI approval mode");
   assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "auto_send");
+  const unclearScraper = {
+    ...base,
+    source: "scraper",
+    verdict: "needs_review",
+    confidence: 0.9,
+    checks: [{ rule: "Read quantities", status: "unclear", note: "Screenshot does not show the cycle count screen." }],
+    feedback: "Could not fully read this evidence. Please resend a clearer screenshot."
+  };
+  assert.equal(decideDelivery(unclearScraper, auto), "silent", "unclear OCR analysis questions never post to WhatsApp");
+  assert.equal(shouldAutoCloseUnclearOcr(unclearScraper, auto), true, "default auto-closes unclear OCR with no review draft");
   assert.equal(
-    decideDelivery({
-      ...base,
-      source: "scraper",
-      verdict: "needs_review",
-      confidence: 0.9,
-      checks: [{ rule: "Read quantities", status: "unclear", note: "Screenshot does not show the cycle count screen." }],
-      feedback: "Could not fully read this evidence. Please resend a clearer screenshot."
-    }, auto),
-    "silent",
-    "unclear OCR analysis questions never post to WhatsApp"
+    decideDelivery(unclearScraper, { ...auto, queue_unclear_ocr_reviews: true }),
+    "needs_approval",
+    "setup switch can queue unclear OCR for a person"
   );
+  assert.equal(shouldAutoCloseUnclearOcr(unclearScraper, { queue_unclear_ocr_reviews: true }), false);
   assert.equal(
     decideDelivery({
       ...base,

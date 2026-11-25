@@ -509,7 +509,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
               <strong>AI auto-reply is {auto ? "on" : "off"}</strong>
               <div className={s.hint}>
                 {auto
-                  ? `AI replies at ${Math.round(settings.auto_send_min_confidence * 100)}%+ post without a click. Local OCR posts clear pass/fail in Live groups; unclear screenshots are analysed quietly with no WhatsApp review questions.`
+                  ? `AI replies at ${Math.round(settings.auto_send_min_confidence * 100)}%+ post without a click. Local OCR posts clear pass/fail in Live groups; unclear screenshots auto-close unless “Queue unclear OCR for review” is on in setup.`
                   : "AI replies wait here for approval. Local OCR completion checks still post automatically in Live groups (pass closes the day; fail/unclear feedback goes out without a click)."}
               </div>
             </div>
@@ -541,7 +541,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
         title="Waiting for review"
         icon={<Inbox size={18} aria-hidden />}
         description={settings.mode === "live"
-          ? "Completion reports (cycle count, expiry, stowing, DG) are scraped from the image, Excel photo, web screenshot or pasted text. Pass closes the day automatically; OCR fail/unclear feedback posts in Live without waiting here."
+          ? "Completion reports (cycle count, expiry, stowing, DG) are scraped from the image. Pass closes the day; clear fail may post in Live; unclear OCR auto-closes with no draft unless queued in setup."
           : "The bot is not Live, so approved replies wait and go out once you switch to Live (within 12 hours)."}
         action={waitTotal > 0 ? <span className={s.count}>{waitTotal}</span> : null}
       >

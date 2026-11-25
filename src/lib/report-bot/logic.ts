@@ -284,7 +284,12 @@ export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
   };
 }
 
-export type DeliverySettings = { approval_mode: "manual" | "auto"; auto_send_min_confidence: number };
+export type DeliverySettings = {
+  approval_mode: "manual" | "auto";
+  auto_send_min_confidence: number;
+  /** When true, unclear OCR waits in review. Default/off auto-closes with no draft. */
+  queue_unclear_ocr_reviews?: boolean;
+};
 export type DeliveryDecision = "silent" | "needs_approval" | "auto_send";
 
 /** True when the analysis is still asking rule questions instead of a clear pass/fail. */
@@ -293,13 +298,26 @@ export function hasUnresolvedAnalysisQuestions(analysis: Pick<Analysis, "verdict
     || analysis.checks.some((check) => check.status === "unclear");
 }
 
+/** Unclear OCR that should dismiss itself (no Waiting / Review draft, no WhatsApp reply). */
+export function shouldAutoCloseUnclearOcr(
+  analysis: Pick<Analysis, "source" | "is_report" | "verdict" | "checks">,
+  settings: Pick<DeliverySettings, "queue_unclear_ocr_reviews">
+) {
+  return analysis.source === "scraper"
+    && analysis.is_report === true
+    && hasUnresolvedAnalysisQuestions(analysis)
+    && settings.queue_unclear_ocr_reviews !== true;
+}
+
 export function decideDelivery(analysis: Analysis, settings: DeliverySettings): DeliveryDecision {
   if (!analysis.is_report || analysis.verdict === "not_report") return "silent";
   if (!analysis.feedback.trim()) return "needs_approval";
   // Local OCR scrape: clear pass/fail may post in Live groups. Unclear / needs_review
-  // analysis-question replies must never go to WhatsApp — only record the analysis.
+  // analysis-question replies stay silent unless queue_unclear_ocr_reviews is on.
   if (analysis.source === "scraper") {
-    if (hasUnresolvedAnalysisQuestions(analysis)) return "silent";
+    if (hasUnresolvedAnalysisQuestions(analysis)) {
+      return settings.queue_unclear_ocr_reviews === true ? "needs_approval" : "silent";
+    }
     return analysis.confidence >= 0.5 ? "auto_send" : "needs_approval";
   }
   if (settings.approval_mode !== "auto") return "needs_approval";
