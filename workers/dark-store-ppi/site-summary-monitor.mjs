@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import {
+  DEFAULT_PICK_SLA,
   emptyAssociates,
   mapActiveOrders as mapActiveOrdersBase,
   parseLaborAssociates
@@ -289,7 +290,9 @@ async function fetchSiteSummary(storeId, cookies) {
 
 // ── Acceptance / order clocks (see site-summary-map.mjs) ──────────────────────
 function mapActiveOrders(summaries) {
-  return mapActiveOrdersBase(summaries, { acceptanceTarget: THRESHOLD_S });
+  return mapActiveOrdersBase(summaries, {
+    sla: { ...DEFAULT_PICK_SLA, acceptance: THRESHOLD_S }
+  });
 }
 
 function computeAcceptance(summaries) {

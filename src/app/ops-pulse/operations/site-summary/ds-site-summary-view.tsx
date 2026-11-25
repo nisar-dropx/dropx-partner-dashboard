@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
-import type { DsLiveNetwork, DsLiveStoreDetail } from "@/lib/ops-pulse/ds-live-performance";
+import type { DsLiveNetwork, DsLiveSiteOrder, DsLiveStoreDetail } from "@/lib/ops-pulse/ds-live-performance";
 import s from "./ds-ops.module.css";
 
 const POLL_MS = 60_000;
@@ -36,6 +36,38 @@ function ageLabel(iso: string | null | undefined) {
   return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
 }
 
+/** Advance running clocks since the last VM poll so DropX tracks Amazon between fetches. */
+function liveOrders(orders: DsLiveSiteOrder[], fetchedAt: string | null | undefined, nowMs: number): DsLiveSiteOrder[] {
+  const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  const dt = Number.isFinite(fetchedMs) ? Math.max(0, (nowMs - fetchedMs) / 1000) : 0;
+  if (dt < 0.5) return orders;
+  return orders.map((o) => {
+    const status = String(o.status ?? "").toUpperCase();
+    const packing = (o.packRackSeconds != null && o.packRackSeconds > 0)
+      || /SLAM|PACK|STAGE/.test(status);
+    if (packing) {
+      return {
+        ...o,
+        packRackSeconds: (o.packRackSeconds ?? 0) + dt,
+        totalSeconds: o.totalSeconds != null ? o.totalSeconds + dt : null
+      };
+    }
+    if (o.pickingSeconds != null) {
+      return {
+        ...o,
+        pickingSeconds: o.pickingSeconds + dt,
+        totalSeconds: o.totalSeconds != null ? o.totalSeconds + dt : null
+      };
+    }
+    return {
+      ...o,
+      acceptanceSeconds: o.acceptanceSeconds != null ? o.acceptanceSeconds + dt : null,
+      elapsedSeconds: (o.elapsedSeconds ?? 0) + dt,
+      totalSeconds: o.totalSeconds != null ? o.totalSeconds + dt : null
+    };
+  });
+}
+
 export function DsSiteSummaryView({
   network,
   initialDetail,
@@ -49,6 +81,7 @@ export function DsSiteSummaryView({
   const [detail, setDetail] = useState(initialDetail);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   async function loadStation(next: string) {
     setStation(next);
@@ -83,6 +116,11 @@ export function DsSiteSummaryView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [station, network.businessDate]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const associates = detail?.associates ?? {
     waitingForOrders: 0,
     onBreak: 0,
@@ -93,7 +131,7 @@ export function DsSiteSummaryView({
     total: 0
   };
   const pendingAcceptance = detail?.pendingAcceptance ?? 0;
-  const orders = detail?.siteOrders ?? [];
+  const orders = liveOrders(detail?.siteOrders ?? [], detail?.siteFetchedAt, nowMs);
 
   return (
     <div className={s.report}>

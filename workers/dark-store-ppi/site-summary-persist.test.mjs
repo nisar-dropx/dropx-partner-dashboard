@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapActiveOrders, parseLaborAssociates } from "./site-summary-map.mjs";
+import { mapActiveOrders, parseLaborAssociates, pickSlaSeconds } from "./site-summary-map.mjs";
 
 /** Mirrors associate / order mapping helpers used by site-summary-monitor.mjs */
 function normalizeAssociateLabel(label) {
@@ -106,48 +106,52 @@ test("associate banner parses Site Summary HTML tiles", () => {
   assert.equal(parsed.total_associates, 15);
 });
 
-test("order clocks freeze acceptance after first pick and expose pick %", () => {
+test("pick SLA tiers match Amazon QUICK_COMMERCE capabilities / UI", () => {
+  assert.equal(pickSlaSeconds(2), 150, "2 items → 02:30");
+  assert.equal(pickSlaSeconds(7), 210, "7 items → 03:30");
+  assert.equal(pickSlaSeconds(13), 300, "13 items → 05:00");
+  assert.equal(pickSlaSeconds(23), 630, "23 items → 10:30");
+});
+
+test("acceptance is create→assign; picking starts at assignment", () => {
   const nowS = 1795241312;
   const [row] = mapActiveOrders([{
-    fulfillmentId: "403-0750743-9999999",
-    associateInfo: { associateId: "kdoppaha" },
-    itemsPicked: 6,
-    itemsToPick: 1,
-    totalItems: 7,
+    fulfillmentId: "403-1861924-9999999",
+    associateInfo: { associateId: "athirisg" },
+    itemsPicked: 9,
+    totalItems: 13,
     procurementListAssignmentTime: 1795241258,
-    procurementListCreatedTime: 1795241236,
+    procurementListCreatedTime: 1795241252,
     pickingFinishedTime: null,
     latestPackageStowedTime: null,
     status: "PICKING",
     timeSinceFirstPick: { firstItemPickTime: 1795241270, completionTime: null }
-  }], { nowS, acceptanceTarget: 15 });
+  }], { nowS });
 
-  assert.equal(row.oid, "9999999");
-  assert.equal(row.picker, "kdoppaha");
-  assert.equal(row.pctComplete, 86);
-  assert.equal(row.acceptanceS, 12, "acceptance stops at first pick (not wall-clock age)");
-  assert.equal(row.pickingS, nowS - 1795241270);
-  assert.equal(row.packS, 0);
+  assert.equal(row.acceptanceS, 6, "Amazon acceptance = assign - create");
+  assert.equal(row.pickingS, nowS - 1795241258, "picking runs from assignment, not first scan");
+  assert.equal(row.pctComplete, 69);
+  assert.equal(row.pickingTarget, 300);
+  assert.equal(row.totalTarget, 15 + 300 + 30);
   assert.equal(row.pendingAcceptance, false);
-  assert.equal(row.pickingTarget, 210);
 });
 
-test("assigned order without first pick stays pending acceptance", () => {
+test("unassigned dropped order keeps acceptance running and no picking", () => {
   const nowS = 1795241343 + 45;
   const [row] = mapActiveOrders([{
     fulfillmentId: "404-7864671-1240301",
-    associateInfo: { associateId: "wgskd" },
+    associateInfo: { associateId: null },
     itemsPicked: 0,
     totalItems: 1,
-    procurementListAssignmentTime: 1795241343,
+    procurementListAssignmentTime: null,
     procurementListCreatedTime: 1795241337,
-    status: "ASSIGNED",
+    status: "DROPPED",
     timeSinceFirstPick: { firstItemPickTime: null, completionTime: null }
   }], { nowS });
   assert.equal(row.pendingAcceptance, true);
-  assert.equal(row.acceptanceS, 45);
+  assert.equal(row.acceptanceS, nowS - 1795241337);
   assert.equal(row.pickingS, null);
-  assert.equal(row.pctComplete, 0);
+  assert.equal(row.picker, "Unassigned");
 });
 
 test("labor findpeople maps functions onto Site Summary tiles", () => {
@@ -166,7 +170,7 @@ test("labor findpeople maps functions onto Site Summary tiles", () => {
   assert.equal(parsed.waiting_for_orders, 2);
   assert.equal(parsed.offered_associates, 1);
   assert.equal(parsed.picking_associates, 1);
-  assert.equal(parsed.packing_racking, 2);
-  assert.equal(parsed.other_activities, 1);
+  assert.equal(parsed.packing_racking, 0);
+  assert.equal(parsed.other_activities, 3);
   assert.equal(parsed.total_associates, 7);
 });
