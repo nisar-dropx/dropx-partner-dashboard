@@ -348,10 +348,12 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     ai_result: analysis,
     ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
     ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
-    status_reason: unclearOcrAutoClose
+      status_reason: unclearOcrAutoClose
       ? unclearCloseReason
       : decision === "silent"
-        ? "Not an operational report."
+        ? (analysis.is_report
+          ? "OCR classified silently — no WhatsApp analysis reply."
+          : "Not an operational report.")
         : null,
     updated_at: nowIso()
   }).select("id").single(), "Create review item") as { id: string };
@@ -389,7 +391,11 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
         ? "Passed by image scrape — reminders stopped for today."
         : unclearOcrAutoClose
           ? unclearCloseReason
-          : decision === "silent" ? "Not a report image." : null,
+          : decision === "silent"
+            ? (analysis.is_report
+              ? "OCR classified silently — no WhatsApp analysis reply."
+              : "Not a report image.")
+            : null,
       report_type_id: reportType?.id ?? null,
       request_id: request?.id ?? null,
       ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,

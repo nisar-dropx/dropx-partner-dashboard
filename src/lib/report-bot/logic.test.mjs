@@ -117,8 +117,8 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery({ ...base, is_report: false, verdict: "not_report" }, auto), "silent");
   assert.equal(decideDelivery(base, auto), "auto_send");
   assert.equal(decideDelivery(base, { ...auto, approval_mode: "manual" }), "needs_approval");
-  assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "auto_send", "clear OCR pass may auto-send (thank-you still suppressed on completion close)");
-  assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "auto_send", "clear OCR fail posts in Live groups");
+  assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "silent", "clear OCR pass never posts; reminders close quietly");
+  assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "silent", "clear OCR fail never posts Needs-correction analysis");
   const unclearScraper = {
     ...base,
     source: "scraper",

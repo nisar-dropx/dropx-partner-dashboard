@@ -345,6 +345,8 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       const decision = decideGroupDelivery(analysis, settings, {
         companyMode: settings.mode,
         groupMode,
+        autoReplyPolicy: reportType?.auto_reply_policy,
+        category: reportType?.category,
         highRiskActions: analysis.open_actions.some((action) => action.high_risk)
       });
       const feedback = decision === "silent" ? null : composeFeedback(settings, {
@@ -371,7 +373,9 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
         : unclearOcrAutoClose
           ? "Unclear OCR auto-closed — no Waiting/Review draft; send a clearer screenshot if still due."
           : decision === "silent"
-            ? "Not a report image."
+            ? (analysis.is_report
+              ? "OCR classified silently — no WhatsApp analysis reply."
+              : "Not a report image.")
             : null;
       must(await db.from("report_bot_submissions").update({
         status,
