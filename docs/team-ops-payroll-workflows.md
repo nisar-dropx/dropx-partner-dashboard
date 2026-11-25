@@ -3,7 +3,9 @@
 ## Provider-member Nill Map — 25 November 2026
 
 Unregistered provider members can be marked **Nill Map** below the DropX ID
-selector and saved with required From and To dates, without selecting an associate or payment method.
+selector and saved using the existing Effective from and Effective to fields
+(both required for Nill Map), without selecting an associate or payment method.
+The same controls display the Nill period while checked and payment dates otherwise.
 This creates a company/provider/location/member disposition rather than a person
 or payable mapping. Persisted Nill mapped rows leave Not linked; ID link and
 Validation filters expose Nill mapped for review or unchecking and saving.
