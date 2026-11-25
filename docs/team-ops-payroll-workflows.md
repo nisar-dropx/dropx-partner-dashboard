@@ -3,7 +3,7 @@
 ## Provider-member Nill Map — 25 November 2026
 
 Unregistered provider members can be marked **Nill Map** below the DropX ID
-selector and saved without selecting an associate, payment method or dates.
+selector and saved with required From and To dates, without selecting an associate or payment method.
 This creates a company/provider/location/member disposition rather than a person
 or payable mapping. Persisted Nill mapped rows leave Not linked; ID link and
 Validation filters expose Nill mapped for review or unchecking and saving.
@@ -15,7 +15,10 @@ open worksheets and preserves existing remarks.
 The service-only RPC verifies location access, company/provider ownership,
 source activity and absence of a registered/current link under the company
 payment mutex. Mark/clear operations are audited and retries are idempotent.
-Creating a real mapping clears the marker and records its mapping ID in audit.
+Dated exclusions apply within their period and allow a non-overlapping later associate mapping.
+Overlapping mapping dates require shortening or clearing Nill Map first. Past dated
+exclusions remain stored; dates and remarks are audited. Legacy ongoing exclusions
+remain compatible and clear on a real mapping. Migration: `20261125081818_provider_nil_map_periods.sql`.
 Migration: `20261125060532_provider_member_nil_maps.sql`.
 
 ## Selected-period payout publication — 24 November 2026

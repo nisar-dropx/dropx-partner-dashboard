@@ -13,7 +13,7 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
       create table stations(id uuid primary key,company_id uuid,provider_id uuid,station_code text);
       create table workforce(id uuid primary key,company_id uuid,location_id uuid,provider_employee_id text,deleted_at timestamptz);
       create table cps_shipment_daily(company_id uuid,station_code text,provider_employee_id text);
-      create table field_executive_provider_mappings(id uuid primary key default gen_random_uuid(),company_id uuid,provider_id uuid,station_id uuid,provider_member_id text,workforce_id uuid,status text,effective_to date);
+      create table field_executive_provider_mappings(id uuid primary key default gen_random_uuid(),company_id uuid,provider_id uuid,station_id uuid,provider_member_id text,workforce_id uuid,status text,effective_to date,effective_from date);
       create function lock_workforce_payment_allocation_company(uuid) returns void language sql as $$select$$;
     `);
     const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -31,6 +31,8 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await db.exec(primaryKeyFix);await db.exec(primaryKeyFix);
     const remarksMigration=readFileSync(new URL('../../supabase/migrations/20261125072200_provider_nil_map_remarks.sql',import.meta.url),'utf8');
     await db.exec(remarksMigration);await db.exec(remarksMigration);
+    const periods=readFileSync(new URL('../../supabase/migrations/20261125081818_provider_nil_map_periods.sql',import.meta.url),'utf8');
+    await db.exec(periods);await db.exec(periods);
     const primaryKey=(await db.query("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='provider_member_nil_maps'::regclass and contype='p'")).rows[0].definition;
     assert.equal(primaryKey,'PRIMARY KEY (id)','no unintended stations/providers many-to-many relationship may be inferred');
     await db.exec('grant usage on schema auth to service_role;grant select on companies,providers,stations,workforce,cps_shipment_daily,field_executive_provider_mappings to service_role;');
@@ -73,10 +75,38 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await assert.rejects(save(),/already has a registered associate or mapping/);
     await db.query('insert into workforce values($1,$2,$3,$4,null)',[id(8),company,otherStation,'MEMBER01']);
     await assert.rejects(save(true,[otherStation],'MEMBER01',otherStation),/already has a registered associate or mapping/);
+    await db.query("delete from field_executive_provider_mappings");
+    const dated=async(from,to,value=true)=>{
+      await db.exec('set role service_role;');
+      try{return await db.query('select provider_set_member_nil_map($1,$2,$3,$4,$5,$6,$7::uuid[],$8,$9::date,$10::date)',[company,actor,provider,station,'MEMBER01',value,[station],'Temporary',from,to]);}
+      finally{await db.exec('reset role;');}
+    };
+    await assert.rejects(dated('2026-11-15','2026-11-01'),/valid From and To/);
+    await assert.rejects(dated('2026-11-01',null),/valid From and To/);
+    await dated('2026-11-01','2026-11-15');
+    const eventCount=(await db.query('select count(*)::int n from provider_member_nil_map_events')).rows[0].n;
+    await dated('2026-11-01','2026-11-15');
+    assert.equal((await db.query('select count(*)::int n from provider_member_nil_map_events')).rows[0].n,eventCount);
+    const link=async from=>db.query("insert into field_executive_provider_mappings(company_id,provider_id,station_id,provider_member_id,workforce_id,status,effective_from) values($1,$2,$3,'MEMBER01',$4,'active',$5)",[company,provider,station,id(9),from]);
+    await assert.rejects(link('2026-11-15'),/overlap a Nill Map period/);
+    await link('2026-11-16');
+    assert.equal((await db.query('select count(*)::int n from provider_member_nil_maps where station_id=$1',[station])).rows[0].n,1,'later remapping preserves earlier Nill period');
+    await assert.rejects(dated('2026-11-01','2026-11-16'),/overlap an existing/);
+    await dated(null,null,false);
+    assert.equal((await db.query("select effective_to::text from provider_member_nil_map_events where action='cleared' order by created_at desc limit 1")).rows[0].effective_to,'2026-11-15');
     const security=(await db.query(`select has_function_privilege('authenticated','provider_set_member_nil_map(uuid,uuid,uuid,uuid,text,boolean,uuid[])','execute') can_call,
       has_table_privilege('authenticated','provider_member_nil_maps','insert') can_insert,
       (select relrowsecurity from pg_class where oid='provider_member_nil_maps'::regclass) rls`)).rows[0];
     assert.deepEqual(security,{can_call:false,can_insert:false,rls:true});
     assert.equal((await db.query("select has_table_privilege('service_role','auth.users','select') allowed")).rows[0].allowed,false,'saving does not require private auth table access');
   } finally {await db.close();}
+});
+
+test('Nill date applicability restores unlinked after the period and preserves historical month views',async()=>{
+ const {providerNilMapApplies:applies}=await import('./provider-first-mapping-view.ts');
+ assert.equal(applies('2026-11-01','2026-11-15','2026-11','2026-11-15'),true);
+ assert.equal(applies('2026-11-01','2026-11-15','2026-11','2026-11-16'),false);
+ assert.equal(applies('2026-11-20','2026-11-25','2026-11','2026-11-16'),false);
+ assert.equal(applies('2026-10-01','2026-10-15','2026-10','2026-11-16'),true);
+ assert.equal(applies('2026-10-01','2026-10-15','2026-11','2026-11-16'),false);
 });

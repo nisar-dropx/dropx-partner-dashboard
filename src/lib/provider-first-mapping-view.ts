@@ -47,6 +47,8 @@ export type ProviderFirstWorkerView = {
 export type ProviderFirstMappingRowView = {
   nilMapped?: boolean;
   nilRemark?: string;
+  nilFrom?: string;
+  nilTo?: string;
   identityLinked?: boolean;
   outboundMonths?: string[];
   providerMemberId: string;
@@ -1243,7 +1245,11 @@ export function providerFirstRowIssue(
   method: ProviderFirstPaymentMethodView | undefined
 ) {
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
-  if (row.nilMapped) return row.workforceId || row.mappingId ? "Clear the existing associate link before using Nill Map." : null;
+  if (row.nilMapped) {
+    if (row.workforceId || row.mappingId) return "Clear the existing associate link before using Nill Map.";
+    if (!row.nilFrom || !row.nilTo || row.nilTo < row.nilFrom) return "Nill Map requires From and To dates, with To on or after From.";
+    return null;
+  }
   if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
   const mappingReference = providerFirstMappingReferenceForRow(row, worker);
@@ -1364,4 +1370,11 @@ export function verifiedProviderIdentityWorker<T extends {id:string;location_id:
  const matches=candidates.filter(w=>w.location_id===stationId&&w.provider_employee_id===providerMemberId&&Boolean(w.dropx_id));
  if(matches.length!==1||historicalOwnerIds.some(id=>id!==matches[0].id))return null;
  return matches[0];
+}
+
+/** Current month follows today; other month views show overlapping periods. */
+export function providerNilMapApplies(from: string, to: string, month: string, today: string): boolean {
+  if (!from) return true; // Legacy exclusions were ongoing.
+  if (!month || month === today.slice(0, 7)) return from <= today && (!to || to >= today);
+  return from.slice(0, 7) <= month && (!to || to.slice(0, 7) >= month);
 }

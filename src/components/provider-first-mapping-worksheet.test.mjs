@@ -96,11 +96,15 @@ test('Nill Map saves without a DropX ID and leaves Not linked only after success
   const checkbox=()=>ui.one(node=>node.type==='input' && node.props.type==='checkbox').props;
   assert.equal(checkbox().disabled,false);
   checkbox().onChange({target:{checked:true}});ui.render();
+  ui.one(node=>node.type==='input' && node.props['aria-label']==='Nill Map from').props.onChange({target:{value:'2026-10-01'}});ui.render();
+  ui.one(node=>node.type==='input' && node.props['aria-label']==='Nill Map to').props.onChange({target:{value:'2026-10-15'}});ui.render();
   assert.equal(ui.cards().length,1,'draft stays visible until saved');
   assert.equal(ui.select('provider_first_worker_0').disabled,true);
   await ui.save();
   assert.equal(payload.get('rows[0][id]'),'');
   assert.equal(payload.get('rows[0][nil_map_action]'),'mark');
+  assert.equal(payload.get('rows[0][nil_map_from]'),'2026-10-01');
+  assert.equal(payload.get('rows[0][nil_map_to]'),'2026-10-15');
   assert.equal(ui.cards().length,0,'saved nil row leaves unlinked');
   ui.filter('ID link').setSelected(['nil_mapped']);ui.render();
   assert.equal(ui.cards().length,1);
@@ -122,7 +126,7 @@ test('unchecking Nill Map restores Not linked after saving, without creating a p
 
 test('saved Nill Map remarks load, remain editable and use the same save action',async()=>{
   let payload;
-  const ui=worksheet({mappings:[{...row,nilMapped:true,nilRemark:'Before registration'}],initialMappingStatus:'nil_mapped'},async data=>{
+  const ui=worksheet({mappings:[{...row,nilMapped:true,nilFrom:'2026-10-01',nilTo:'2026-10-15',nilRemark:'Before registration'}],initialMappingStatus:'nil_mapped'},async data=>{
     payload=data;
     return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:true,nilRemark:data.get('rows[0][nil_map_remark]')}]};
   });

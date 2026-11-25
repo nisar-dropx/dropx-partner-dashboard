@@ -24760,3 +24760,7 @@ td strong,
 .payment-track-timeline li[data-tone="issue"]::before { background: #d92d20; }
 .payment-track-timeline li[data-tone="current"] > div strong { color: #1d4d86; }
 .payment-track-timeline li[data-tone="current"]::before { background: #2b6bb1; }
+
+.provider-first-nil-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.provider-first-nil-dates > span { grid-column: 1 / -1; }
+.provider-first-nil-dates input { width: 100%; min-width: 0; }

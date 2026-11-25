@@ -10,7 +10,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { verifiedProviderIdentityWorker, canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
+import { providerNilMapApplies, verifiedProviderIdentityWorker, canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -53,7 +53,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
 
   if (!supabaseAdmin) return <AppShell active="ID Mapping" pageCode={pageCode}><PageHead eyebrow="Source-of-truth bridge" title="ID & pay mapping" /><section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">Supabase service role key is not configured.</p></div></section></AppShell>;
 
-  const nilQuery = supabaseAdmin.from("provider_member_nil_maps").select("provider_id,station_id,provider_member_id,remark").eq("company_id", companyId).order("station_id").order("provider_member_id");
+  const nilQuery = supabaseAdmin.from("provider_member_nil_maps").select("provider_id,station_id,provider_member_id,remark,effective_from,effective_to").eq("company_id", companyId).order("station_id").order("provider_member_id");
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult, designationsResult, nilMapsResult] = await Promise.all([
     // Payouts and mapping history remain valid after a station is deactivated.
     // Load every authorized company station so those stored mappings do not
@@ -67,7 +67,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     readAllRows(allLocations ? nilQuery : nilQuery.in("station_id", authorization.locationScopeIds))
   ]);
   const loadError = stationsResult.error || workersResult.error || providerResult.error || mappingsResult.error || methodsResult.error || designationsResult.error || nilMapsResult.error;
-  const nilMaps = new Map((nilMapsResult.data ?? []).map(row => [`${row.provider_id}|${providerMemberKey(row.station_id, row.provider_member_id)}`, row.remark]));
+  const nilMaps = new Map((nilMapsResult.data ?? []).map(row => [`${row.provider_id}|${providerMemberKey(row.station_id, row.provider_member_id)}`, row]));
   const allStations = stationsResult.data ?? [];
   // Keep every station for historical labels, but current mapping choices and
   // provider activity must use only locations that are operational now.
@@ -262,7 +262,9 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     worksheetMappingByMember,
     historyByMember
   ).map(({ member, mapping: link, history: exactMemberHistory }) => {
-    const worker = link?.workforce_id ? workforceById.get(link.workforce_id) : verifiedProviderIdentityWorker(
+    const nil = nilMaps.get(`${member.providerId}|${providerMemberKey(member.stationId, member.id)}`);
+    const nilActive = Boolean(nil && providerNilMapApplies(nil.effective_from, nil.effective_to ?? "", entryFilters.month, today));
+    const worker = !link && nilActive ? undefined : link?.workforce_id ? workforceById.get(link.workforce_id) : verifiedProviderIdentityWorker(
       identityWorkersByKey.get(providerMemberKey(member.stationId,member.id)) ?? [], member.stationId, member.id,
       identityOwnersByKey.get(providerMemberIdentityKey(member.providerId,member.id)) ?? []
     );
@@ -276,7 +278,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
       ? historyByWorkforce.get(link.workforce_id) ?? []
       : uniquePaymentAllocationHistory([...exactMemberHistory, ...identityHistory]);
     const thresholdSnapshot = parseProductionThresholdSnapshot(link?.production_threshold_config);
-    return { nilRemark: String(nilMaps.get(`${member.providerId}|${providerMemberKey(member.stationId, member.id)}`) ?? ""), nilMapped: !worker && !link && nilMaps.has(`${member.providerId}|${providerMemberKey(member.stationId, member.id)}`), identityLinked: !link && Boolean(worker), relatedStationIds: relatedStationIdsByStation.get(member.stationId) ?? [member.stationId], outboundMonths: member.outboundMonths, providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
+    return { nilRemark: nil?.remark ?? "", nilFrom: nil?.effective_from ?? "", nilTo: nil?.effective_to ?? "", nilMapped: !worker && !link && nilActive, identityLinked: !link && Boolean(worker), relatedStationIds: relatedStationIdsByStation.get(member.stationId) ?? [member.stationId], outboundMonths: member.outboundMonths, providerMemberId: member.id, providerMemberName: member.name, stationId: member.stationId, stationLabel: member.stationLabel, providerId: member.providerId, workforceId: worker?.id ?? "", dropxId: String(worker?.dropx_id ?? ""), dropxName: String(worker?.full_name ?? ""), mappingId: link?.id ?? "", paymentMethodId: link?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(link?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), productionThresholdConfig: thresholdSnapshot ? { period: thresholdSnapshot.period, component_codes: thresholdSnapshot.component_codes } : null, productionThresholdMinimumUnits: thresholdSnapshot ? String(thresholdSnapshot.minimum_units) : "", effectiveFrom: link?.effective_from ?? String(worker?.date_of_join ?? ""), effectiveTo: link?.effective_to ?? "", history: sortPaymentAllocationHistory(history) };
   });
   // Lookup is independent of outbound/month/status filters, but never of authorization.
   const lookupEntries: ProviderMappingLookupEntry[] = mappingHistory.map(mapping => {
