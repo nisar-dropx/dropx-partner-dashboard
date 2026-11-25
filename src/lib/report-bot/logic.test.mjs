@@ -118,6 +118,29 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery(base, { ...auto, approval_mode: "manual" }), "needs_approval");
   assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "auto_send", "OCR scrape bypasses AI approval mode");
   assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "auto_send");
+  assert.equal(
+    decideDelivery({
+      ...base,
+      source: "scraper",
+      verdict: "needs_review",
+      confidence: 0.9,
+      checks: [{ rule: "Read quantities", status: "unclear", note: "Screenshot does not show the cycle count screen." }],
+      feedback: "Could not fully read this evidence. Please resend a clearer screenshot."
+    }, auto),
+    "silent",
+    "unclear OCR analysis questions never post to WhatsApp"
+  );
+  assert.equal(
+    decideDelivery({
+      ...base,
+      source: "scraper",
+      verdict: "pass",
+      confidence: 0.55,
+      checks: [{ rule: "r", status: "unclear", note: "cropped" }]
+    }, auto),
+    "silent",
+    "any unclear scraper check stays silent even if verdict was pass"
+  );
   assert.equal(decideDelivery({ ...base, confidence: 0.8 }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, verdict: "needs_review" }, auto), "needs_approval");
   assert.equal(decideDelivery({ ...base, checks: [{ rule: "r", status: "unclear", note: "" }] }, auto), "needs_approval");

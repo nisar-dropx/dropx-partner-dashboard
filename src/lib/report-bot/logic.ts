@@ -287,17 +287,23 @@ export function parseAnalysis(raw: unknown, candidateIds: string[]): Analysis {
 export type DeliverySettings = { approval_mode: "manual" | "auto"; auto_send_min_confidence: number };
 export type DeliveryDecision = "silent" | "needs_approval" | "auto_send";
 
+/** True when the analysis is still asking rule questions instead of a clear pass/fail. */
+export function hasUnresolvedAnalysisQuestions(analysis: Pick<Analysis, "verdict" | "checks">) {
+  return analysis.verdict === "needs_review"
+    || analysis.checks.some((check) => check.status === "unclear");
+}
+
 export function decideDelivery(analysis: Analysis, settings: DeliverySettings): DeliveryDecision {
   if (!analysis.is_report || analysis.verdict === "not_report") return "silent";
   if (!analysis.feedback.trim()) return "needs_approval";
-  // Local OCR scrape: post automatically in Live groups. Approval mode only gates AI replies.
-  // Put a group in Review (or report policy "never") when a human must approve OCR replies.
+  // Local OCR scrape: clear pass/fail may post in Live groups. Unclear / needs_review
+  // analysis-question replies must never go to WhatsApp — only record the analysis.
   if (analysis.source === "scraper") {
+    if (hasUnresolvedAnalysisQuestions(analysis)) return "silent";
     return analysis.confidence >= 0.5 ? "auto_send" : "needs_approval";
   }
   if (settings.approval_mode !== "auto") return "needs_approval";
-  if (analysis.verdict === "needs_review") return "needs_approval";
-  if (analysis.checks.some((check) => check.status === "unclear")) return "needs_approval";
+  if (hasUnresolvedAnalysisQuestions(analysis)) return "needs_approval";
   return analysis.confidence >= settings.auto_send_min_confidence ? "auto_send" : "needs_approval";
 }
 

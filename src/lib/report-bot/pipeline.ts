@@ -348,11 +348,17 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       const autoOk = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
       const complete = shouldCompleteRequest(analysis, reportType);
       const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
+      const scraperUnclearSilent = decision === "silent"
+        && analysis.source === "scraper"
+        && analysis.is_report
+        && analysis.verdict !== "not_report";
       const status = decision === "silent" || scraperPassClose ? "ignored" : autoOk ? "queued_to_send" : "awaiting_approval";
       must(await db.from("report_bot_submissions").update({
         status,
         status_reason: scraperPassClose
           ? "Passed by image scrape — reminders stopped for today."
+          : scraperUnclearSilent
+            ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
           : decision === "silent" ? "Not a report image." : null,
         request_id: request?.id ?? null,
         report_type_id: reportType?.id ?? null,

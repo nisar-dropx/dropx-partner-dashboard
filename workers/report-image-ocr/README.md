@@ -20,6 +20,7 @@ Render free web services have ~512 MB RAM. This service is tuned for that budget
 | `REPORT_IMAGE_OCR_MAX_LONG_EDGE` | `1600` | Cap decode/upscale buffers |
 | `REPORT_IMAGE_OCR_MAX_UPLOAD_MB` | `8` | Reject oversized uploads early |
 | uvicorn `--workers` | `1` | No multi-process RSS duplication |
+| uvicorn `--limit-concurrency` | unset | A low limit returns HTTP 503 to Render health while OCR waits are queued |
 
 Do **not** raise concurrency above `2` on free. Prefer leaving the portal's `tesseract.js` fallback for bulk spikes rather than paying for a larger instance.
 

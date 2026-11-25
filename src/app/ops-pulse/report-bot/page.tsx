@@ -509,7 +509,7 @@ async function ReviewTab({ workspace, companyId, groupIds, lookup, settings, can
               <strong>AI auto-reply is {auto ? "on" : "off"}</strong>
               <div className={s.hint}>
                 {auto
-                  ? `AI replies at ${Math.round(settings.auto_send_min_confidence * 100)}%+ post without a click. Local OCR (cycle / expiry / stowing / DG) always posts in Live groups — put a group in Review to require approval.`
+                  ? `AI replies at ${Math.round(settings.auto_send_min_confidence * 100)}%+ post without a click. Local OCR posts clear pass/fail in Live groups; unclear screenshots are analysed quietly with no WhatsApp review questions.`
                   : "AI replies wait here for approval. Local OCR completion checks still post automatically in Live groups (pass closes the day; fail/unclear feedback goes out without a click)."}
               </div>
             </div>

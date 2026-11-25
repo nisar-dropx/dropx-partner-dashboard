@@ -15,4 +15,6 @@ ENV REPORT_IMAGE_OCR_MAX_LONG_EDGE=1600
 ENV REPORT_IMAGE_OCR_MAX_UPLOAD_MB=8
 EXPOSE 10000
 # Single worker keeps peak RSS inside Render free (~512 MB).
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT} --workers 1 --limit-concurrency 16"]
+# Do NOT set --limit-concurrency: queued OCR holders would fill the slot budget and
+# Render health checks then get HTTP 503 even while the process is alive.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT} --workers 1"]

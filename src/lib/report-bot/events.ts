@@ -343,7 +343,11 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     ai_result: analysis,
     ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,
     ai_model: analysis.source === "scraper" ? "image-scraper" : settings.ai_model,
-    status_reason: decision === "silent" ? "Not an operational report." : null,
+    status_reason: decision === "silent"
+      ? (analysis.source === "scraper" && analysis.is_report && analysis.verdict !== "not_report"
+        ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
+        : "Not an operational report.")
+      : null,
     updated_at: nowIso()
   }).select("id").single(), "Create review item") as { id: string };
 
@@ -368,6 +372,10 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
     // Scraper pass on completion reports: stop reminders and leave the Waiting queue
     // without requiring a human click (feedback is optional noise once cleared).
     const scraperPassClose = complete && analysis.verdict === "pass" && reportType?.requires_pass_to_close === true;
+    const scraperUnclearSilent = decision === "silent"
+      && analysis.source === "scraper"
+      && analysis.is_report
+      && analysis.verdict !== "not_report";
     const autoSend = decision === "auto_send" && canAutoSendToGroup(settings.mode, groupMode);
     const submissionStatus = decision === "silent" || scraperPassClose
       ? "ignored"
@@ -376,7 +384,11 @@ export async function processInboundEvent(settings: ReportBotSettings, eventId: 
         : "awaiting_approval";
     await db.from("report_bot_submissions").update({
       status: submissionStatus,
-      status_reason: scraperPassClose ? "Passed by image scrape — reminders stopped for today." : decision === "silent" ? "Not a report image." : null,
+      status_reason: scraperPassClose
+        ? "Passed by image scrape — reminders stopped for today."
+        : scraperUnclearSilent
+          ? "Analysed without a group reply — unclear evidence stays pending for a clearer screenshot."
+          : decision === "silent" ? "Not a report image." : null,
       report_type_id: reportType?.id ?? null,
       request_id: request?.id ?? null,
       ai_provider: analysis.source === "scraper" ? "scraper" : settings.ai_provider,

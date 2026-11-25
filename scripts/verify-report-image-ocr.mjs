@@ -51,6 +51,8 @@ test("memory-safe OCR path closes images and avoids MedianFilter", () => {
   assert.doesNotMatch(mainPy, /MedianFilter\s*\(/);
   assert.doesNotMatch(mainPy, /ImageFilter/);
   assert.match(dockerfile, /--workers 1/);
+  // Comments may warn about the flag; the CMD must not enable it.
+  assert.doesNotMatch(dockerfile, /CMD \[[^\]]*--limit-concurrency/);
 });
 
 test("invalid concurrency env cannot raise above two or below one", () => {
