@@ -11,11 +11,27 @@ test('workspace selection cannot use a cookie to grant another business location
 test('dual access offers both workspaces, excluding HO and hidden locations',()=>{const r=ctx.resolveOperatingContext([lm,ds,{...ds,id:'h',is_ho:true},{...ds,id:'x',hide_from_location_list:true}]);assert.equal(r.mode,'amazon_now');assert.deepEqual(r.modeLocations,[ds]);assert.equal(r.availableModes.length,2);});
 test('DS has unit costs, Store Health Review Desk, and no last-mile specialist workflows',()=>{
   const catalog=nav.opsNavCatalogForMode('amazon_now');
+  const storeAuditsIndex=catalog.findIndex(x=>x.code==='store_audits');
+  const performanceIndex=catalog.findIndex(x=>x.code==='performance');
+  assert(storeAuditsIndex>=0);
+  assert.equal(performanceIndex,storeAuditsIndex+1,'Performance sits immediately after Store Audits');
   const operations=catalog.find(x=>x.label==='Operations');
   assert(operations);
+  assert.equal(operations.children?.[0]?.code,'ops_report_bot');
+  assert.equal(operations.children?.[0]?.href,'/report-bot?workspace=dark_store');
   assert(operations.children?.some(c=>c.code==='ds_live_performance'&&c.href==='/operations/live'));
   assert(operations.children?.some(c=>c.code==='ds_ppi'&&c.href==='/operations/ppi'));
   assert(operations.children?.some(c=>c.code==='ds_site_summary'&&c.href==='/operations/site-summary'));
+  assert(!catalog.some(x=>x.code==='ops_report_bot'&&!x.children));
+  const teamOps=catalog.find(x=>x.label==='Team Ops');
+  assert(teamOps);
+  assert.equal(teamOps.code,'ops_attendance_reports');
+  assert(teamOps.children?.some(c=>c.code==='ops_rostering'&&c.href==='/rostering'));
+  assert(teamOps.children?.some(c=>c.code==='ops_my_team'&&c.href==='/attendance/my-team'));
+  assert(teamOps.children?.some(c=>c.code==='ops_attendance_reports'&&c.href==='/attendance'));
+  assert(teamOps.children?.some(c=>c.code==='ops_unplanned_leaves'&&String(c.href).includes('unplanned-leaves')));
+  assert(!catalog.some(x=>x.label==='Rostering'&&!x.children));
+  assert(!catalog.some(x=>x.code==='workforce'));
   const menus=nav.opsNavItemsForMode('amazon_now',{roleCode:'FSD'});
   assert(menus.some(x=>x.href==='/cpu'));
   assert(menus.some(x=>x.label==='Operations'));
@@ -37,8 +53,8 @@ test('DS has unit costs, Store Health Review Desk, and no last-mile specialist w
   assert(!shiftMenu.children?.some(c=>c.label==='Activities report'));
   assert(menus.some(x=>x.code==='si_handover_master'||(x.children||[]).some(c=>c.code==='si_handover_master')));
   assert(menus.some(x=>x.code==='store_ops_master'||(x.children||[]).some(c=>c.code==='store_ops_master')));
-  for(const code of ['ops_rostering','business_documents','payments','ops_reports','master_data','users'])assert(menus.some(x=>x.code===code));
-  for(const code of ['cod','fleet','capacity'])assert(!menus.some(x=>x.code===code));
+  for(const code of ['ops_rostering','ops_my_team','ops_attendance_reports','ops_unplanned_leaves','business_documents','payments','ops_reports','master_data','users'])assert(menus.some(x=>x.code===code||(x.children||[]).some(c=>c.code===code)));
+  for(const code of ['cod','fleet','capacity','workforce'])assert(!menus.some(x=>x.code===code));
   assert(!performance.children?.some(c=>['daily','sls'].some(part=>String(c.href).includes(`view=${part}`))));
 });
 test('both workspaces lead to the same complete approvals queue',()=>{const approvals=mode=>nav.opsNavItemsForMode(mode).find(x=>x.code==='payments').children.find(x=>x.code==='payment_approvals');assert.deepEqual(approvals('amazon_edsp'),approvals('amazon_now'));assert.equal(approvals('amazon_now').href,'/payments/approvals');});

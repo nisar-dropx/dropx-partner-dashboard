@@ -14,6 +14,7 @@ const icons: Record<string, LucideIcon> = {
   cps: BarChart3, fleet: Truck, ops_attendance_reports: Users, ops_reports: FileBarChart2,
   ops_notification_settings: Settings2, master_data: ListTree, users: ShieldCheck,
   store_audits: ClipboardCheck, ops_rostering: CalendarDays, ops_report_bot: Activity,
+  ds_live_performance: ClipboardCheck, si_handover: ClipboardCheck,
   cpu_overview: BarChart3, service_network: MapPin, edd_dashboard: Truck,
   delivery_associates: Users, ops_provider_mapping: UserRoundSearch, ops_provider_mapping_summary: BarChart3,
   ops_workforce_payouts: WalletCards, ops_workforce_advances: WalletCards, fleet_da_mapping: Truck,

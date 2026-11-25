@@ -88,18 +88,27 @@ test('Last Mile Report Bot appears under Operations for a granted user',()=>{
   assert.equal(hasLm(nav.opsNavItemsForMode('amazon_edsp',{allowCod:true,email:'tech@dropxlogistics.com'})),true);
 });
 
+test('Dark Store Report Bot appears under Operations like Last Mile',()=>{
+  const operations=nav.opsNavCatalogForMode('amazon_now').find(item=>item.label==='Operations');
+  assert.equal(operations?.children?.[0]?.code,'ops_report_bot');
+  assert.equal(operations?.children?.[0]?.href,'/report-bot?workspace=dark_store');
+  const hasDs=items=>items.some(item=>item.children?.some(child=>child.code==='ops_report_bot'));
+  assert.equal(hasDs(nav.opsNavItemsForMode('amazon_now',{allowCod:true})),true);
+});
 
 test('attendance and roster links share the existing grant while keeping separate menu row identities',()=>{
   const groups=grouping.permissionMenuGroups(pages,views[1].items,views);
   assert.equal(new Set(groups.map(g=>g.key)).size,groups.length);
-  const attendance=groups.find(g=>g.label==='Shift Attendance'),roster=groups.find(g=>g.label==='Rostering');
-  assert.equal(attendance.rows[0].page.id,roster.rows[0].page.id);
+  const attendance=groups.find(g=>g.label==='Shift Attendance'),teamOps=groups.find(g=>g.label==='Team Ops');
+  const roster=teamOps.rows.find(row=>row.label==='Rostering');
+  assert(roster);
+  assert.equal(attendance.rows[0].page.id,roster.page.id);
   assert(attendance.rows[0].sharedWith.includes('Rostering'));
   const h=mount({initialNavigationView:'amazon_now'});h.render();
   h.all().find(n=>n.props['aria-label']==='Expand Shift Attendance').props.onClick();h.render();
   h.all().find(n=>n.props['aria-label']==='Shift Attendance / Shift Attendance: View').props.onChange({target:{checked:true}});h.render();
-  h.all().find(n=>n.props['aria-label']==='Expand Rostering').props.onClick();h.render();
-  assert.equal(h.all().find(n=>n.props['aria-label']==='Rostering / Rostering: View').props.checked,true);
+  h.all().find(n=>n.props['aria-label']==='Expand Team Ops').props.onClick();h.render();
+  assert.equal(h.all().find(n=>n.props['aria-label']==='Team Ops / Rostering: View').props.checked,true);
   assert.deepEqual(h.payload().filter(p=>p.can_view),[{page_id:'ops_rostering',can_view:true,can_add:false,can_edit:false}]);
 });
 

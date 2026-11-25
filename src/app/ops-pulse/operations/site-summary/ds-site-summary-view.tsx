@@ -5,7 +5,7 @@ import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import type { DsLiveNetwork, DsLiveSiteOrder, DsLiveStoreDetail } from "@/lib/ops-pulse/ds-live-performance";
 import s from "./ds-ops.module.css";
 
-const POLL_MS = 60_000;
+const POLL_MS = 10_000;
 
 function count(n: number) {
   return n.toLocaleString("en-IN");
@@ -106,8 +106,13 @@ export function DsSiteSummaryView({
   useEffect(() => {
     if (!station) return;
     let cancelled = false;
+    let inFlight = false;
     const id = window.setInterval(() => {
-      if (!cancelled) void loadStation(station);
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      void loadStation(station).finally(() => {
+        inFlight = false;
+      });
     }, POLL_MS);
     return () => {
       cancelled = true;
@@ -144,7 +149,7 @@ export function DsSiteSummaryView({
             <span aria-hidden>·</span>
             Feed {ageLabel(detail?.siteFetchedAt)}
             <span aria-hidden>·</span>
-            Poll 60s
+            Poll 10s
           </p>
         </div>
         <div className={s.actions}>

@@ -110,6 +110,7 @@ const cps: NavItem = {
 };
 
 const lastMileReportBot = { code: "ops_lm_report_bot", label: "Last Mile Report Bot", href: "/report-bot?workspace=last_mile" };
+const darkStoreReportBot = { code: "ops_report_bot", label: "Report Bot", href: "/report-bot?workspace=dark_store" };
 
 const administration: NavItem[] = [
   {code:'ops_notification_settings',label:'Settings',icon:'*',children:[
@@ -204,8 +205,16 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
   if (mode === "amazon_now") return [
     {code:'ops_pulse',label:'Command Center',href:'/',icon:'#'},
     shiftAttendanceNavItem,
-    {code:'ops_rostering',label:'Rostering',href:'/rostering',icon:'S'},
     {code:'store_audits',label:'Store Audits',href:'/store-audits',icon:'A'},
+    {
+      code: "performance",
+      label: "Performance",
+      icon: "P",
+      children: [
+        { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
+        { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" }
+      ]
+    },
     {
       code: "si_handover",
       label: "Activities & Handover",
@@ -237,23 +246,25 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
       code: "ds_live_performance",
       label: "Operations",
       icon: "O",
-      permissionCodes: [...DS_OPERATIONS_PAGE_CODES],
+      permissionCodes: ["ops_report_bot", ...DS_OPERATIONS_PAGE_CODES],
       children: [
+        darkStoreReportBot,
         { code: "ds_live_performance", label: "Live performance", href: "/operations/live" },
         { code: "ds_ppi", label: "PPI", href: "/operations/ppi" },
         { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" }
       ]
     },
     {
-      code: "performance",
-      label: "Performance",
-      icon: "P",
+      code: "ops_attendance_reports",
+      label: "Team Ops",
+      icon: "T",
       children: [
-        { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
-        { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" }
+        { code: "ops_rostering", label: "Rostering", href: "/rostering" },
+        { code: "ops_my_team", label: "My Team & Org", href: "/attendance/my-team" },
+        { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
+        { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" }
       ]
     },
-    {code:'ops_report_bot',label:'Report Bot',href:'/report-bot',icon:'W'},
     businessDocuments,payments,
     {code:'cpu_overview',label:'CPU · Cost per unit',href:'/cpu',icon:'C'},reports,
     {...administration[0],children:[...(administration[0].children??[]),{code:'ops_report_bot',label:'Report Bot setup',href:'/report-bot/setup'}]},
@@ -280,12 +291,14 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
 export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
   const items = opsNavCatalogForMode(mode);
   const showLastMileReportBot = Boolean(authorization && hasPermission(authorization, "ops_lm_report_bot", "access"));
+  const showDarkStoreReportBot = Boolean(authorization && hasPermission(authorization, "ops_report_bot", "access"));
   const dsOpsCodes = new Set<string>(DS_OPERATIONS_PAGE_CODES);
   return items
     .map(item => {
       if (!item.children) return item;
       const children = item.children
         .filter(child => child.code !== "ops_lm_report_bot" || showLastMileReportBot)
+        .filter(child => child.code !== "ops_report_bot" || showDarkStoreReportBot)
         .filter(child => !child.code || !dsOpsCodes.has(child.code) || Boolean(authorization && canViewDsOperations(authorization, child.code as typeof DS_OPERATIONS_PAGE_CODES[number])))
         .filter(child => child.href !== "/cod/pending" || Boolean(authorization && canAccessDailyCodPending(authorization)))
         .map(child => {
