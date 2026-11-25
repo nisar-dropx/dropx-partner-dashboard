@@ -518,7 +518,7 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
     try {
       const result = await workerRequest<{ id: string }>(settings, "/send", {
         method: "POST",
-        timeoutMs: 30000,
+        timeoutMs: 45000,
         body: {
           client_ref: item.id,
           to: group.wa_group_id,
@@ -527,7 +527,8 @@ export async function flushOutbox(settings: ReportBotSettings, deadline: number)
           mentions: item.mentions ?? []
         }
       });
-      await release({ status: "sent", sent_at: nowIso(), sent_wa_message_id: result?.id ?? null, status_reason: null });
+      if (!result?.id) throw new Error("WhatsApp worker returned success without a message id.");
+      await release({ status: "sent", sent_at: nowIso(), sent_wa_message_id: result.id, status_reason: null });
       if (item.submission_id) {
         await db.from("report_bot_submissions").update({ status: "sent", sent_at: nowIso(), updated_at: nowIso() }).eq("id", item.submission_id);
         await db.from("report_bot_review_items").update({ review_status: "sent", sent_at: nowIso(), updated_at: nowIso() })
