@@ -198,6 +198,7 @@ define(
     "/operations/live",
     "/operations/ppi",
     "/operations/site-summary",
+    "/operations/cold-chain",
     "/performance/review-status",
     "/performance/cortex",
     "/?view=hourly",
