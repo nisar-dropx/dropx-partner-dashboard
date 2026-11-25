@@ -27,6 +27,10 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await db.exec(migration);await db.exec(migration);
     const roleFix=readFileSync(new URL('../../supabase/migrations/20261125061932_provider_nil_map_service_role_access.sql',import.meta.url),'utf8');
     await db.exec(roleFix);await db.exec(roleFix);
+    const primaryKeyFix=readFileSync(new URL('../../supabase/migrations/20261125062559_provider_nil_map_primary_key.sql',import.meta.url),'utf8');
+    await db.exec(primaryKeyFix);await db.exec(primaryKeyFix);
+    const primaryKey=(await db.query("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='provider_member_nil_maps'::regclass and contype='p'")).rows[0].definition;
+    assert.equal(primaryKey,'PRIMARY KEY (id)','no unintended stations/providers many-to-many relationship may be inferred');
     await db.exec('grant usage on schema auth to service_role;grant select on companies,providers,stations,workforce,cps_shipment_daily,field_executive_provider_mappings to service_role;');
     const save=async(value=true,scope=[station],member='member01',stationId=station,companyId=company)=>{
       await db.exec('set role service_role;');
