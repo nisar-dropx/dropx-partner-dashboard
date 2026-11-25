@@ -51,8 +51,7 @@ function isRedirectError(error: unknown) {
 async function scopedAmazonStations(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) throw new Error("Database connection unavailable.");
   const result = await supabaseAdmin
-    .from("stations")
-    .select("id,station_code,hide_from_location_list,parent_station_id,providers(name)")
+    .from("stations").select("id,station_code,hide_from_location_list,parent_station_id,providers!stations_provider_id_fkey (name)")
     .eq("company_id", companyId)
     .eq("is_active", true)
     .order("station_code")

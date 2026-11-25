@@ -450,8 +450,7 @@ export async function createFieldExecutive(formData: FormData) {
       throw new Error("You do not have access to the selected location.");
     }
     const { data: location, error: locationError } = await supabaseAdmin
-      .from("stations")
-      .select("id, station_code, is_active, hide_from_location_list, providers(name), location_models(code,name)")
+      .from("stations").select("id, station_code, is_active, hide_from_location_list, providers!stations_provider_id_fkey (name), location_models(code,name)")
       .eq("id", locationId)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -547,7 +546,7 @@ export async function createFieldExecutive(formData: FormData) {
         : ["not_applicable"],
       is_active: config.profileType === "field_executive" ? false : true
     }, companyId);
-    const executiveSelect = "id, stations (station_code, station_name, providers (name))";
+    const executiveSelect = "id, stations (station_code, station_name, providers!stations_provider_id_fkey (name))";
     let insertResult = await supabaseAdmin.from(table).insert({
       ...basePayload,
       onboarding_token_hash: registrationTokenHash,
@@ -750,8 +749,7 @@ export async function updateFieldExecutive(formData: FormData) {
       throw new Error("You do not have access to the selected location.");
     }
     const { data: location, error: locationError } = await supabaseAdmin
-      .from("stations")
-      .select("id, station_code, providers(name), location_models(code,name)")
+      .from("stations").select("id, station_code, providers!stations_provider_id_fkey (name), location_models(code,name)")
       .eq("id", payload.location_id)
       .eq("company_id", companyId)
       .maybeSingle();

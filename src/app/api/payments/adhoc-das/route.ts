@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   if (station.error) return Response.json({ error: "Station lookup failed." }, { status: 503 });
   const email = auth.email?.trim().toLowerCase();
   if (!station.data || (!auth.hasAllLocationAccess && !auth.locationScopeIds.includes(location) && !(email && [station.data.station_email, station.data.station_manager_email].some(value => value?.trim().toLowerCase() === email)))) return Response.json({ error: "Station outside your scope." }, { status: 403 });
-  const providerResult = await supabaseAdmin.from("stations").select("providers(code,name)").eq("company_id", company).eq("id", location).single();
+  const providerResult = await supabaseAdmin.from("stations").select("providers!stations_provider_id_fkey (code, name)").eq("company_id", company).eq("id", location).single();
   if (providerResult.error) return Response.json({ error: "Unable to identify the station provider." }, { status: 503 });
   const related: any = providerResult.data?.providers;
   const provider = Array.isArray(related) ? related[0] : related;

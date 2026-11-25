@@ -48,7 +48,7 @@ export default async function ProviderMappingSummaryPage() {
   </AppShell>;
 
   const [stationResult, sourceResult, mappingResult, workerResult, methodResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name,region,is_ho,is_active,hide_from_location_list,providers(name),location_models(code,name)").eq("company_id",companyId).order("station_code"),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,region,is_ho,is_active,hide_from_location_list,providers!stations_provider_id_fkey (name),location_models(code,name)").eq("company_id",companyId).order("station_code"),
     supabaseAdmin.rpc("ops_cps_mapping_members",{p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     readAllRows(supabaseAdmin.from("field_executive_provider_mappings").select("id,station_id,provider_member_id,workforce_id,payment_method_id,payment_values,production_threshold_config,effective_from,effective_to,status,updated_at").eq("company_id",companyId).order("effective_from",{ascending:false}).order("updated_at",{ascending:false})),
     readAllRows(supabaseAdmin.from("workforce").select("id,dropx_id,full_name,onboarding_status").eq("company_id",companyId).is("deleted_at",null)),

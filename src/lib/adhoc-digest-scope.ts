@@ -99,8 +99,7 @@ async function allRows<T>(query: (offset: number) => PromiseLike<{ data: unknown
 
 export async function loadAdHocMailScope(db: SupabaseClient, companyId: string, domain: string, additionalEmails: string[] = [], policy?: OperationsMailPolicy) {
   const [stations, memberships, roles, profiles, personLinks, people, engagements, assignments, departments] = await Promise.all([
-    allRows<AdHocMailStation>(offset => db.from("stations")
-      .select("id,station_code,station_name,station_email,city,state,region,is_ho,hide_from_location_list,providers(code,name),location_models(code,name)")
+    allRows<AdHocMailStation>(offset => db.from("stations").select("id,station_code,station_name,station_email,city,state,region,is_ho,hide_from_location_list,providers!stations_provider_id_fkey (code, name),location_models(code,name)")
       .eq("company_id", companyId).eq("is_active", true).order("id").range(offset, offset + 999)),
     allRows<AdHocMembership>(offset => db.from("company_product_memberships")
       .select("user_id,role_id,has_all_location_access,location_scope_ids")

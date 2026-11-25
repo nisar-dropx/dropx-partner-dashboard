@@ -260,8 +260,7 @@ function resolveFormType(station: CodLocationRow, clientHint: string): CodFormTy
 async function stationDetails(companyId: string, locationId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const { data, error } = await supabaseAdmin
-    .from("stations")
-    .select("id, station_code, station_name, state, providers (code, name), location_models (code, name)")
+    .from("stations").select("id, station_code, station_name, state, providers!stations_provider_id_fkey (code, name), location_models (code, name)")
     .eq("company_id", companyId)
     .eq("id", locationId)
     .maybeSingle();

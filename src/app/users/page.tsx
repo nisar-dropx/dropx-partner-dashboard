@@ -533,7 +533,7 @@ async function loadAccessData(
         station_manager_email,
         hide_from_location_list,
         is_active,
-        providers (name),
+        providers!stations_provider_id_fkey (name),
         location_models (code, name)
       `;
     const legacyLocationSelect = `
@@ -545,7 +545,7 @@ async function loadAccessData(
         station_email,
         station_manager_email,
         is_active,
-        providers (name),
+        providers!stations_provider_id_fkey (name),
         location_models (code, name)
       `;
     let result = await client

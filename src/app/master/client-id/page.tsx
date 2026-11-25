@@ -59,7 +59,7 @@ export default async function ClientIdMasterPage({ searchParams }: { searchParam
     : Promise.resolve({ data: null, error: new Error("OpsPulse deployment variables are not configured.") });
 
   const [stationResult, settingResult, areaResult, defaultResult, supervisorResult, syncResult, workerResult] = await Promise.all([
-    supabaseAdmin.from("stations").select("id,station_code,station_name,hide_from_location_list,parent_station_id,providers(name)").eq("company_id", companyId).eq("is_active", true).order("station_code").limit(500),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,hide_from_location_list,parent_station_id,providers!stations_provider_id_fkey (name)").eq("company_id", companyId).eq("is_active", true).order("station_code").limit(500),
     supabaseAdmin.from("workforce_amazon_station_settings").select("station_id,service_area_code,amazon_service_area_id,service_type,supervisor_alias,contract_type,associate_email_pattern,invitation_enabled,version,updated_at").eq("company_id", companyId),
     supabaseAdmin.from("workforce_amazon_service_areas").select("service_area_id,service_area_name,station_code,station_state").eq("company_id", companyId).order("station_code"),
     supabaseAdmin.from("workforce_amazon_supervisor_defaults").select("supervisor_alias").eq("company_id", companyId).maybeSingle(),

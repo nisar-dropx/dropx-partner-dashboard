@@ -22,7 +22,7 @@ export async function recordCodException(_prev:ExceptionState|null,form:FormData
   if(!['No Cash','Banker Not Reported'].includes(kind))throw new Error('Choose a valid update.');
   if(reason.length<3||reason.length>2000)throw new Error('Enter a reason between 3 and 2,000 characters.');
   if(!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(location))throw new Error('Station access denied.');
-  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,station_email,parent_station_id,providers(code,name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
+  const station=await supabaseAdmin.from('stations').select('id,station_code,station_name,station_email,parent_station_id,providers!stations_provider_id_fkey (code, name),location_models(code,name)').eq('company_id',company).eq('id',location).eq('is_active',true).maybeSingle();
   if(station.error||!station.data||!inferFormTypeFromLocation(station.data))throw new Error('Choose an active COD station.');
   const modelRelation=station.data.location_models as {code?:string|null}|{code?:string|null}[]|null;
   const modelCode=String((Array.isArray(modelRelation)?modelRelation[0]:modelRelation)?.code||'').trim().toUpperCase();

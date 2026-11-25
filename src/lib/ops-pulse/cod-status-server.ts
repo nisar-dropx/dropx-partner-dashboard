@@ -18,8 +18,7 @@ export async function loadCodStatusLocations(auth: AuthorizationContext) {
 export async function loadCodStatusLocation(auth: AuthorizationContext, locationId: string) {
   if (!locationId || (!auth.hasAllLocationAccess && !auth.locationScopeIds.includes(locationId))) return null;
   if (!supabaseAdmin) throw new Error('Unable to load authorized locations. Please retry.');
-  const result = await supabaseAdmin.from('stations')
-    .select('id, station_code, station_name, hide_from_location_list, is_ho, providers (code, name), location_models (code, name)')
+  const result = await supabaseAdmin.from('stations').select('id, station_code, station_name, hide_from_location_list, is_ho, providers!stations_provider_id_fkey (code, name), location_models (code, name)')
     .eq('company_id',requireCompanyId(auth)).eq('id',locationId).eq('is_active',true).maybeSingle();
   if (result.error) throw new Error('Unable to load authorized locations. Please retry.');
   const row = result.data as CodLocationRow | null;

@@ -42,8 +42,8 @@ async function loadRecipients(companyId: string) {
   const results = await Promise.all(workforceProfileTypes.map(async (profileType) => {
     const referenceColumn = profileType === "employee" ? "employee_code" : "dropx_id";
     const profileColumns = profileType === "employee"
-      ? `id, full_name, biometric_id, designation_id, mobile, mobile_country_code, email, profile_completion_status, ${referenceColumn}, stations (station_code, providers (name), location_models (code, name))`
-      : `id, full_name, biometric_id, designation, mobile, mobile_country_code, email, onboarding_status, ${referenceColumn}, stations (station_code, providers (name), location_models (code, name))`;
+      ? `id, full_name, biometric_id, designation_id, mobile, mobile_country_code, email, profile_completion_status, ${referenceColumn}, stations (station_code, providers!stations_provider_id_fkey (name), location_models (code, name))`
+      : `id, full_name, biometric_id, designation, mobile, mobile_country_code, email, onboarding_status, ${referenceColumn}, stations (station_code, providers!stations_provider_id_fkey (name), location_models (code, name))`;
     const result = await supabaseAdmin!
       .from(workforceTable(profileType))
       .select(profileColumns)

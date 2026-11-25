@@ -675,14 +675,12 @@ async function loadFieldExecutiveData(
   const companyId = requireCompanyId(authorization);
   const mappedDesignationIds = await loadMappedDesignationIds(companyId, targetRegister);
   let locationsResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
-    .from("stations")
-    .select("id, station_code, station_name, parent_station_id, is_active, location_model_id, hide_from_location_list, providers (name), location_models (code, name)")
+    .from("stations").select("id, station_code, station_name, parent_station_id, is_active, location_model_id, hide_from_location_list, providers!stations_provider_id_fkey (name), location_models (code, name)")
     .eq("company_id", companyId)
     .order("station_code");
   if (isMissingColumnError(locationsResult.error)) {
     locationsResult = await supabaseAdmin
-      .from("stations")
-      .select("id, station_code, station_name, parent_station_id, is_active, location_model_id, providers (name), location_models (code, name)")
+      .from("stations").select("id, station_code, station_name, parent_station_id, is_active, location_model_id, providers!stations_provider_id_fkey (name), location_models (code, name)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("station_code");
@@ -756,7 +754,7 @@ async function loadFieldExecutiveData(
         dl_front_path,
         dl_back_path,
         profile_photo_path,
-        stations (station_code, station_name, providers (name), location_models (code, name))
+        stations (station_code, station_name, providers!stations_provider_id_fkey (name), location_models (code, name))
       `;
   const legacyExecutiveSelect = executiveSelect
     .replace("mobile_country_code,", "")

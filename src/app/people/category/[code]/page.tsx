@@ -171,8 +171,7 @@ export async function DynamicWorkforceCategoryPageContent({
 
   const [locationsResult, designationsResult] = await Promise.all([
     supabaseAdmin
-      .from("stations")
-      .select("id, station_code, station_name, location_model_id, hide_from_location_list, providers (name), location_models (code, name)")
+      .from("stations").select("id, station_code, station_name, location_model_id, hide_from_location_list, providers!stations_provider_id_fkey (name), location_models (code, name)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("station_code"),
@@ -187,7 +186,7 @@ export async function DynamicWorkforceCategoryPageContent({
     ? { data: [] as ProfileRow[], error: provisionResult.error }
     : await supabaseAdmin
       .from(dynamicWorkforceTable(code))
-      .select("*, stations (station_code, station_name, providers (name), location_models (code, name))")
+      .select("*, stations (station_code, station_name, providers!stations_provider_id_fkey (name), location_models (code, name))")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
 

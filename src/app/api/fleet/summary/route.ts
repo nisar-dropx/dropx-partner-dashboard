@@ -143,12 +143,11 @@ async function loadVehicles(companyId: string, stationCodes: string[] | null) {
 async function loadLocations(companyId: string, stationCodes: string[] | null) {
   if (!supabaseAdmin) return [];
   let query = supabaseAdmin
-    .from("stations")
-    .select(`
+    .from("stations").select(`
       station_code,
       station_name,
       is_active,
-      providers (code, name),
+      providers!stations_provider_id_fkey (code, name),
       location_models (code, name)
     `)
     .eq("company_id", companyId)

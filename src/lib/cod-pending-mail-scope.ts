@@ -37,7 +37,7 @@ export async function loadCodMailRecipients(db:SupabaseClient,companyId:string,s
  pagedCodRows<Role>(o=>db.from('user_roles').select('id,code,location_access_mode').eq('company_id',companyId).eq('is_active',true).order('id').range(o,o+999)),
  pagedCodRows<Profile>(o=>db.from('profiles').select('id,email,full_name').eq('company_id',companyId).eq('is_active',true).order('id').range(o,o+999)),
  pagedCodRows<{id:string}>(o=>db.from('app_pages').select('id').eq('company_id',companyId).eq('is_active',true).in('code',['cod','cod_reports']).order('id').range(o,o+999)),
- pagedCodRows<PendingStation>(o=>db.from('stations').select('id,station_code,station_name,station_email,is_active,hide_from_location_list,providers(code,name),location_models(code,name)').eq('company_id',companyId).order('id').range(o,o+999))]);
+ pagedCodRows<PendingStation>(o=>db.from('stations').select('id,station_code,station_name,station_email,is_active,hide_from_location_list,providers!stations_provider_id_fkey (code, name),location_models(code,name)').eq('company_id',companyId).order('id').range(o,o+999))]);
  const grants=pages.length?await pagedCodRows<{role_id:string;can_view:boolean;can_edit:boolean}>(o=>db.from('role_page_permissions').select('role_id,can_view,can_edit').eq('company_id',companyId).in('page_id',pages.map(p=>p.id)).order('role_id').order('page_id').range(o,o+999)):[];
  return resolveCodRecipients(stationDirectory.filter(s=>stations.some(candidate=>candidate.id===s.id)),memberships,roles,profiles,new Set(grants.filter(g=>g.can_view||g.can_edit).map(g=>g.role_id)),domain,stationDirectory);
 }

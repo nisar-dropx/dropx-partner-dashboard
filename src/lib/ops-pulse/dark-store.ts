@@ -9,7 +9,7 @@ import {cpsPeriod,selectedCpsStations,type CpsParams} from './cps';
 import {contractDaily,effectiveOn,roundMoney,type CostContract,type NowVolume} from '@/lib/finance/now';
 export async function darkStoreScope(a:AuthorizationContext){
  const companyId=requireCompanyId(a);if(!supabaseAdmin)throw Error('Data is temporarily unavailable.');
- const r=await loadCodLocations(companyId,a.locationScopeIds,a.hasAllLocationAccess);if(r.error)throw Error('Location access could not be loaded.');
+ const r=await loadCodLocations(companyId,a.locationScopeIds,a.hasAllLocationAccess);if(r.error)throw Error(`Location access could not be loaded. ${r.error}`);
  return {companyId,db:supabaseAdmin,locations:r.locations.filter(l=>!l.is_ho&&!l.hide_from_location_list&&locationModelName(l).toUpperCase()==='NOW')};
 }
 export async function loadCpu(a:AuthorizationContext,params:CpsParams){

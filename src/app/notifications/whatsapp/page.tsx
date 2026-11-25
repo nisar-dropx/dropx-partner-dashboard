@@ -150,7 +150,7 @@ async function loadBulkWhatsAppData(companyId: string) {
   };
   if (!supabaseAdmin) return { ...defaults, error: "Supabase service role key is not configured." };
 
-  const workforceLocationSelect = "stations (station_code, providers (name), location_models (code, name))";
+  const workforceLocationSelect = "stations (station_code, providers!stations_provider_id_fkey (name), location_models (code, name))";
   const [settings, templates, profiles, userRoles, senderProfiles, campaignProfiles, employees, fieldExecutives, contractors, vendors, workers, locations, campaigns] = await Promise.all([
     supabaseAdmin.from("whatsapp_settings").select("is_enabled").eq("company_id", companyId).eq("id", true).maybeSingle(),
     supabaseAdmin.from("whatsapp_template_cache").select("template_id, whatsapp_profile_id, name, language, category, status, components").eq("company_id", companyId).order("name"),
@@ -163,7 +163,7 @@ async function loadBulkWhatsAppData(companyId: string) {
     supabaseAdmin.from("contractors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("vendors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("helpers").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
-    supabaseAdmin.from("stations").select("id, station_code, providers (name), location_models (code, name)").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false"),
+    supabaseAdmin.from("stations").select("id, station_code, providers!stations_provider_id_fkey (name), location_models (code, name)").eq("company_id", companyId).eq("is_active", true).or("hide_from_location_list.is.null,hide_from_location_list.eq.false"),
     supabaseAdmin
       .from("whatsapp_campaigns")
       .select("id, campaign_code, whatsapp_profile_id, whatsapp_profile_name, created_at, total_count, sent_count, failed_count, pending_count, status, whatsapp_campaign_recipients (id, row_no, recipient_name, recipient_mobile, country_code, status, provider_message_id, error_message, sent_at, updated_at)")

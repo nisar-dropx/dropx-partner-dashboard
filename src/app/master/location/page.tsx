@@ -135,7 +135,7 @@ async function loadMasterData(companyId: string) {
     inbound_requires_destination,
     is_ho,
     is_active,
-    providers (code, name),
+    providers!stations_provider_id_fkey (code, name),
     location_models (code, name)
   `;
   const legacyLocationSelect = `
@@ -155,7 +155,7 @@ async function loadMasterData(companyId: string) {
     geofence_radius_m,
     station_email,
     is_active,
-    providers (code, name),
+    providers!stations_provider_id_fkey (code, name),
     location_models (code, name)
   `;
 

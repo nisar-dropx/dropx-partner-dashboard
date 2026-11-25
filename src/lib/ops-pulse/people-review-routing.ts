@@ -30,7 +30,7 @@ export async function loadPeopleReviewGraph(companyId: string, db: SupabaseClien
     allRoutingRows(db.from('profiles').select('id').eq('company_id', companyId).eq('is_active', true).order('id')),
     allRoutingRows(db.from('company_product_memberships').select('id,user_id,has_all_location_access,location_scope_ids').eq('company_id', companyId).eq('product_code', 'operations').eq('is_active', true).order('id')),
     allRoutingRows(db.from('ops_performance_review_oversight_roles').select('id,match_text').eq('company_id', companyId).eq('is_active', true).eq('tier', 'full').order('id')),
-    allRoutingRows(db.from('stations').select('id,parent_station_id,station_code,station_name,providers(code,name),location_models(code,name)').eq('company_id', companyId).order('id')),
+    allRoutingRows(db.from('stations').select('id,parent_station_id,station_code,station_name,providers!stations_provider_id_fkey (code, name),location_models(code,name)').eq('company_id', companyId).order('id')),
     allRoutingRows(db.from('people_person_access_scopes').select('person_id,location_scope_ids').eq('company_id', companyId).order('person_id'))
   ]);
   const managedScopeByPerson = new Map(managedScopes.map(row => [row.person_id, row.location_scope_ids ?? []]));

@@ -80,7 +80,7 @@ export function buildIdMappingDigestMessages(snapshot:MappingDigestSnapshot,subj
 
 export async function loadIdMappingRecipientScope(db:SupabaseClient,companyId:string,domain:string,additionalEmails:string[]=defaultAdditionalEmails){
  const [stations,memberships,roles,profiles]=await Promise.all([
-  allRows<MappingDigestStation>(offset=>db.from("stations").select("id,station_code,station_name,hide_from_location_list,providers(code),location_models(code)").eq("company_id",companyId).eq("is_active",true).order("id").range(offset,offset+999)),
+  allRows<MappingDigestStation>(offset=>db.from("stations").select("id,station_code,station_name,hide_from_location_list,providers!stations_provider_id_fkey (code),location_models(code)").eq("company_id",companyId).eq("is_active",true).order("id").range(offset,offset+999)),
   allRows<Membership>(offset=>db.from("company_product_memberships").select("user_id,role_id,product_code,has_all_location_access,location_scope_ids").eq("company_id",companyId).in("product_code",["operations","finance"]).eq("is_active",true).order("id").range(offset,offset+999)),
   allRows<Role>(offset=>db.from("user_roles").select("id,code,location_access_mode").eq("company_id",companyId).eq("is_active",true).order("id").range(offset,offset+999)),
   allRows<Profile>(offset=>db.from("profiles").select("id,full_name,email").eq("company_id",companyId).eq("is_active",true).order("id").range(offset,offset+999))

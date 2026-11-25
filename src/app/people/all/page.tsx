@@ -217,7 +217,7 @@ async function loadPeople(
     const sourceSpecificFields = source.employeeDesignation ? ", pincode, ifsc" : ", postal_pin, ifsc_code";
     const result = await supabaseAdmin!
       .from(source.table)
-      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, ${source.codeField}, ${source.statusField}, stations (station_code, providers (name), location_models (code, name))${designationFields}${sourceSpecificFields}`)
+      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, ${source.codeField}, ${source.statusField}, stations (station_code, providers!stations_provider_id_fkey (name), location_models (code, name))${designationFields}${sourceSpecificFields}`)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (result.error) return { rows: [] as AllPeopleRow[], error: result.error.message };
@@ -268,7 +268,7 @@ async function loadPeople(
   const customResults = await Promise.all(customSources.map(async (source) => {
     const result = await supabaseAdmin!
       .from(source.table)
-      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, dropx_id, onboarding_status, postal_pin, ifsc_code, stations (station_code, providers (name), location_models (code, name)), designation`)
+      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, dropx_id, onboarding_status, postal_pin, ifsc_code, stations (station_code, providers!stations_provider_id_fkey (name), location_models (code, name)), designation`)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (result.error) return { rows: [] as AllPeopleRow[], error: result.error.message };
