@@ -87,6 +87,48 @@ function worksheet(
   };
 }
 
+test('Nill Map saves without a DropX ID and leaves Not linked only after success',async()=>{
+  let payload;
+  const ui=worksheet({},async data=>{
+    payload=data;
+    return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:true}]};
+  });
+  const checkbox=()=>ui.one(node=>node.type==='input' && node.props.type==='checkbox').props;
+  assert.equal(checkbox().disabled,false);
+  checkbox().onChange({target:{checked:true}});ui.render();
+  assert.equal(ui.cards().length,1,'draft stays visible until saved');
+  assert.equal(ui.select('provider_first_worker_0').disabled,true);
+  await ui.save();
+  assert.equal(payload.get('rows[0][id]'),'');
+  assert.equal(payload.get('rows[0][nil_map_action]'),'mark');
+  assert.equal(ui.cards().length,0,'saved nil row leaves unlinked');
+  ui.filter('ID link').setSelected(['nil_mapped']);ui.render();
+  assert.equal(ui.cards().length,1);
+  assert.equal(checkbox().checked,true);
+});
+
+test('unchecking Nill Map restores Not linked after saving, without creating a person',async()=>{
+  let action;
+  const ui=worksheet({mappings:[{...row,nilMapped:true}],initialMappingStatus:'nil_mapped'},async data=>{
+    action=data.get('rows[0][nil_map_action]');
+    return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:false}]};
+  });
+  ui.one(node=>node.type==='input' && node.props.type==='checkbox').props.onChange({target:{checked:false}});ui.render();
+  await ui.save();
+  assert.equal(action,'clear');
+  assert.equal(ui.cards().length,0);
+  ui.filter('ID link').setSelected(['unmapped']);ui.render();assert.equal(ui.cards().length,1);
+});
+
+test('Nill Map cannot replace an existing associate and failed saves remain staged',async()=>{
+  const linked=worksheet({mappings:[{...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName}],initialMappingStatus:'all'});
+  assert.equal(linked.one(node=>node.type==='input' && node.props.type==='checkbox').props.disabled,true);
+  const ui=worksheet();
+  ui.one(node=>node.type==='input' && node.props.type==='checkbox').props.onChange({target:{checked:true}});ui.render();
+  await ui.save();
+  assert.equal(ui.cards().length,1);assert.match(JSON.stringify(ui.cards()),/Unsaved/);
+});
+
 test('historical month rows show their end date and expose the clear icon', () => {
   const historical = {
     ...row,

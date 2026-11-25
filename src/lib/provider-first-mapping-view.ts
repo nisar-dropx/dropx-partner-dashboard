@@ -45,6 +45,7 @@ export type ProviderFirstWorkerView = {
 };
 
 export type ProviderFirstMappingRowView = {
+  nilMapped?: boolean;
   identityLinked?: boolean;
   outboundMonths?: string[];
   providerMemberId: string;
@@ -1241,6 +1242,7 @@ export function providerFirstRowIssue(
   method: ProviderFirstPaymentMethodView | undefined
 ) {
   if (isScientificProviderMemberId(row.providerMemberId)) return "The imported Provider Member ID is rounded. Reimport a report containing the full ID.";
+  if (row.nilMapped) return row.workforceId || row.mappingId ? "Clear the existing associate link before using Nill Map." : null;
   if (!row.workforceId) return row.mappingId ? null : "Select a DropX workforce ID.";
   if (!worker) return "The selected DropX workforce ID is unavailable.";
   const mappingReference = providerFirstMappingReferenceForRow(row, worker);
@@ -1292,6 +1294,7 @@ export function providerFirstValidationStatus(
   worker: ProviderFirstWorkerView | undefined,
   method: ProviderFirstPaymentMethodView | undefined
 ) {
+  if (row.nilMapped && !row.workforceId) return "nil_mapped";
   if (!row.workforceId) return "unmapped";
   return providerFirstRowIssue(row, worker, method) ? "needs_attention" : "ready";
 }
@@ -1316,7 +1319,7 @@ export function filterProviderFirstRowIndexes({
     const searchable = [row.providerMemberId, row.providerMemberName, row.dropxId, row.dropxName, row.stationLabel]
       .join(" ")
       .toLocaleLowerCase();
-    const mappingStatus = row.workforceId ? "mapped" : "unmapped";
+    const mappingStatus = row.nilMapped && !row.workforceId ? "nil_mapped" : row.workforceId ? "mapped" : "unmapped";
     const validationStatus = providerFirstValidationStatus(row, worker, method);
     const matches = (!query || searchable.includes(query))
       && (!filters.outboundMonths?.length || filters.outboundMonths.some((month) => row.outboundMonths?.includes(month)))

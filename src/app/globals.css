@@ -23034,6 +23034,22 @@ td strong,
   white-space: nowrap;
 }
 
+.provider-first-workforce-select label.provider-first-nil-map {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.provider-first-workforce-select .provider-first-nil-map input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin: 0;
+  accent-color: #ef431f;
+}
+
 .provider-first-row .mapping-period-row {
   display: contents;
 }

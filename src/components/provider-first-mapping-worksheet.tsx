@@ -50,7 +50,7 @@ export type ProviderFirstWorker = ProviderFirstWorkerView;
 export type ProviderFirstMappingRow = ProviderFirstMappingRowView;
 
 function signature(row: ProviderFirstMappingRow) {
-  return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
+  return [Boolean(row.nilMapped), row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), JSON.stringify(row.productionThresholdConfig), row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo].join("|");
 }
 
 function previousIsoDate(value: string) {
@@ -74,9 +74,11 @@ function appendRow(
   replacementMappingId = "",
   replacementAction: "move" | "keep" | "" = "",
   paidHistoryDecision?: PaidHistoryDecision,
-  clearWorkforceId = ""
+  clearWorkforceId = "",
+  previousNilMapped = false
 ) {
   const prefix = `rows[${position}]`;
+  formData.set(`${prefix}[nil_map_action]`, !row.workforceId && (row.nilMapped || previousNilMapped) ? (row.nilMapped ? "mark" : "clear") : "");
   formData.set(`${prefix}[client_key]`, providerMemberKey(row.stationId, row.providerMemberId));
   formData.set(`${prefix}[id]`, row.workforceId);
   formData.set(`${prefix}[source_type]`, "workforce");
@@ -242,7 +244,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   shipmentMonths: string[];
   lookupEntries?: ProviderMappingLookupEntry[];
   initialOutboundMonth: string;
-  initialMappingStatus?: "all" | "mapped" | "unmapped";
+  initialMappingStatus?: "all" | "mapped" | "unmapped" | "nil_mapped";
   initialQuery?: string;
   initialStationId?: string;
   canEdit: boolean;
@@ -325,7 +327,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     stations: {selected: stationFilters, values: r=>r.stationId},
     clusters: {selected: clusterFilters, values: r=>clusterKeysByStation[r.stationId] || []},
     methods: {selected: methodFilters, values: r=>r.paymentMethodId || "unassigned"},
-    mapping: {selected: mappingFilters, values: r=>r.workforceId ? "mapped" : "unmapped"},
+    mapping: {selected: mappingFilters, values: r=>r.nilMapped && !r.workforceId ? "nil_mapped" : r.workforceId ? "mapped" : "unmapped"},
     validation: {selected: validationFilters, values: r=>providerFirstValidationStatus(r,workerById.get(r.workforceId),paymentMethodById.get(r.paymentMethodId))}
   }, r=>[r.providerMemberId,r.providerMemberName,r.dropxId,r.dropxName,r.stationLabel].join(" ").toLowerCase().includes(deferredQuery.trim().toLowerCase())), [baselineRows, workerById, paymentMethodById, clusterKeysByStation, clusterFilters, deferredQuery, monthFilters, stationFilters, methodFilters, mappingFilters, validationFilters]);
   const visibleIndexes = useMemo(()=>mappingFacets.rows.map(r=>r.index),[mappingFacets]);
@@ -395,7 +397,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         const method = paymentMethodById.get(row.paymentMethodId);
         return [
           row.providerMemberId, row.providerMemberName, row.stationLabel, row.providerId, row.dropxId, row.dropxName,
-          row.identityLinked ? "ID linked · pay setup pending" : row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
+          row.nilMapped ? "Nill mapped" : row.identityLinked ? "ID linked · pay setup pending" : row.workforceId ? "Mapped" : "Unmapped", method?.name ?? "", method?.code ?? "",
           ...paymentKeys.map((key) => row.paymentValues?.[key] ?? ""),
           row.productionThresholdMinimumUnits, row.effectiveFrom, row.effectiveTo, (row.outboundMonths ?? []).join(", ")
         ].map((value) => String(value ?? ""));
@@ -597,6 +599,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
   }
 
   function chooseWorker(index: number, workerId: string) {
+    update(index, { nilMapped: false });
     const worker = workerById.get(workerId);
     if (worker && rows[index].workforceId === worker.id) return;
     setPaymentTemplateSources(current => { const next = { ...current }; delete next[index]; return next; });
@@ -675,6 +678,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
     });
     for (const index of selected) {
       if (nextErrors[index]) continue;
+      if (baselineRows[index].nilMapped && !rows[index].nilMapped && !rows[index].workforceId && !rows[index].mappingId) continue;
       const message = providerFirstRowIssue(rows[index], workerById.get(rows[index].workforceId), paymentMethodById.get(rows[index].paymentMethodId));
       if (message) nextErrors[index] = message;
     }
@@ -786,7 +790,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       snapshot.replacementMappingId,
       snapshot.replacementAction,
       snapshot.paidHistoryDecision,
-      snapshot.previousWorkforceId
+      snapshot.previousWorkforceId,
+      Boolean(baselineRows[snapshot.index].nilMapped)
     ));
     setSavingIndexes(new Set(selected));
     setSaveNotice(null);
@@ -809,6 +814,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
       for (const saved of result.savedRows) {
         const snapshot = snapshotByKey.get(saved.clientKey);
         if (!snapshot) continue;
+        if (typeof saved.nilMapped === "boolean") {
+          canonicalByIndex.set(snapshot.index, { ...snapshot.row, nilMapped: saved.nilMapped });
+          continue;
+        }
         if (saved.cleared) {
           const clearedHistory = relocatedHistory(snapshot.row.history, {
             previousMappingId: saved.cleared.previousMappingId,
@@ -1109,8 +1118,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
         <MappingMultiFilter allLabel="All locations" label="Location" options={mappingFacets.options("stations",stations.map(([value, label]) => ({ value, label, searchText: label })))} selected={stationFilters} setSelected={(values) => { setStationFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={mappingFacets.options("clusters",clusterOptions)} selected={clusterFilters} setSelected={(values) => { setClusterFilters(values); resetPage(); }} />
         <MappingMultiFilter allLabel="All methods" label="Payment method" options={mappingFacets.options("methods",[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))])} selected={methodFilters} setSelected={(values) => { setMethodFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All records" label="ID link" options={mappingFacets.options("mapping",[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }])} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
-        <MappingMultiFilter allLabel="All statuses" label="Validation" options={mappingFacets.options("validation",[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }])} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All records" label="ID link" options={mappingFacets.options("mapping",[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }, { value: "nil_mapped", label: "Nill mapped" }])} selected={mappingFilters} setSelected={(values) => { setMappingFilters(values); resetPage(); }} />
+        <MappingMultiFilter allLabel="All statuses" label="Validation" options={mappingFacets.options("validation",[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }, { value: "nil_mapped", label: "Nill mapped" }])} selected={validationFilters} setSelected={(values) => { setValidationFilters(values); resetPage(); }} />
         <label className="mapping-page-size">Rows<select onChange={(event) => { const value = event.target.value; setPageSize(value === "all" ? "all" : Number(value) as ProviderFirstPageSize); resetPage(); }} value={pageSize}><option value="50">50</option><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="all">All</option></select></label>
         <div className="provider-first-filter-summary"><strong>{visibleIndexes.length}</strong><span>of {rows.length}</span><button className="button secondary compact provider-mapping-download-trigger" disabled={!rows.length} onClick={openExport} type="button"><Download aria-hidden="true" size={15} /> Download</button>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
         {exportOpen ? <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target && !exporting) setExportOpen(false); }}>
@@ -1128,8 +1137,8 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
                 <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label, searchText: label }))} selected={exportFilters.stations} setSelected={(stations) => setExportFilters((current) => ({ ...current, stations }))} />
                 <MappingMultiFilter allLabel={clusterFilterUnavailable ? "Unavailable" : "All clusters / AOMs"} disabled={clusterFilterUnavailable} label="Cluster / AOM" options={clusterOptions} selected={exportFilters.clusters} setSelected={(clusters) => setExportFilters((current) => ({ ...current, clusters }))} />
                 <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method", searchText: "unassigned no payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: `${method.name}${method.isActive === false ? " (Inactive)" : ""}`, searchText: `${method.name} ${method.code}` }))]} selected={exportFilters.methods} setSelected={(methods) => setExportFilters((current) => ({ ...current, methods }))} />
-                <MappingMultiFilter allLabel="All records" label="ID link" options={[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
-                <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={exportFilters.validation} setSelected={(validation) => setExportFilters((current) => ({ ...current, validation }))} />
+                <MappingMultiFilter allLabel="All records" label="ID link" options={[{ value: "mapped", label: "Linked" }, { value: "unmapped", label: "Not linked" }, { value: "nil_mapped", label: "Nill mapped" }]} selected={exportFilters.mapping} setSelected={(mapping) => setExportFilters((current) => ({ ...current, mapping }))} />
+                <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }, { value: "nil_mapped", label: "Nill mapped" }]} selected={exportFilters.validation} setSelected={(validation) => setExportFilters((current) => ({ ...current, validation }))} />
               </div>
               <fieldset className="provider-mapping-download-formats">
                 <legend>Format</legend>
@@ -1195,9 +1204,9 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
           <summary onClick={event=>{event.preventDefault();setExpandedMappings(current=>{const next=new Set(current);next.has(rowKey)?next.delete(rowKey):next.add(rowKey);return next;});}}>
             <span className={workspace.chevron}><ChevronRight size={15} aria-hidden="true" /></span>
             <span><strong>{row.providerMemberName || "Provider ID"}</strong><small>{row.providerMemberId} · {row.stationLabel}</small></span>
-            <span><strong>{row.dropxName || "No associate linked"}</strong><small>{row.dropxId || "Select an associate to configure pay"}</small></span>
+            <span><strong>{row.nilMapped ? "Nill mapped" : row.dropxName || "No associate linked"}</strong><small>{row.nilMapped ? "No registration / no payout mapping" : row.dropxId || "Select an associate to configure pay"}</small></span>
             <span><strong>{selectedPaymentMethod?.name || "No payment method"}</strong><small>{row.effectiveFrom ? `${formatDashboardDate(row.effectiveFrom)} – ${row.effectiveTo ? formatDashboardDate(row.effectiveTo) : "Ongoing"}` : "Dates not set"}</small></span>
-            <span className={workspace.badge} data-tone={errors[index] || rowStatus!=="ready" ? "warning" : dirtyRows[index] ? "" : "success"}>{errors[index] ? "Save failed" : dirtyRows[index] ? "Unsaved" : rowStatus==="ready" ? "Ready" : rowStatus==="unmapped" ? "Not linked" : "Needs attention"}</span>
+            <span className={workspace.badge} data-tone={errors[index] || (rowStatus!=="ready" && rowStatus!=="nil_mapped") ? "warning" : dirtyRows[index] ? "" : "success"}>{errors[index] ? "Save failed" : dirtyRows[index] ? "Unsaved" : rowStatus==="nil_mapped" ? "Nill mapped" : rowStatus==="ready" ? "Ready" : rowStatus==="unmapped" ? "Not linked" : "Needs attention"}</span>
           </summary>
         <div className={`mapping-row-card provider-first-row ${dirtyRows[index] ? "unsaved-row" : ""}`}>
 
@@ -1210,7 +1219,7 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", initialStatio
             <span className="mapping-station-label">{row.stationLabel}</span>
           </div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear disabled={!canEditRow} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} />{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping period. Its history will be preserved.</span> : null}</div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select provider-first-selection-field"><span className="mapping-field-label">DropX ID / name</span><SearchableSelect allowClear disabled={!canEditRow || row.nilMapped} maxOptions={50} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={selectableWorkerOptionsByIndex.get(index) ?? []} placeholder="Select available DropX associate" value={row.workforceId} /><label className="provider-first-nil-map"><input type="checkbox" checked={Boolean(row.nilMapped)} disabled={!canEditRow || Boolean(row.workforceId || row.mappingId)} onChange={(event) => update(index, { nilMapped: event.target.checked })} /> Nill Map</label>{row.nilMapped ? <span className="provider-first-selected-detail">No registered associate. Save to remove from Not linked.</span> : null}{row.workforceId ? <span className="provider-first-selected-detail" title={`${row.dropxId} · ${row.dropxName}`}>{row.dropxId} · {row.dropxName}{historicalMappingEnd ? ` · Mapped period ${formatDashboardDate(baselineRows[index].effectiveFrom)}–${formatDashboardDate(historicalMappingEnd)} · history preserved` : ""}</span> : row.mappingId ? <span className="provider-first-selected-detail">Save to clear this mapping period. Its history will be preserved.</span> : null}</div>
             <div className="mapping-field mapping-payment-method-select provider-first-selection-field"><span className="mapping-field-label">Payment method</span><SearchableSelect allowClear={false} disabled={!canEditRow || !row.workforceId} maxOptions={Math.max(50, paymentOptions.length)} name={`provider_first_payment_method_${index}`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {}, productionThresholdConfig: paymentMethodById.get(value)?.productionThresholdConfig ?? null, productionThresholdMinimumUnits: "" })} options={rowPaymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} />{selectedPaymentMethod ? <span className="provider-first-selected-detail" title={`${selectedPaymentMethod.name} · ${selectedPaymentMethod.code}${selectedPaymentMethod.isActive === false ? " · Inactive" : ""}`}>{selectedPaymentMethod.name} · {selectedPaymentMethod.code}{selectedPaymentMethod.isActive === false ? " · Inactive" : ""}</span> : null}</div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEditRow || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             {productionThresholdConfig ? <label>

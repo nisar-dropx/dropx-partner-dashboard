@@ -1902,6 +1902,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
 }
 
 export type ProviderFirstInlineSavedRow = {
+  nilMapped?: boolean;
   clientKey: string;
   mappingId: string;
   workforceId: string;
@@ -2096,6 +2097,25 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
 
     for (let index = 0; index < rowCount; index += 1) {
       currentClientKey = rowValue(formData, index, "client_key") ?? String(index);
+      const nilAction = rowValue(formData, index, "nil_map_action");
+      if (nilAction) {
+        if (!['mark', 'clear'].includes(nilAction) || rowValue(formData, index, "id") || rowValue(formData, index, "mapping_id")) {
+          throw new Error(`Row ${index + 1}: Nill Map requires an unlinked provider member.`);
+        }
+        const stationId = rowRequired(formData, index, "station_id", "Location");
+        if (allowedLocationIds && !allowedLocationIds.has(stationId)) throw new Error(`Row ${index + 1}: This provider member is outside your allocated locations.`);
+        const { error } = await supabaseAdmin.rpc("provider_set_member_nil_map", {
+          p_company: companyId, p_actor: authorization.userId,
+          p_provider: rowRequired(formData, index, "provider_id", "Provider"), p_station: stationId,
+          p_member: rowRequired(formData, index, "provider_member_id", "Provider Member ID"),
+          p_nil: nilAction === 'mark', p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null
+        });
+        if (error) throw new Error(error.message);
+        savedRows.push({ clientKey: currentClientKey, nilMapped: nilAction === 'mark', mappingId: '', workforceId: '',
+          profileStationId: '', profileLocationLabel: '', paymentMethodId: '', paymentValues: {},
+          productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '', effectiveTo: '' });
+        continue;
+      }
       const clearRequested = rowValue(formData, index, "clear_mapping") === "yes";
       if (clearRequested) {
         const mappingId = rowRequired(formData, index, "mapping_id", "Mapping");
