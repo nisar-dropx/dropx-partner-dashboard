@@ -25,7 +25,14 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await db.query("insert into cps_shipment_daily values($1,'AAA',' Member01 '),($1,'BBB','MEMBER01')",[company]);
     const migration=readFileSync(new URL('../../supabase/migrations/20261125060532_provider_member_nil_maps.sql',import.meta.url),'utf8');
     await db.exec(migration);await db.exec(migration);
-    const save=(value=true,scope=[station],member='member01',stationId=station,companyId=company)=>db.query('select provider_set_member_nil_map($1,$2,$3,$4,$5,$6,$7::uuid[]) result',[companyId,actor,provider,stationId,member,value,scope]);
+    const roleFix=readFileSync(new URL('../../supabase/migrations/20261125061932_provider_nil_map_service_role_access.sql',import.meta.url),'utf8');
+    await db.exec(roleFix);await db.exec(roleFix);
+    await db.exec('grant usage on schema auth to service_role;grant select on companies,providers,stations,workforce,cps_shipment_daily,field_executive_provider_mappings to service_role;');
+    const save=async(value=true,scope=[station],member='member01',stationId=station,companyId=company)=>{
+      await db.exec('set role service_role;');
+      try {return await db.query('select provider_set_member_nil_map($1,$2,$3,$4,$5,$6,$7::uuid[]) result',[companyId,actor,provider,stationId,member,value,scope]);}
+      finally {await db.exec('reset role;');}
+    };
     assert.equal((await save()).rows[0].result.nil_mapped,true);
     await save();
     assert.deepEqual((await db.query('select provider_member_id,station_id from provider_member_nil_maps')).rows,[{provider_member_id:'MEMBER01',station_id:station}]);
@@ -50,5 +57,6 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
       has_table_privilege('authenticated','provider_member_nil_maps','insert') can_insert,
       (select relrowsecurity from pg_class where oid='provider_member_nil_maps'::regclass) rls`)).rows[0];
     assert.deepEqual(security,{can_call:false,can_insert:false,rls:true});
+    assert.equal((await db.query("select has_table_privilege('service_role','auth.users','select') allowed")).rows[0].allowed,false,'saving does not require private auth table access');
   } finally {await db.close();}
 });
