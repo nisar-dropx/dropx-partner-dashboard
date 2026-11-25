@@ -184,6 +184,9 @@ test("send rejects documents without a safe filename", () => {
 test("lru forgets the oldest entries", () => {
   const lru = new Lru(2).set("a", 1).set("b", 2).set("a", 3).set("c", 4);
   assert.deepEqual(lru.entries(), [["a", 3], ["c", 4]]);
+  assert.equal(lru.delete("a"), true);
+  assert.equal(lru.has("a"), false);
+  assert.equal(lru.delete("missing"), false);
 });
 
 test("timestamps accept numbers, strings and protobuf Longs", () => {

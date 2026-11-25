@@ -51,6 +51,9 @@ export class Lru {
     while (this.map.size > this.max) this.map.delete(this.map.keys().next().value);
     return this;
   }
+  delete(key) {
+    return this.map.delete(key);
+  }
   entries() {
     return [...this.map.entries()];
   }
