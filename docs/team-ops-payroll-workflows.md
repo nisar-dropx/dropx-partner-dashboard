@@ -3,25 +3,16 @@
 ## Provider-member Nill Map — 25 November 2026
 
 Unregistered provider members can be marked **Nill Map** below the DropX ID
-selector and saved using the existing Effective from and Effective to fields
-(both required for Nill Map), without selecting an associate or payment method.
-The same controls display the Nill period while checked and payment dates otherwise.
-This creates a company/provider/location/member disposition rather than a person
-or payable mapping. Persisted Nill mapped rows leave Not linked; ID link and
-Validation filters expose Nill mapped for review or unchecking and saving.
-Drafts and failed saves remain visible. Actual mapping history is unchanged.
-An optional Remark (up to 2000 characters) is saved with Nill Map, remains
-editable on saved records, reloads with the row and is included in downloads.
-Remark updates are audited. The original save API stays compatible with older
-open worksheets and preserves existing remarks.
-The service-only RPC verifies location access, company/provider ownership,
-source activity and absence of a registered/current link under the company
-payment mutex. Mark/clear operations are audited and retries are idempotent.
-Dated exclusions apply within their period and allow a non-overlapping later associate mapping.
-Overlapping mapping dates require shortening or clearing Nill Map first. Past dated
-exclusions remain stored; dates and remarks are audited. Legacy ongoing exclusions
-remain compatible and clear on a real mapping. Migration: `20261125081818_provider_nil_map_periods.sql`.
-Migration: `20261125060532_provider_member_nil_maps.sql`.
+selector without an associate, payment method or dates. The optional Remark remains
+editable. Nill Map stays active until explicitly cleared or replaced by a real
+associate mapping; it does not expire. Payment date controls are hidden while Nill
+Map is checked and remain unchanged for normal associate mappings. Persisted Nill
+rows leave Not linked and are available under Nill mapped. Draft/failed saves stay
+visible. Scoped service-only RPCs validate tenant, provider, location and source
+identity under the company payment mutex. Real mappings automatically clear the
+marker and retain its remark in audit. Older dated API callers are compatible, but
+their dates no longer limit Nill status or block remapping. Historical date columns
+and audit records are preserved. Migration: `20261125094016_provider_nil_map_until_remapped.sql`.
 
 ## Selected-period payout publication — 24 November 2026
 

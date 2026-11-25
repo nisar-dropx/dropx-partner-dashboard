@@ -94,19 +94,22 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await assert.rejects(dated('2026-11-01','2026-11-16'),/overlap an existing/);
     await dated(null,null,false);
     assert.equal((await db.query("select effective_to::text from provider_member_nil_map_events where action='cleared' order by created_at desc limit 1")).rows[0].effective_to,'2026-11-15');
+    const ongoing=readFileSync(new URL('../../supabase/migrations/20261125094016_provider_nil_map_until_remapped.sql',import.meta.url),'utf8');
+    await db.exec(ongoing);await db.exec(ongoing);
+    await db.query('delete from field_executive_provider_mappings');
+    await dated(null,null);
+    await remark('SPOT PAYMENT');
+    assert.equal((await db.query('select remark from provider_member_nil_maps where station_id=$1',[station])).rows[0].remark,'SPOT PAYMENT');
+    // Old date-bearing clients no longer impose an expiry or reject a missing To.
+    await dated('2026-11-01',null);
+    await db.query("update provider_member_nil_maps set effective_to='2026-11-15',effective_from='2026-11-01' where station_id=$1",[station]);
+    await link('2026-11-01');
+    assert.equal((await db.query('select count(*)::int n from provider_member_nil_maps where station_id=$1',[station])).rows[0].n,0,'remapping clears even a previously dated Nill record without overlap blocks');
+    assert.equal((await db.query("select count(*)::int n from provider_member_nil_map_events where action='mapping_linked' and remark='Temporary'")).rows[0].n,1,'the replaced Nill remark remains in history');
     const security=(await db.query(`select has_function_privilege('authenticated','provider_set_member_nil_map(uuid,uuid,uuid,uuid,text,boolean,uuid[])','execute') can_call,
       has_table_privilege('authenticated','provider_member_nil_maps','insert') can_insert,
       (select relrowsecurity from pg_class where oid='provider_member_nil_maps'::regclass) rls`)).rows[0];
     assert.deepEqual(security,{can_call:false,can_insert:false,rls:true});
     assert.equal((await db.query("select has_table_privilege('service_role','auth.users','select') allowed")).rows[0].allowed,false,'saving does not require private auth table access');
   } finally {await db.close();}
-});
-
-test('Nill date applicability restores unlinked after the period and preserves historical month views',async()=>{
- const {providerNilMapApplies:applies}=await import('./provider-first-mapping-view.ts');
- assert.equal(applies('2026-11-01','2026-11-15','2026-11','2026-11-15'),true);
- assert.equal(applies('2026-11-01','2026-11-15','2026-11','2026-11-16'),false);
- assert.equal(applies('2026-11-20','2026-11-25','2026-11','2026-11-16'),false);
- assert.equal(applies('2026-10-01','2026-10-15','2026-10','2026-11-16'),true);
- assert.equal(applies('2026-10-01','2026-10-15','2026-11','2026-11-16'),false);
 });

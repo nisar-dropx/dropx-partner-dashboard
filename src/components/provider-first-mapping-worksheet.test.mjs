@@ -96,15 +96,11 @@ test('Nill Map saves without a DropX ID and leaves Not linked only after success
   const checkbox=()=>ui.one(node=>node.type==='input' && node.props.type==='checkbox').props;
   assert.equal(checkbox().disabled,false);
   checkbox().onChange({target:{checked:true}});ui.render();
-  ui.one(node=>node.type==='input' && node.props['aria-label']==='Effective from').props.onChange({target:{value:'2026-10-01'}});ui.render();
-  ui.one(node=>node.type==='input' && node.props['aria-label']==='Effective to').props.onChange({target:{value:'2026-10-15'}});ui.render();
   assert.equal(ui.cards().length,1,'draft stays visible until saved');
   assert.equal(ui.select('provider_first_worker_0').disabled,true);
   await ui.save();
   assert.equal(payload.get('rows[0][id]'),'');
   assert.equal(payload.get('rows[0][nil_map_action]'),'mark');
-  assert.equal(payload.get('rows[0][nil_map_from]'),'2026-10-01');
-  assert.equal(payload.get('rows[0][nil_map_to]'),'2026-10-15');
   assert.equal(ui.cards().length,0,'saved nil row leaves unlinked');
   ui.filter('ID link').setSelected(['nil_mapped']);ui.render();
   assert.equal(ui.cards().length,1);
@@ -993,18 +989,15 @@ test('mapping filter choices follow other filters and retain selected zero-match
  assert.deepEqual(ui.filter('Location').options.map(o=>o.value),['station-1']);
 });
 
-test('Nill Map reuses the existing effective date fields and preserves payment dates',async()=>{
+test('Nill Map saves without dates and keeps payment date controls out of the form',async()=>{
  let payload;
- const ui=worksheet({mappings:[{...row,nilMapped:true,nilFrom:'2026-10-01',nilTo:'2026-10-15',effectiveFrom:'',effectiveTo:''}],initialMappingStatus:'nil_mapped'},async data=>{
-  payload=data;return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:true,nilFrom:'2026-10-02',nilTo:'2026-10-16'}]};
+ const ui=worksheet({mappings:[{...row,nilMapped:true,nilRemark:'Old remark',nilFrom:'2026-10-01',nilTo:'2026-10-15'}],initialMappingStatus:'nil_mapped'},async data=>{
+  payload=data;return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:true,nilRemark:'SPOT PAYMENT'}]};
  });
- const from=()=>ui.one(n=>n.type==='input' && n.props['aria-label']==='Effective from').props;
- const to=()=>ui.one(n=>n.type==='input' && n.props['aria-label']==='Effective to').props;
- assert.equal(from().disabled,false);assert.equal(to().disabled,false);assert.equal(to().required,true);
- assert.equal(from().value,'2026-10-01');assert.equal(to().value,'2026-10-15');
- assert.equal(JSON.stringify(ui.cards()).includes('Nill Map from'),false);
- from().onChange({target:{value:'2026-10-02'}});ui.render();to().onChange({target:{value:'2026-10-16'}});ui.render();
- await ui.save();assert.equal(payload.get('rows[0][nil_map_from]'),'2026-10-02');assert.equal(payload.get('rows[0][nil_map_to]'),'2026-10-16');
- assert.equal(payload.get('rows[0][effective_from]'),'');assert.equal(payload.get('rows[0][effective_to]'),'');
- assert.equal(from().value,'2026-10-02');assert.equal(to().value,'2026-10-16');
+ assert.equal(JSON.stringify(ui.cards()).includes('Effective from'),false);
+ assert.equal(JSON.stringify(ui.cards()).includes('Effective to'),false);
+ ui.one(n=>n.type==='textarea').props.onChange({target:{value:'SPOT PAYMENT'}});ui.render();
+ await ui.save();assert.equal(payload.get('rows[0][nil_map_action]'),'mark');
+ assert.equal(payload.get('rows[0][nil_map_from]'),null);assert.equal(payload.get('rows[0][nil_map_to]'),null);
+ assert.equal(ui.one(n=>n.type==='input' && n.props.type==='checkbox').props.checked,true,'old saved dates cannot expire status after a save');
 });

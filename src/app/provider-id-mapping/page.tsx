@@ -10,7 +10,7 @@ import { ProviderFirstMappingWorksheet, type ProviderFirstMappingRow, type Provi
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { providerNilMapApplies, verifiedProviderIdentityWorker, canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
+import { verifiedProviderIdentityWorker, canonicalizeProviderFirstMembers, mergeProviderFirstLocationMembers, providerFirstLocationMappingEntries, providerFirstMappingForOutboundMonth, providerFirstMappingIsCurrentOrScheduled, providerMemberIdentityKey, providerMemberKey, providerSourceMemberKey, providerMappingStationFamily } from "@/lib/provider-first-mapping-view";
 import { paymentAllocationHistoryRates, sortPaymentAllocationHistory, uniquePaymentAllocationHistory, type PaymentAllocationHistoryEntry } from "@/lib/payment-allocation-history";
 import { parseProductionThresholdConfig } from "@/lib/production-threshold-config";
 import { parseProductionThresholdSnapshot } from "@/lib/production-threshold-snapshot";
@@ -263,7 +263,7 @@ export default async function ProviderIdMappingPage({searchParams}: {searchParam
     historyByMember
   ).map(({ member, mapping: link, history: exactMemberHistory }) => {
     const nil = nilMaps.get(`${member.providerId}|${providerMemberKey(member.stationId, member.id)}`);
-    const nilActive = Boolean(nil && providerNilMapApplies(nil.effective_from, nil.effective_to ?? "", entryFilters.month, today));
+    const nilActive = Boolean(nil);
     const worker = !link && nilActive ? undefined : link?.workforce_id ? workforceById.get(link.workforce_id) : verifiedProviderIdentityWorker(
       identityWorkersByKey.get(providerMemberKey(member.stationId,member.id)) ?? [], member.stationId, member.id,
       identityOwnersByKey.get(providerMemberIdentityKey(member.providerId,member.id)) ?? []
