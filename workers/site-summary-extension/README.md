@@ -37,6 +37,6 @@ Click the toolbar icon to open the popup:
 
 ## Go live
 
-Edit `config.js`:
-1. Set `TESTING_GROUP: ""` (empty)
-2. The `STATION_GROUPS` map already has all 7 war room JIDs — alerts go there automatically
+Edit `config.local.js` (not committed):
+1. Set `CONFIG.TESTING_GROUP = ""` — **required**. Dark Store Testing is muted in the portal; sending there returns 422 and nothing posts.
+2. Keep `STATION_GROUPS` / war-room JIDs in `config.js` — alerts go to each station's live group (TFB7 stays off until re-enabled in Report Bot).

@@ -806,7 +806,15 @@ if (debugAuth) {
 }
 
 console.log(`DropX Site Summary Monitor - stations: ${STATIONS.join(", ")} - threshold: ${THRESHOLD_S}s - interval: ${POLL_MS / 1000}s${dryRun ? " [DRY RUN]" : ""}`);
-if (TESTING_GROUP) console.log(`  Testing mode: all alerts → ${TESTING_GROUP}`);
+if (TESTING_GROUP) {
+  console.log(`  Testing mode: all alerts → ${TESTING_GROUP}`);
+  if (/120363429732355530@g\.us/i.test(TESTING_GROUP)) {
+    console.warn("  WARNING: Dark Store Testing is muted in Report Bot (is_enabled=false). Sends will 422 until that group is re-enabled or TESTING_GROUP_JID is cleared.");
+  }
+} else {
+  const mapped = Object.keys(stationGroupMap);
+  console.log(`  Live war rooms: ${mapped.length ? mapped.join(", ") : "(none — set AMAZON_STATION_GROUP_JIDS)"}`);
+}
 
 if (runOnce) {
   await pollOnce();

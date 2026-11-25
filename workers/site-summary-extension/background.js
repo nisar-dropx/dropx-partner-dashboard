@@ -273,7 +273,9 @@ async function sendWhatsApp(stationCode, breachingRows, { overrideGroup, tabId }
 
 // ── Send Test ──────────────────────────────────────────────────────────────────
 async function sendTest() {
-  const testingGroup = CONFIG.TESTING_GROUP || "120363429732355530@g.us";
+  // Prefer an explicit testing override; otherwise send to the station war room.
+  // Never hardcode Dark Store Testing — that group is muted in the portal.
+  const overrideGroup = CONFIG.TESTING_GROUP || "";
   const fakeRows = [{
     oid: "TEST", items: "3", associate: "testuser",
     elapsedText: "00:26", elapsedS: 26, slaText: "00:15", slaS: 15, red: true,
@@ -289,14 +291,14 @@ async function sendTest() {
       const stationCode = CONFIG.STORE_MAP[storeId] || "TEST";
       const realRows    = (data?.rows || []).filter(r => r.elapsedS != null && r.elapsedS > 0);
       const rows        = realRows.length ? realRows : fakeRows;
-      await sendWhatsApp(stationCode, rows, { overrideGroup: testingGroup, tabId: tab.id });
+      await sendWhatsApp(stationCode, rows, { overrideGroup: overrideGroup || undefined, tabId: tab.id });
       addLog(`🔔 Test sent for ${stationCode}`);
       return { ok: true };
     }
   } catch (e) {
     addLog(`⚠ Test: falling back to fake data (${e.message})`);
   }
-  await sendWhatsApp(CONFIG.STATIONS[0] || "TEST", fakeRows, { overrideGroup: testingGroup });
+  await sendWhatsApp(CONFIG.STATIONS[0] || "TEST", fakeRows, { overrideGroup: overrideGroup || undefined });
   addLog("🔔 Test sent (fake data — no Site Summary tab open)");
   return { ok: true };
 }
