@@ -457,7 +457,7 @@ define(
   "View parsed report",
 );
 define(
-  ["/report-bot"],
+  ["/report-bot", "/report-bot?workspace=dark_store"],
   "report-bot",
   "Try a scripted reporting conversation and inspect the structured store update.",
   ["Message", "Source", "Parsed result", "Time"],
