@@ -116,6 +116,8 @@ const recentMessageStatus = new Lru(500);
 /** Recent confirmed group deliveries so a fast echo/receipt is not missed. */
 const recentGroupDeliveries = new Lru(500);
 const SEND_ACK_TIMEOUT_MS = Math.max(5_000, Number(process.env.SEND_ACK_TIMEOUT_MS || 25_000));
+/** Groups need longer: media upload + receipt fan-out is slower than DM SERVER_ACK. */
+const GROUP_DELIVERY_TIMEOUT_MS = Math.max(SEND_ACK_TIMEOUT_MS, Number(process.env.GROUP_DELIVERY_TIMEOUT_MS || 45_000));
 const SERVER_ACK = proto.WebMessageInfo.Status.SERVER_ACK;
 const ERROR_STATUS = proto.WebMessageInfo.Status.ERROR;
 let config = normalizeConfig(null);
@@ -131,10 +133,14 @@ function noteMessageStatus(messageId, status) {
       waiter.resolve(status);
     }
   }
-  if (status === ERROR_STATUS) {
-    const groupWaiter = pendingGroupDeliveries.get(messageId);
-    if (groupWaiter) {
+  const groupWaiter = pendingGroupDeliveries.get(messageId);
+  if (groupWaiter) {
+    if (status === ERROR_STATUS) {
       groupWaiter.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+    } else if (status >= SERVER_ACK) {
+      // Rare for groups, but if WhatsApp does emit status, treat it as delivery proof.
+      recentGroupDeliveries.set(messageId, groupWaiter.groupJid);
+      groupWaiter.resolve(true);
     }
   }
 }
@@ -182,9 +188,9 @@ function waitForServerAck(messageId, seedStatus = null) {
 }
 
 /**
- * Group sends: Baileys never emits messages.update SERVER_ACK for groups.
- * Require a fromMe upsert echo for this group, or a participant receipt — never
- * "no ERROR for N seconds", which caused phantom portal "sent" rows.
+ * Group sends: Baileys usually does not emit messages.update SERVER_ACK for groups.
+ * Require a real receipt / server status — never a local fromMe upsert echo.
+ * Upsert-only "success" made Site Summary / PPI log ✅ while war rooms stayed empty.
  */
 function waitForGroupDelivery(messageId, groupJid) {
   if (recentGroupDeliveries.get(messageId) === groupJid) return Promise.resolve(true);
@@ -192,11 +198,12 @@ function waitForGroupDelivery(messageId, groupJid) {
   if (known === ERROR_STATUS) {
     return Promise.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
   }
+  if (known != null && known >= SERVER_ACK) return Promise.resolve(true);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingGroupDeliveries.delete(messageId);
       reject(Object.assign(new Error("WhatsApp did not confirm the message in the group. It may not have been delivered — check the bot is still a member and allowed to post."), { status: 504 }));
-    }, SEND_ACK_TIMEOUT_MS);
+    }, GROUP_DELIVERY_TIMEOUT_MS);
     pendingGroupDeliveries.set(messageId, {
       groupJid,
       resolve(value) {
@@ -212,6 +219,13 @@ function waitForGroupDelivery(messageId, groupJid) {
     });
     if (recentGroupDeliveries.get(messageId) === groupJid) {
       pendingGroupDeliveries.get(messageId)?.resolve(true);
+    } else {
+      const again = recentMessageStatus.get(messageId);
+      if (again === ERROR_STATUS) {
+        pendingGroupDeliveries.get(messageId)?.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+      } else if (again != null && again >= SERVER_ACK) {
+        pendingGroupDeliveries.get(messageId)?.resolve(true);
+      }
     }
   });
 }
@@ -497,7 +511,8 @@ async function startSocket({ method, phone = null }) {
     for (const msg of messages ?? []) {
       const groupId = msg?.key?.remoteJid;
       if (groupId && GROUP_JID.test(groupId)) {
-        if (msg?.key?.fromMe && msg?.key?.id) noteGroupDelivery(msg.key.id, groupId);
+        // Do NOT treat fromMe upsert as delivery — it is only a local echo and
+        // caused Site Summary/PPI to report war-room sends that never appeared.
         if (config.groups.includes(groupId)) {
           const entry = chatEntry(msg, { normalize: normalizeMessageContent, isBot: (id) => botMessageIds.has(id) });
           if (entry) {
@@ -548,17 +563,32 @@ async function startSocket({ method, phone = null }) {
     }
   });
 
-  // Group fan-out: only participant-backed receipts count as delivery (not bare fromMe).
+  // Group fan-out: receipts (with or without participant / LID userJid) count as delivery.
+  // Local fromMe upsert alone does not.
   sock.ev.on("message-receipt.update", (updates) => {
     for (const update of updates ?? []) {
       const id = update?.key?.id;
-      const remoteJid = update?.key?.remoteJid;
-      if (!id || update.key.fromMe === false || !remoteJid) continue;
-      const participant = update.key.participant || update.receipt?.userJid;
-      if (GROUP_JID.test(remoteJid) && participant) {
+      const remoteJid = update?.key?.remoteJid || update?.key?.remoteJidAlt;
+      if (!id || update.key?.fromMe === false || !remoteJid) continue;
+      const participant =
+        update.key?.participant
+        || update.key?.participantAlt
+        || update.receipt?.userJid
+        || update.receipt?.participant
+        || null;
+      if (GROUP_JID.test(remoteJid)) {
+        logger.info({
+          id,
+          remoteJid,
+          participant,
+          receiptKeys: update.receipt ? Object.keys(update.receipt) : [],
+          hasReceiptTimestamp: Boolean(update.receipt?.receiptTimestamp)
+        }, "group message-receipt.update");
+        // Any receipt update for our outbound group message means WhatsApp accepted
+        // fan-out bookkeeping — participant may be omitted on server/device acks.
         noteGroupDelivery(id, remoteJid);
         noteMessageStatus(id, SERVER_ACK);
-      } else if (!GROUP_JID.test(remoteJid)) {
+      } else {
         noteMessageStatus(id, SERVER_ACK);
       }
     }
