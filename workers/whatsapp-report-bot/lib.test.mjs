@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, classifyOperationalContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, normalizeOperationalEvent, pruneBefore, pruneOlderThan, startOfLocalDayMs, validateSend } from "./lib.mjs";
+import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, classifyOperationalContent, cleanMentions, EventQueue, Lru, messageSeconds, myIds, normalizeConfig, normalizeOperationalEvent, participantIsMe, pruneBefore, pruneOlderThan, startOfLocalDayMs, validateSend } from "./lib.mjs";
+
+test("LID-era group roster matches the linked account via Contact.jid, not phoneNumber", () => {
+  const mine = myIds({ user: { id: "917902403828:3@s.whatsapp.net", lid: "152170791960762@lid" } });
+  assert.equal(participantIsMe({ id: "152170791960762@lid", jid: "917902403828@s.whatsapp.net" }, mine), true);
+  assert.equal(participantIsMe({ id: "152170791960762@lid" }, mine), true, "lid-only roster row");
+  assert.equal(participantIsMe({ id: "999@lid", jid: "919999999999@s.whatsapp.net" }, mine), false);
+  // Legacy code looked at phoneNumber; Baileys Contact uses jid — still accept both.
+  assert.equal(participantIsMe({ id: "1@lid", phoneNumber: "917902403828@s.whatsapp.net" }, mine), true);
+});
 
 test("chat view: text, captions, replies and mentions are read; reactions and protocol noise are skipped", () => {
   assert.deepEqual(chatContent({ conversation: "Hi team" }), { type: "text", text: "Hi team", context: null });

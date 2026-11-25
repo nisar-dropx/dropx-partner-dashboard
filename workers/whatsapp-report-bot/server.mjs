@@ -26,6 +26,7 @@ import {
   EventQueue,
   GROUP_JID,
   DIRECT_JID,
+  identityKeys,
   parseDirectAllowlist,
   ChatLog,
   chatEntry,
@@ -33,9 +34,11 @@ import {
   Lru,
   MEDIA_REF,
   messageSeconds,
+  myIds,
   newRef,
   normalizeConfig,
   normalizeOperationalEvent,
+  participantIsMe,
   pruneBefore,
   startOfLocalDayMs,
   readJson,
@@ -291,16 +294,6 @@ async function authCall(body) {
   const response = await portalFetch("/api/report-bot/worker/auth", { method: "POST", body: JSON.stringify(body) });
   if (!response.ok) throw new Error(`Portal session store returned HTTP ${response.status}`);
   return response.json();
-}
-
-/** "9198...:12@s.whatsapp.net" and "1234@lid" both reduce to their user part. */
-function bareId(value) {
-  return String(value ?? "").split("@")[0].split(":")[0];
-}
-
-/** Groups may list this account by phone number or by its LID, so match either. */
-function myIds(sock) {
-  return new Set([sock?.user?.id, sock?.user?.lid].filter(Boolean).map(bareId));
 }
 
 function statusEvent() {
@@ -610,7 +603,10 @@ async function startSocket({ method, phone = null }) {
 
   sock.ev.on("group-participants.update", ({ id, participants, action }) => {
     const mine = myIds(sock);
-    const removedMe = action === "remove" && (participants ?? []).some((participant) => mine.has(bareId(participant?.id ?? participant)));
+    const removedMe = action === "remove" && (participants ?? []).some((participant) => {
+      if (participant && typeof participant === "object") return participantIsMe(participant, mine);
+      return [...identityKeys(participant)].some((key) => mine.has(key));
+    });
     if (removedMe) {
       session.groups.delete(id);
       queue.push({ type: "group_left", group_id: id }).catch(() => {});
@@ -639,12 +635,23 @@ async function sendToGroup(body) {
         // and WhatsApp would drop the post while our chat log still showed "sent".
         const metadata = await session.sock.groupMetadata(body.to);
         const mine = myIds(session.sock);
-        const member = metadata.participants?.some((participant) =>
-          [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value)))
-        );
+        const member = metadata.participants?.some((participant) => participantIsMe(participant, mine));
+        // groupFetchAllParticipating already proved membership. After WhatsApp's LID
+        // migration, metadata rows often only expose @lid / Contact.jid while sock.user
+        // still looks like a PN — a false "not a member" here blocked every war-room send.
         if (!member) {
-          session.groups.delete(body.to);
-          throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
+          logger.warn({
+            group: body.to,
+            mine: [...mine],
+            participantSample: (metadata.participants ?? []).slice(0, 5).map((participant) => ({
+              id: participant?.id ?? null,
+              lid: participant?.lid ?? null,
+              jid: participant?.jid ?? null,
+              phoneNumber: participant?.phoneNumber ?? null,
+              admin: participant?.admin ?? null
+            })),
+            addressingMode: metadata.addressingMode ?? null
+          }, "group metadata identity mismatch; trusting participating-groups membership");
         }
         group = {
           subject: metadata.subject ?? group.subject ?? "",
@@ -653,8 +660,12 @@ async function sendToGroup(body) {
         };
         session.groups.set(body.to, group);
         if (group.announce) {
-          const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
-          if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+          const admin = metadata.participants?.some((participant) => participant.admin && participantIsMe(participant, mine));
+          // Only enforce announce when we can positively identify this account in the roster.
+          // If identity matching failed above, WhatsApp itself will reject a non-admin send.
+          if (member && !admin) {
+            throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+          }
         }
       }
       const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;

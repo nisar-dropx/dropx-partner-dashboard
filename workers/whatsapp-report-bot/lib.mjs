@@ -21,6 +21,42 @@ export function parseDirectAllowlist(value) {
     .filter(Boolean);
 }
 
+/** "9198...:12@s.whatsapp.net" and "1234@lid" both reduce to their user part. */
+export function bareId(value) {
+  return String(value ?? "").split("@")[0].split(":")[0];
+}
+
+/** Expand one WhatsApp id into the keys we may need to match against another addressing mode. */
+export function identityKeys(value) {
+  const bare = bareId(value);
+  if (!bare) return [];
+  const digits = bare.replace(/\D/g, "");
+  return digits && digits !== bare ? [bare, digits] : [bare];
+}
+
+/**
+ * Groups may list this account by phone JID, LID, or Contact.jid after the LID migration.
+ * Baileys Contact uses `jid` (PN) — not `phoneNumber`.
+ */
+export function myIds(sock) {
+  const keys = new Set();
+  for (const value of [sock?.user?.id, sock?.user?.lid, sock?.user?.jid]) {
+    for (const key of identityKeys(value)) keys.add(key);
+  }
+  return keys;
+}
+
+/** True when a group participant row refers to the linked account under any addressing mode. */
+export function participantIsMe(participant, mine) {
+  if (!participant || !mine?.size) return false;
+  for (const value of [participant.id, participant.lid, participant.jid, participant.phoneNumber]) {
+    for (const key of identityKeys(value)) {
+      if (mine.has(key)) return true;
+    }
+  }
+  return false;
+}
+
 /** Constant-time bearer check. An unset secret never authorises anything. */
 export function bearerMatches(header, secret) {
   if (!secret || typeof header !== "string" || !header.startsWith("Bearer ")) return false;
