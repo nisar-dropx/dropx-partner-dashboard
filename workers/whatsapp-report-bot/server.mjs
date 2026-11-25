@@ -485,6 +485,7 @@ async function startSocket({ method, phone = null }) {
       session.pairingPhone = null;
       session.connectedAt = Date.now();
       setState("open");
+      sock.sendPresenceUpdate("available").catch(() => {});
       refreshGroups().catch((error) => logger.warn({ err: error }, "group refresh failed"));
       logger.info({ me: sock.user?.id }, "whatsapp connected");
     }
@@ -571,6 +572,8 @@ async function startSocket({ method, phone = null }) {
     for (const update of updates ?? []) {
       const id = update?.key?.id;
       const remoteJid = update?.key?.remoteJid || update?.key?.remoteJidAlt;
+      // fromMe false is another participant's receipt about their own message — ignore.
+      // fromMe true/undefined are our outbound bookkeeping (Baileys omits the flag on some acks).
       if (!id || update.key?.fromMe === false || !remoteJid) continue;
       const participant =
         update.key?.participant
@@ -659,6 +662,9 @@ async function sendToGroup(body) {
         ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
         : undefined;
       await session.sock.sendPresenceUpdate("available").catch(() => {});
+      // Presence on the group JID nudges WhatsApp to treat the companion as live
+      // before the fan-out; without it, sendMessage can return a local id that never leaves.
+      if (!isDirect) await session.sock.presenceSubscribe(body.to).catch(() => {});
       await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
       const mentions = cleanMentions(body.mentions);
@@ -686,7 +692,13 @@ async function sendToGroup(body) {
       } else {
         payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
       }
-      const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
+      const sent = await Promise.race([
+        session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {}),
+        new Promise((_, reject) => setTimeout(
+          () => reject(Object.assign(new Error("WhatsApp send timed out before the socket accepted the message."), { status: 504 })),
+          30_000
+        ))
+      ]);
       await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
       const messageId = sent?.key?.id ?? null;
       if (!messageId) throw Object.assign(new Error("WhatsApp did not return a message id."), { status: 502 });
@@ -798,6 +810,20 @@ async function handle(req, res) {
     await wipeSession();
     setState("logged_out", null);
     return json(res, 200, { ok: true });
+  }
+  // Soft reconnect: keep saved credentials, reopen the socket. Use when group fan-out
+  // stalls (local send ids without receipts) without forcing a phone re-pair.
+  if (req.method === "POST" && url.pathname === "/session/reconnect") {
+    if (!(await hasRemoteSession(authCall))) {
+      return json(res, 409, { error: "No saved WhatsApp session. Link from the portal first." });
+    }
+    session.manualStop = false;
+    if (session.reconnectTimer) {
+      clearTimeout(session.reconnectTimer);
+      session.reconnectTimer = null;
+    }
+    await startSocket({ method: "qr" });
+    return json(res, 202, { ok: true, state: session.state });
   }
   if (req.method === "GET" && url.pathname === "/chats") {
     const group = url.searchParams.get("group") ?? "";

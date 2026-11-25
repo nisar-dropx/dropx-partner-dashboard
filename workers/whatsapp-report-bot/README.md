@@ -81,6 +81,7 @@ link WhatsApp from Report Bot setup.
 | GET | `/health` | Liveness and connection state |
 | GET | `/session` | State, QR string or pairing code, linked account |
 | POST | `/session/connect` | `{ "method": "qr" }` or `{ "method": "code", "phone": "9198…" }` |
+| POST | `/session/reconnect` | Soft reopen using the saved login (no phone re-pair) |
 | POST | `/session/logout` | Unlink and delete the saved login |
 | GET | `/groups` | Groups the linked number belongs to |
 | POST | `/config` | Enabled groups and mode (also pulled every minute) |
