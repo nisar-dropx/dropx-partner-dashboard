@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, classifyOperationalContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, normalizeOperationalEvent, pruneOlderThan, validateSend } from "./lib.mjs";
+import { bearerMatches, chatContent, chatEntry, ChatLog, classifyContent, classifyOperationalContent, cleanMentions, EventQueue, Lru, messageSeconds, normalizeConfig, normalizeOperationalEvent, pruneBefore, pruneOlderThan, startOfLocalDayMs, validateSend } from "./lib.mjs";
 
 test("chat view: text, captions, replies and mentions are read; reactions and protocol noise are skipped", () => {
   assert.deepEqual(chatContent({ conversation: "Hi team" }), { type: "text", text: "Hi team", context: null });
@@ -220,6 +220,30 @@ test("media pruning removes only expired files", async () => {
     await utimes(path.join(directory, "old.msg"), old, old);
     assert.equal(await pruneOlderThan(directory, 2 * 3600 * 1000, Date.now(), ".bin"), 1, "only image bytes expire on the short cache");
     assert.equal(await pruneOlderThan(directory, 2 * 3600 * 1000, Date.now(), ".msg"), 1, "message records expire on their own schedule");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("media day prune clears previous local day after midnight", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "report-bot-media-day-"));
+  const zone = "Asia/Kolkata";
+  try {
+    const now = Date.parse("2026-11-25T06:30:00.000Z"); // 12:00 IST
+    const midnight = startOfLocalDayMs(zone, now);
+    assert.equal(midnight, Date.parse("2026-11-24T18:30:00.000Z"), "IST midnight is previous UTC evening");
+
+    await writeFile(path.join(directory, "yesterday.bin"), "x");
+    await writeFile(path.join(directory, "today.bin"), "x");
+    await writeFile(path.join(directory, "keep.msg"), "x");
+    await utimes(path.join(directory, "yesterday.bin"), new Date(midnight - 60_000), new Date(midnight - 60_000));
+    await utimes(path.join(directory, "today.bin"), new Date(midnight + 60_000), new Date(midnight + 60_000));
+    await utimes(path.join(directory, "keep.msg"), new Date(midnight - 60_000), new Date(midnight - 60_000));
+
+    assert.equal(await pruneBefore(directory, midnight, ".bin"), 1, "yesterday's photo is cleared");
+    assert.equal(await pruneBefore(directory, midnight, ".bin"), 0, "today's photo stays");
+    assert.ok(await stat(path.join(directory, "today.bin")));
+    assert.ok(await stat(path.join(directory, "keep.msg")), "non-.bin files are left alone");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

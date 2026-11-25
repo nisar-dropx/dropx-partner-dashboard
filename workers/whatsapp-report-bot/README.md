@@ -60,8 +60,9 @@ link WhatsApp from Report Bot setup.
   Voice notes, video, stickers, contacts and location are ignored. Images are cached briefly in `/tmp`;
   text events carry no media bytes.
 - It only sends to enabled groups, and only while the portal is in **Live** mode.
-- Downloaded photos are cached in `/tmp` for `MEDIA_TTL_HOURS` (48). After that, or after a redeploy, a photo is
-  downloaded from WhatsApp again using its saved record, while WhatsApp still has it.
+- Downloaded photos are cached in `/tmp` for the current local day only (`MEDIA_DAY_TZ`, default
+  `Asia/Kolkata`). After midnight, or after a redeploy, a photo is downloaded from WhatsApp again
+  using its saved record, while WhatsApp still has it.
 
 ## Environment
 
@@ -71,7 +72,7 @@ link WhatsApp from Report Bot setup.
 | `PORTAL_URL` | No | Defaults to `https://ops.dropxlogistics.com`. |
 | `WORKER_PUBLIC_URL` | No | Only if the host doesn't publish its address (Railway, Render and Fly do). |
 | `DEVICE_NAME` | No | Name shown in WhatsApp → Linked devices. |
-| `MEDIA_TTL_HOURS`, `LOG_LEVEL` | No | Cache length and log detail. |
+| `MEDIA_DAY_TZ`, `LOG_LEVEL` | No | Photo cache day boundary (default `Asia/Kolkata`) and log detail. |
 
 ## Endpoints (all except /health need `Authorization: Bearer <WORKER_TOKEN>`)
 

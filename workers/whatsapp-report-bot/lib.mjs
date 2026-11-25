@@ -220,6 +220,56 @@ export async function pruneOlderThan(directory, maxAgeMs, now = Date.now(), suff
   return removed;
 }
 
+/** Local calendar date `YYYY-MM-DD` in `timeZone` for `now`. */
+export function localDayKey(timeZone, now = Date.now()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(now));
+}
+
+/**
+ * UTC ms of local midnight for the calendar day of `now` in `timeZone`.
+ * Used so photo cache clears previous days after 12:00 local, not on a rolling TTL.
+ */
+export function startOfLocalDayMs(timeZone, now = Date.now()) {
+  const day = localDayKey(timeZone, now);
+  // Walk back from local noon so DST / fixed offsets both land on midnight.
+  let probe = Date.parse(`${day}T12:00:00.000Z`);
+  for (let i = 0; i < 36; i += 1) {
+    const t = probe - i * 3600 * 1000;
+    if (localDayKey(timeZone, t) !== day) continue;
+    if (localDayKey(timeZone, t - 3600 * 1000) === day) continue;
+    // `t` is in the first local hour of `day`; refine to the first ms.
+    let lo = t - 3600 * 1000;
+    let hi = t;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (localDayKey(timeZone, mid) === day) hi = mid;
+      else lo = mid;
+    }
+    return hi;
+  }
+  return Date.parse(`${day}T00:00:00.000Z`);
+}
+
+/** Deletes files last written before `cutoffMs` (optionally only `suffix`); returns how many. */
+export async function pruneBefore(directory, cutoffMs, suffix = "") {
+  let removed = 0;
+  for (const name of await readdir(directory).catch(() => [])) {
+    if (suffix && !name.endsWith(suffix)) continue;
+    const file = path.join(directory, name);
+    const info = await stat(file).catch(() => null);
+    if (info?.isFile() && info.mtimeMs < cutoffMs) {
+      await rm(file, { force: true });
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 const CONTENT_TYPES = [
   ["conversation", "text"],
   ["extendedTextMessage", "text"],

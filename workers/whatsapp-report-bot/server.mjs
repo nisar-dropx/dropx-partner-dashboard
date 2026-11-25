@@ -36,7 +36,8 @@ import {
   newRef,
   normalizeConfig,
   normalizeOperationalEvent,
-  pruneOlderThan,
+  pruneBefore,
+  startOfLocalDayMs,
   readJson,
   validateSend,
   writeJsonAtomic
@@ -61,7 +62,8 @@ const EVENTS_DIR = path.join(DATA_DIR, "events");
 const CHATS_DIR = path.join(DATA_DIR, "chats");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const SENT_FILE = path.join(DATA_DIR, "sent-refs.json");
-const MEDIA_TTL_HOURS = Math.max(Number(process.env.MEDIA_TTL_HOURS || 48), 1);
+// Photo cache keeps today's images only (local midnight). Override with MEDIA_DAY_TZ.
+const MEDIA_DAY_TZ = String(process.env.MEDIA_DAY_TZ || "Asia/Kolkata").trim() || "Asia/Kolkata";
 const MAX_MEDIA_BYTES = Math.max(Number(process.env.MAX_MEDIA_BYTES || 12 * 1024 * 1024), 1024 * 1024);
 // Matches the portal's cut-off for accepting a message as a new submission.
 const MAX_MESSAGE_AGE_SECONDS = 6 * 60 * 60;
@@ -786,8 +788,8 @@ async function main() {
   }
   // Start the config refresh loop; fire quickly on boot so any startup miss is caught fast.
   setTimeout(configLoop, config.groups.length > 0 ? 30_000 : 5_000);
-  const prune = () => pruneOlderThan(MEDIA_DIR, MEDIA_TTL_HOURS * 3600 * 1000, Date.now(), ".bin").catch(() => {});
-  setInterval(prune, 3600 * 1000);
+  const prune = () => pruneBefore(MEDIA_DIR, startOfLocalDayMs(MEDIA_DAY_TZ), ".bin").catch(() => {});
+  setInterval(prune, 15 * 60 * 1000);
   prune();
   resumeSavedSession();
 
