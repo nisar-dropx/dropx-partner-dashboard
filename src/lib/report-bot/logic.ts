@@ -312,13 +312,14 @@ export function shouldAutoCloseUnclearOcr(
 export function decideDelivery(analysis: Analysis, settings: DeliverySettings): DeliveryDecision {
   if (!analysis.is_report || analysis.verdict === "not_report") return "silent";
   if (!analysis.feedback.trim()) return "needs_approval";
-  // Local OCR scrape: clear pass/fail may post in Live groups. Unclear / needs_review
-  // analysis-question replies stay silent unless queue_unclear_ocr_reviews is on.
+  // Local OCR scrape never posts WhatsApp replies (pass/fail/unclear). Pass still
+  // closes completion reminders via shouldCompleteRequest + scraperPassClose.
+  // Optional: queue unclear OCR as a Waiting/Review draft (no auto-send).
   if (analysis.source === "scraper") {
-    if (hasUnresolvedAnalysisQuestions(analysis)) {
-      return settings.queue_unclear_ocr_reviews === true ? "needs_approval" : "silent";
+    if (hasUnresolvedAnalysisQuestions(analysis) && settings.queue_unclear_ocr_reviews === true) {
+      return "needs_approval";
     }
-    return analysis.confidence >= 0.5 ? "auto_send" : "needs_approval";
+    return "silent";
   }
   if (settings.approval_mode !== "auto") return "needs_approval";
   if (hasUnresolvedAnalysisQuestions(analysis)) return "needs_approval";

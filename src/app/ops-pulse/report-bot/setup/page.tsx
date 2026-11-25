@@ -347,7 +347,7 @@ function SettingsForm({ workspace, settings, canEdit }: { workspace: ReportBotWo
                 <Toggle
                   name="queue_unclear_ocr_reviews"
                   label="Queue unclear OCR for review"
-                  hint="Off by default: wrong-screen or unreadable cycle/expiry/stowing/DG photos are analysed and closed with no Waiting item and no Review draft. Turn on only if a person should check those drafts."
+                  hint="Off by default: wrong-screen or unreadable cycle/expiry/stowing/DG photos are analysed and closed with no Waiting item, no Review draft, and no WhatsApp reply (OCR never posts). Turn on only if a person should check those drafts in the queue."
                   defaultChecked={settings.queue_unclear_ocr_reviews}
                 />
               </div>

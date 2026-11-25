@@ -117,8 +117,8 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
   assert.equal(decideDelivery({ ...base, is_report: false, verdict: "not_report" }, auto), "silent");
   assert.equal(decideDelivery(base, auto), "auto_send");
   assert.equal(decideDelivery(base, { ...auto, approval_mode: "manual" }), "needs_approval");
-  assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "auto_send", "OCR scrape bypasses AI approval mode");
-  assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "auto_send");
+  assert.equal(decideDelivery({ ...base, source: "scraper" }, { ...auto, approval_mode: "manual" }), "silent", "OCR pass never posts to WhatsApp");
+  assert.equal(decideDelivery({ ...base, source: "scraper", verdict: "fail", confidence: 0.9 }, { ...auto, approval_mode: "manual" }), "silent", "OCR fail never posts to WhatsApp");
   const unclearScraper = {
     ...base,
     source: "scraper",
@@ -127,12 +127,12 @@ test("delivery: memes are silent, doubtful results go to a person, confident one
     checks: [{ rule: "Read quantities", status: "unclear", note: "Screenshot does not show the cycle count screen." }],
     feedback: "Could not fully read this evidence. Please resend a clearer screenshot."
   };
-  assert.equal(decideDelivery(unclearScraper, auto), "silent", "unclear OCR analysis questions never post to WhatsApp");
+  assert.equal(decideDelivery(unclearScraper, auto), "silent", "unclear OCR never posts to WhatsApp");
   assert.equal(shouldAutoCloseUnclearOcr(unclearScraper, auto), true, "default auto-closes unclear OCR with no review draft");
   assert.equal(
     decideDelivery(unclearScraper, { ...auto, queue_unclear_ocr_reviews: true }),
     "needs_approval",
-    "setup switch can queue unclear OCR for a person"
+    "setup switch can queue unclear OCR for a person (still no auto WhatsApp send)"
   );
   assert.equal(shouldAutoCloseUnclearOcr(unclearScraper, { queue_unclear_ocr_reviews: true }), false);
   assert.equal(
