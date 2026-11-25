@@ -120,6 +120,22 @@ test('unchecking Nill Map restores Not linked after saving, without creating a p
   ui.filter('ID link').setSelected(['unmapped']);ui.render();assert.equal(ui.cards().length,1);
 });
 
+test('saved Nill Map remarks load, remain editable and use the same save action',async()=>{
+  let payload;
+  const ui=worksheet({mappings:[{...row,nilMapped:true,nilRemark:'Before registration'}],initialMappingStatus:'nil_mapped'},async data=>{
+    payload=data;
+    return {ok:true,message:'Saved',savedRows:[{clientKey:mapping.providerMemberKey(row.stationId,row.providerMemberId),nilMapped:true,nilRemark:data.get('rows[0][nil_map_remark]')}]};
+  });
+  const field=()=>ui.one(node=>node.type==='textarea' && node.props.placeholder==='Enter remark').props;
+  assert.equal(field().value,'Before registration');assert.equal(field().disabled,false);
+  field().onChange({target:{value:'Absconded before registration'}});ui.render();
+  await ui.save();
+  assert.equal(payload.get('rows[0][nil_map_action]'),'mark');
+  assert.equal(payload.get('rows[0][nil_map_remark]'),'Absconded before registration');
+  assert.equal(field().value,'Absconded before registration');
+  assert.equal(ui.one(node=>node.type==='input' && node.props.type==='checkbox').props.checked,true);
+});
+
 test('Nill Map cannot replace an existing associate and failed saves remain staged',async()=>{
   const linked=worksheet({mappings:[{...row,workforceId:worker.id,dropxId:worker.dropxId,dropxName:worker.fullName}],initialMappingStatus:'all'});
   assert.equal(linked.one(node=>node.type==='input' && node.props.type==='checkbox').props.disabled,true);

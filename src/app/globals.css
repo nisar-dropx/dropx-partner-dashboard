@@ -23049,6 +23049,18 @@ td strong,
   margin: 0;
   accent-color: #ef431f;
 }
+.provider-first-nil-remark {
+  display: block;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.provider-first-nil-remark textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  min-height: 54px;
+  resize: vertical;
+}
 
 .provider-first-row .mapping-period-row {
   display: contents;

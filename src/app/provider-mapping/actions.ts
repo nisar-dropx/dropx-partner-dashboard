@@ -1903,6 +1903,7 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
 
 export type ProviderFirstInlineSavedRow = {
   nilMapped?: boolean;
+  nilRemark?: string;
   clientKey: string;
   mappingId: string;
   workforceId: string;
@@ -2104,14 +2105,16 @@ export async function saveProviderFirstMappingsInline(formData: FormData): Promi
         }
         const stationId = rowRequired(formData, index, "station_id", "Location");
         if (allowedLocationIds && !allowedLocationIds.has(stationId)) throw new Error(`Row ${index + 1}: This provider member is outside your allocated locations.`);
+        const remark = rowValue(formData, index, "nil_map_remark") ?? '';
+        if (remark.length > 2000) throw new Error(`Row ${index + 1}: Remark must be 2000 characters or fewer.`);
         const { error } = await supabaseAdmin.rpc("provider_set_member_nil_map", {
           p_company: companyId, p_actor: authorization.userId,
           p_provider: rowRequired(formData, index, "provider_id", "Provider"), p_station: stationId,
           p_member: rowRequired(formData, index, "provider_member_id", "Provider Member ID"),
-          p_nil: nilAction === 'mark', p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null
+          p_nil: nilAction === 'mark', p_locations: allowedLocationIds ? Array.from(allowedLocationIds) : null, p_remark: remark
         });
         if (error) throw new Error(error.message);
-        savedRows.push({ clientKey: currentClientKey, nilMapped: nilAction === 'mark', mappingId: '', workforceId: '',
+        savedRows.push({ clientKey: currentClientKey, nilMapped: nilAction === 'mark', nilRemark: nilAction === 'mark' ? remark : '', mappingId: '', workforceId: '',
           profileStationId: '', profileLocationLabel: '', paymentMethodId: '', paymentValues: {},
           productionThresholdConfig: null, productionThresholdMinimumUnits: '', effectiveFrom: '', effectiveTo: '' });
         continue;

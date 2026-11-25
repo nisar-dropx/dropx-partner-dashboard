@@ -26,7 +26,14 @@ function action(options={}) {
 test('Nill Map action derives company and actor from session without asking for a worker',async()=>{
   const a=action();const result=await a.save(a.form());
   assert.equal(result.ok,true,result.message);assert.equal(result.savedRows[0].nilMapped,true);
-  assert.deepEqual(a.calls,[{name:'provider_set_member_nil_map',args:{p_company:'trusted-company',p_actor:'trusted-actor',p_provider:'provider',p_station:'station',p_member:'MEMBER01',p_nil:true,p_locations:['station']}}]);
+  assert.deepEqual(a.calls,[{name:'provider_set_member_nil_map',args:{p_company:'trusted-company',p_actor:'trusted-actor',p_provider:'provider',p_station:'station',p_member:'MEMBER01',p_nil:true,p_locations:['station'],p_remark:''}}]);
+});
+
+test('Nill Map remarks are saved, returned and bounded',async()=>{
+  const a=action();const result=await a.save(a.form({nil_map_remark:'Absconded before registration'}));
+  assert.equal(result.savedRows[0].nilRemark,'Absconded before registration');
+  assert.equal(a.calls[0].args.p_remark,'Absconded before registration');
+  const b=action();assert.equal((await b.save(b.form({nil_map_remark:'x'.repeat(2001)}))).ok,false);assert.equal(b.calls.length,0);
 });
 test('Nill Map authorization rejects viewers, outside locations and mixed linked identities',async()=>{
   for(const [options,overrides] of [[{signedOut:true},{}],[{denied:true},{}],[{},{station_id:'outside'}],[{},{id:'existing-worker'}],[{},{mapping_id:'existing-map'}],[{},{nil_map_action:'unexpected'}]]) {

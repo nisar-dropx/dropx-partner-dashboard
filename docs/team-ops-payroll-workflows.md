@@ -8,6 +8,10 @@ This creates a company/provider/location/member disposition rather than a person
 or payable mapping. Persisted Nill mapped rows leave Not linked; ID link and
 Validation filters expose Nill mapped for review or unchecking and saving.
 Drafts and failed saves remain visible. Actual mapping history is unchanged.
+An optional Remark (up to 2000 characters) is saved with Nill Map, remains
+editable on saved records, reloads with the row and is included in downloads.
+Remark updates are audited. The original save API stays compatible with older
+open worksheets and preserves existing remarks.
 The service-only RPC verifies location access, company/provider ownership,
 source activity and absence of a registered/current link under the company
 payment mutex. Mark/clear operations are audited and retries are idempotent.

@@ -29,6 +29,8 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     await db.exec(roleFix);await db.exec(roleFix);
     const primaryKeyFix=readFileSync(new URL('../../supabase/migrations/20261125062559_provider_nil_map_primary_key.sql',import.meta.url),'utf8');
     await db.exec(primaryKeyFix);await db.exec(primaryKeyFix);
+    const remarksMigration=readFileSync(new URL('../../supabase/migrations/20261125072200_provider_nil_map_remarks.sql',import.meta.url),'utf8');
+    await db.exec(remarksMigration);await db.exec(remarksMigration);
     const primaryKey=(await db.query("select pg_get_constraintdef(oid) definition from pg_constraint where conrelid='provider_member_nil_maps'::regclass and contype='p'")).rows[0].definition;
     assert.equal(primaryKey,'PRIMARY KEY (id)','no unintended stations/providers many-to-many relationship may be inferred');
     await db.exec('grant usage on schema auth to service_role;grant select on companies,providers,stations,workforce,cps_shipment_daily,field_executive_provider_mappings to service_role;');
@@ -43,6 +45,20 @@ test('Nill Map persists without a person, enforces scope, reverses and clears on
     assert.equal((await db.query('select count(*)::int n from workforce')).rows[0].n,0);
     assert.equal((await db.query('select count(*)::int n from field_executive_provider_mappings')).rows[0].n,0);
     assert.equal((await db.query('select count(*)::int n from provider_member_nil_map_events')).rows[0].n,1,'retry does not duplicate audit');
+    const remark=async text=>{
+      await db.exec('set role service_role;');
+      try{return await db.query('select provider_set_member_nil_map($1,$2,$3,$4,$5,true,$6::uuid[],$7) result',[company,actor,provider,station,'MEMBER01',[station],text]);}
+      finally{await db.exec('reset role;');}
+    };
+    await remark('  Absconded before registration  ');
+    await remark('Absconded before registration');
+    assert.equal((await db.query('select remark from provider_member_nil_maps where station_id=$1',[station])).rows[0].remark,'Absconded before registration');
+    assert.equal((await db.query("select count(*)::int n from provider_member_nil_map_events where action='remark_updated'")).rows[0].n,1);
+    await remark('Not registered');
+    assert.equal((await db.query('select remark from provider_member_nil_maps where station_id=$1',[station])).rows[0].remark,'Not registered');
+    await assert.rejects(remark('x'.repeat(2001)),/2000 characters/);
+    await save();
+    assert.equal((await db.query('select remark from provider_member_nil_maps where station_id=$1',[station])).rows[0].remark,'Not registered','older worksheets do not erase the remark');
     await assert.rejects(save(true,[]),/outside your allocated/);
     await assert.rejects(save(true,[otherStation]),/outside your allocated/);
     await assert.rejects(save(true,[station],'MEMBER01',station,otherCompany),/location is unavailable/);

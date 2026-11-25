@@ -46,6 +46,7 @@ export type ProviderFirstWorkerView = {
 
 export type ProviderFirstMappingRowView = {
   nilMapped?: boolean;
+  nilRemark?: string;
   identityLinked?: boolean;
   outboundMonths?: string[];
   providerMemberId: string;
