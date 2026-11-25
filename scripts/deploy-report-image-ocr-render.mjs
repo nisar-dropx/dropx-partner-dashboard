@@ -66,7 +66,9 @@ async function createService(token) {
         numInstances: 1,
         envVars: [
           { key: "REPORT_IMAGE_OCR_TOKEN", value: token },
-          { key: "REPORT_IMAGE_OCR_CONCURRENCY", value: "2" }
+          { key: "REPORT_IMAGE_OCR_CONCURRENCY", value: "1" },
+          { key: "REPORT_IMAGE_OCR_MAX_LONG_EDGE", value: "1600" },
+          { key: "REPORT_IMAGE_OCR_MAX_UPLOAD_MB", value: "8" }
         ]
       }
     })
@@ -174,7 +176,9 @@ if (existing) {
     await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_TOKEN", token);
     console.log("Generated a new REPORT_IMAGE_OCR_TOKEN on the service.");
   }
-  await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_CONCURRENCY", "2").catch(() => undefined);
+  await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_CONCURRENCY", "1").catch(() => undefined);
+  await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_MAX_LONG_EDGE", "1600").catch(() => undefined);
+  await upsertEnvVar(serviceId, "REPORT_IMAGE_OCR_MAX_UPLOAD_MB", "8").catch(() => undefined);
   const deploy = await triggerDeploy(serviceId);
   console.log(`Redeploy started: ${deploy.id ?? deploy.deploy?.id ?? "ok"}`);
 } else {

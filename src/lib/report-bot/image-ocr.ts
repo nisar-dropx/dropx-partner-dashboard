@@ -12,7 +12,10 @@ export class OcrError extends Error {
 /** Typical local / remote OCR wall time — used by the submission queue budget. */
 export const OCR_BUDGET_MS = 55_000;
 const REMOTE_TIMEOUT_MS = 45_000;
-const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** Keep aligned with workers/report-image-ocr free-tier upload cap. */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/** Match remote OCR max long-edge so we do not re-inflate screenshots on Render free. */
+const OCR_MAX_LONG_EDGE = 1600;
 const MAX_OCR_CHARS = 40_000;
 
 let sharedWorker: Worker | null = null;
@@ -43,7 +46,7 @@ export async function extractReportImageText(
 ): Promise<string> {
   if (!image?.length) throw new OcrError("No image bytes to OCR.", false);
   if (image.length > MAX_IMAGE_BYTES) {
-    throw new OcrError("Image is larger than 12 MB.", false);
+    throw new OcrError("Image is larger than 8 MB.", false);
   }
 
   return withOcrLock(async () => {
@@ -76,7 +79,12 @@ async function preprocessForOcr(image: Uint8Array): Promise<Uint8Array> {
       .rotate()
       .grayscale()
       .normalize()
-      .resize({ width: 1800, height: 1800, fit: "inside", withoutEnlargement: false })
+      .resize({
+        width: OCR_MAX_LONG_EDGE,
+        height: OCR_MAX_LONG_EDGE,
+        fit: "inside",
+        withoutEnlargement: false
+      })
       .sharpen()
       .png()
       .toBuffer());

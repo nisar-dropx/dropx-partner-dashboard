@@ -8,3 +8,9 @@ services:
     envVars:
       - key: REPORT_IMAGE_OCR_TOKEN
         generateValue: true
+      - key: REPORT_IMAGE_OCR_CONCURRENCY
+        value: "1"
+      - key: REPORT_IMAGE_OCR_MAX_LONG_EDGE
+        value: "1600"
+      - key: REPORT_IMAGE_OCR_MAX_UPLOAD_MB
+        value: "8"
