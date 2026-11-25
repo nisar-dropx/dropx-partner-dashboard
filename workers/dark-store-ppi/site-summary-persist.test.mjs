@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mapActiveOrders, parseLaborAssociates } from "./site-summary-map.mjs";
 
 /** Mirrors associate / order mapping helpers used by site-summary-monitor.mjs */
 function normalizeAssociateLabel(label) {
@@ -103,4 +104,69 @@ test("associate banner parses Site Summary HTML tiles", () => {
   assert.equal(parsed.source, "html");
   assert.equal(parsed.waiting_for_orders, 2);
   assert.equal(parsed.total_associates, 15);
+});
+
+test("order clocks freeze acceptance after first pick and expose pick %", () => {
+  const nowS = 1795241312;
+  const [row] = mapActiveOrders([{
+    fulfillmentId: "403-0750743-9999999",
+    associateInfo: { associateId: "kdoppaha" },
+    itemsPicked: 6,
+    itemsToPick: 1,
+    totalItems: 7,
+    procurementListAssignmentTime: 1795241258,
+    procurementListCreatedTime: 1795241236,
+    pickingFinishedTime: null,
+    latestPackageStowedTime: null,
+    status: "PICKING",
+    timeSinceFirstPick: { firstItemPickTime: 1795241270, completionTime: null }
+  }], { nowS, acceptanceTarget: 15 });
+
+  assert.equal(row.oid, "9999999");
+  assert.equal(row.picker, "kdoppaha");
+  assert.equal(row.pctComplete, 86);
+  assert.equal(row.acceptanceS, 12, "acceptance stops at first pick (not wall-clock age)");
+  assert.equal(row.pickingS, nowS - 1795241270);
+  assert.equal(row.packS, 0);
+  assert.equal(row.pendingAcceptance, false);
+  assert.equal(row.pickingTarget, 210);
+});
+
+test("assigned order without first pick stays pending acceptance", () => {
+  const nowS = 1795241343 + 45;
+  const [row] = mapActiveOrders([{
+    fulfillmentId: "404-7864671-1240301",
+    associateInfo: { associateId: "wgskd" },
+    itemsPicked: 0,
+    totalItems: 1,
+    procurementListAssignmentTime: 1795241343,
+    procurementListCreatedTime: 1795241337,
+    status: "ASSIGNED",
+    timeSinceFirstPick: { firstItemPickTime: null, completionTime: null }
+  }], { nowS });
+  assert.equal(row.pendingAcceptance, true);
+  assert.equal(row.acceptanceS, 45);
+  assert.equal(row.pickingS, null);
+  assert.equal(row.pctComplete, 0);
+});
+
+test("labor findpeople maps functions onto Site Summary tiles", () => {
+  const parsed = parseLaborAssociates({
+    associates: [
+      { associateId: "a", function: "Wait" },
+      { associateId: "b", function: "Wait" },
+      { associateId: "c", function: "Offered" },
+      { associateId: "d", function: "Pack" },
+      { associateId: "e", function: "BagScan" },
+      { associateId: "f", function: "CompletePackage" },
+      { associateId: "g", function: "Stow" }
+    ]
+  });
+  assert.equal(parsed.source, "labor");
+  assert.equal(parsed.waiting_for_orders, 2);
+  assert.equal(parsed.offered_associates, 1);
+  assert.equal(parsed.picking_associates, 1);
+  assert.equal(parsed.packing_racking, 2);
+  assert.equal(parsed.other_activities, 1);
+  assert.equal(parsed.total_associates, 7);
 });

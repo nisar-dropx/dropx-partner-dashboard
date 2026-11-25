@@ -32,6 +32,11 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { writeFile, mkdir, readFile } from "node:fs/promises";
+import {
+  emptyAssociates,
+  mapActiveOrders as mapActiveOrdersBase,
+  parseLaborAssociates
+} from "./site-summary-map.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -282,95 +287,13 @@ async function fetchSiteSummary(storeId, cookies) {
   return parseSiteSummaryResponse(storeId, r);
 }
 
-// ── Acceptance time computation ───────────────────────────────────────────────
-/** Amazon may return assignment epoch in seconds or milliseconds. */
-function assignmentEpochSeconds(raw) {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  // ms since epoch is ~1e12; seconds is ~1e9
-  return n > 1e11 ? n / 1000 : n;
-}
-
-function orderOid(summary) {
-  const raw = String(summary.fulfillmentId ?? summary.procurementListId ?? summary.orderId ?? "").trim();
-  if (!raw) return null;
-  const stripped = raw.replace(/^.+-/, "");
-  // Prefer last 12 chars when available to cut collision risk vs last-6.
-  return (stripped || raw).slice(-12);
-}
-
-function clockFieldSeconds(summary, keys) {
-  for (const key of keys) {
-    const raw = summary?.[key];
-    if (raw == null || raw === "") continue;
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      return raw > 1e11 ? raw / 1000 : raw > 1e6 ? raw / 1000 : raw;
-    }
-    const text = String(raw).trim();
-    const parts = text.replace(/^\//, "").trim().split(":").map(Number);
-    if (parts.length >= 2 && parts.every((n) => Number.isFinite(n))) {
-      if (parts.length === 2) return parts[0] * 60 + parts[1];
-      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-  }
-  return null;
-}
-
+// ── Acceptance / order clocks (see site-summary-map.mjs) ──────────────────────
 function mapActiveOrders(summaries) {
-  const nowS = Date.now() / 1000;
-  const rows = [];
-  for (const s of summaries) {
-    const oid = orderOid(s);
-    if (!oid) continue;
-    const assignedAt = assignmentEpochSeconds(
-      s.procurementListAssignmentTime ?? s.assignmentTime ?? s.procurementListCreatedTime ?? 0
-    );
-    const acceptanceFromClock = clockFieldSeconds(s, ["acceptanceTimeSeconds", "acceptanceElapsedSeconds", "elapsedAcceptanceSeconds"]);
-    const acceptanceS = acceptanceFromClock ?? (assignedAt != null ? Math.max(0, nowS - assignedAt) : null);
-    const pickingS = clockFieldSeconds(s, ["pickingTimeSeconds", "pickingElapsedSeconds", "elapsedPickingSeconds"]);
-    const packS = clockFieldSeconds(s, ["packRackTimeSeconds", "packingTimeSeconds", "elapsedPackRackSeconds"]);
-    const totalS = clockFieldSeconds(s, ["totalTimeSeconds", "elapsedTotalSeconds", "totalElapsedSeconds"])
-      ?? ([acceptanceS, pickingS, packS].filter((n) => n != null).reduce((a, b) => a + b, 0) || null);
-    const picker = s.associateInfo?.associateId ?? s.associateInfo?.login ?? s.associateId ?? "Unassigned";
-    const items = Number(s.totalItems ?? s.itemsToPick ?? 0);
-    const pct = Number(s.percentComplete ?? s.pctComplete ?? s.completionPercentage ?? NaN);
-    const status = String(s.status ?? "").toUpperCase();
-    rows.push({
-      oid,
-      picker: String(picker),
-      elapsedS: acceptanceS ?? 0,
-      acceptanceS,
-      pickingS,
-      packS,
-      totalS,
-      acceptanceTarget: THRESHOLD_S,
-      pickingTarget: Number(s.pickingTargetSeconds ?? s.pickingSlaSeconds ?? 0) || null,
-      packTarget: Number(s.packRackTargetSeconds ?? s.packingSlaSeconds ?? 0) || null,
-      totalTarget: Number(s.totalTargetSeconds ?? s.totalSlaSeconds ?? 0) || null,
-      items,
-      pctComplete: Number.isFinite(pct) ? pct : null,
-      status
-    });
-  }
-  rows.sort((a, b) => (b.acceptanceS ?? b.elapsedS) - (a.acceptanceS ?? a.elapsedS));
-  return rows;
+  return mapActiveOrdersBase(summaries, { acceptanceTarget: THRESHOLD_S });
 }
 
 function computeAcceptance(summaries) {
-  return mapActiveOrders(summaries).filter((o) => o.status === "OFFERED" || o.status === "UNASSIGNED");
-}
-
-function emptyAssociates() {
-  return {
-    waiting_for_orders: 0,
-    on_break: 0,
-    offered_associates: 0,
-    picking_associates: 0,
-    packing_racking: 0,
-    other_activities: 0,
-    total_associates: 0,
-    source: "none"
-  };
+  return mapActiveOrders(summaries).filter((o) => o.pendingAcceptance);
 }
 
 function normalizeAssociateLabel(label) {
@@ -469,6 +392,28 @@ function deriveAssociatesFromOrders(orders) {
 }
 
 async function fetchAssociateBanner(storeId, cookies) {
+  // Labor Tracking people list powers the Site Summary associate tiles in-store.
+  try {
+    const laborUrl = `${GC_BASE}/api/v1/labortracking/findpeople/${storeId}`;
+    let r = await fetch(laborUrl, { method: "GET", headers: siteSummaryHeaders(cookies) });
+    if (r.status === 405) {
+      r = await fetch(laborUrl, {
+        method: "POST",
+        headers: siteSummaryHeaders(cookies, { jsonBody: true }),
+        body: "{}"
+      });
+    }
+    if (r.ok) {
+      const text = await r.text();
+      if (text && !text.trim().startsWith("<")) {
+        const parsed = parseLaborAssociates(JSON.parse(text));
+        if (parsed.source === "labor") return parsed;
+      }
+    }
+  } catch {
+    // fall through to older candidates
+  }
+
   const candidates = [
     `${GC_BASE}/api/v1/associatestatus/${storeId}`,
     `${GC_BASE}/api/v1/associatesummary/${storeId}`,
@@ -789,8 +734,8 @@ async function pollOnce() {
     try {
       const summaries = await fetchSiteSummary(storeId, cookies);
       const activeOrders = mapActiveOrders(summaries);
-      const pending = activeOrders.filter((o) => o.status === "OFFERED" || o.status === "UNASSIGNED");
-      const breaching = pending.filter(o => o.elapsedS >= THRESHOLD_S);
+      const pending = activeOrders.filter((o) => o.pendingAcceptance);
+      const breaching = pending.filter((o) => o.elapsedS >= THRESHOLD_S);
       let associates = emptyAssociates();
       try {
         associates = await fetchAssociateBanner(storeId, cookies);
