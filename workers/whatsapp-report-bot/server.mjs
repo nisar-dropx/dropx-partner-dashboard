@@ -105,7 +105,64 @@ function scheduleChatPersist(groupId) {
   }, 2000));
 }
 let sentRefs = new Lru(1000); // client_ref -> result, so a retried /send never posts twice
+/** In-flight /send work keyed by client_ref so retries await the same attempt. */
+const sendInFlight = new Map();
+/** Waiters for WhatsApp server ack (status ≥ SERVER_ACK) keyed by message id. */
+const pendingAcks = new Map();
+/** Recent status updates so a fast SERVER_ACK before waitForServerAck registers is not missed. */
+const recentMessageStatus = new Lru(500);
+const SEND_ACK_TIMEOUT_MS = Math.max(5_000, Number(process.env.SEND_ACK_TIMEOUT_MS || 20_000));
+const SERVER_ACK = proto.WebMessageInfo.Status.SERVER_ACK;
+const ERROR_STATUS = proto.WebMessageInfo.Status.ERROR;
 let config = normalizeConfig(null);
+
+function noteMessageStatus(messageId, status) {
+  if (!messageId || status == null) return;
+  recentMessageStatus.set(messageId, status);
+  const waiter = pendingAcks.get(messageId);
+  if (!waiter) return;
+  if (status === ERROR_STATUS) {
+    waiter.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+  } else if (status >= SERVER_ACK) {
+    waiter.resolve(status);
+  }
+}
+
+function waitForServerAck(messageId, seedStatus = null) {
+  if (seedStatus === ERROR_STATUS) {
+    return Promise.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+  }
+  const known = seedStatus ?? recentMessageStatus.get(messageId);
+  if (known === ERROR_STATUS) {
+    return Promise.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+  }
+  if (known != null && known >= SERVER_ACK) return Promise.resolve(known);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingAcks.delete(messageId);
+      reject(Object.assign(new Error("WhatsApp did not acknowledge the message in time. Check that the bot is still in the group and allowed to post."), { status: 504 }));
+    }, SEND_ACK_TIMEOUT_MS);
+    pendingAcks.set(messageId, {
+      resolve(status) {
+        clearTimeout(timer);
+        pendingAcks.delete(messageId);
+        resolve(status);
+      },
+      reject(error) {
+        clearTimeout(timer);
+        pendingAcks.delete(messageId);
+        reject(error);
+      }
+    });
+    // Re-check in case the update landed between the known read and waiter registration.
+    const again = recentMessageStatus.get(messageId);
+    if (again === ERROR_STATUS) {
+      pendingAcks.get(messageId)?.reject(Object.assign(new Error("WhatsApp rejected the message (group may be admin-only or the bot was removed)."), { status: 502 }));
+    } else if (again != null && again >= SERVER_ACK) {
+      pendingAcks.get(messageId)?.resolve(again);
+    }
+  });
+}
 
 const session = {
   sock: null,
@@ -432,6 +489,12 @@ async function startSocket({ method, phone = null }) {
     }
   });
 
+  sock.ev.on("messages.update", (updates) => {
+    for (const update of updates ?? []) {
+      noteMessageStatus(update?.key?.id, update?.update?.status);
+    }
+  });
+
   sock.ev.on("groups.update", (updates) => {
     for (const update of updates ?? []) {
       if (!update.id || !GROUP_JID.test(update.id)) continue;
@@ -453,78 +516,97 @@ async function startSocket({ method, phone = null }) {
 
 async function sendToGroup(body) {
   const cached = sentRefs.get(body.client_ref);
-  if (cached) return cached;
-  // Claim the idempotency key before the pre-send delay so a retried cron cannot
-  // double-post while the first call is still composing.
-  const pending = { id: null, pending: true };
-  sentRefs.set(body.client_ref, pending);
-  try {
-    if (!session.sock || session.state !== "open") throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
-    const isDirect = DIRECT_JID.test(body.to);
-    if (!isDirect) {
-      if (!session.groups.has(body.to)) await refreshGroups();
-      const group = session.groups.get(body.to);
-      if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
-      if (group.announce) {
-        // Only admins can post; WhatsApp would reject a non-admin silently.
+  // Never treat an in-flight/pending claim as success — retries must wait or fail.
+  if (cached && !cached.pending) return cached;
+  if (sendInFlight.has(body.client_ref)) return sendInFlight.get(body.client_ref);
+
+  const work = (async () => {
+    // Claim the idempotency key before the pre-send delay so a retried cron cannot
+    // double-post while the first call is still composing.
+    sentRefs.set(body.client_ref, { id: null, pending: true });
+    try {
+      if (!session.sock || session.state !== "open") throw Object.assign(new Error("WhatsApp is not connected."), { status: 503 });
+      const isDirect = DIRECT_JID.test(body.to);
+      if (!isDirect) {
+        if (!session.groups.has(body.to)) await refreshGroups();
+        let group = session.groups.get(body.to);
+        if (!group) throw Object.assign(new Error("The linked number is not a member of this group."), { status: 422 });
+        // Always refresh metadata: a stale announce=false would skip the admin check
+        // and WhatsApp would drop the post while our chat log still showed "sent".
         const metadata = await session.sock.groupMetadata(body.to);
-        const mine = myIds(session.sock);
-        const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
-        if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+        group = {
+          subject: metadata.subject ?? group.subject ?? "",
+          size: Array.isArray(metadata.participants) ? metadata.participants.length : group.size,
+          announce: Boolean(metadata.announce)
+        };
+        session.groups.set(body.to, group);
+        if (group.announce) {
+          const mine = myIds(session.sock);
+          const admin = metadata.participants?.some((participant) => participant.admin && [participant.id, participant.lid, participant.phoneNumber].some((value) => value && mine.has(bareId(value))));
+          if (!admin) throw Object.assign(new Error("Only admins can send messages in this group. Make the bot number an admin."), { status: 422 });
+        }
       }
-    }
-    const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;
-    const quoted = quotedId
-      ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
-      : undefined;
-    await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
-    const mentions = cleanMentions(body.mentions);
-    const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
-    const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
-    let payload;
-    let messageType = "text";
-    let messageText = body.text;
-    if (hasDocument) {
-      const bytes = Buffer.from(body.document_base64, "base64");
-      if (!bytes.length) throw Object.assign(new Error("document_base64 is empty."), { status: 422 });
-      if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("document is too large."), { status: 413 });
-      const caption = String(body.caption ?? "").trim().slice(0, 1024);
-      payload = { document: bytes, fileName: body.filename, mimetype: body.mime, caption, ...(mentions.length ? { mentions } : {}) };
-      messageType = "document";
-      messageText = caption || body.filename;
-    } else if (hasImage) {
-      const bytes = Buffer.from(body.image_base64, "base64");
-      if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
-      if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });
-      const caption = String(body.caption ?? body.text ?? "").trim().slice(0, 1024);
-      payload = { image: bytes, caption, mimetype: body.mime || "image/jpeg", ...(mentions.length ? { mentions } : {}) };
-      messageType = "image";
-      messageText = caption || null;
-    } else {
-      payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
-    }
-    const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
-    await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
-    const result = { id: sent?.key?.id ?? null };
-    if (result.id) {
-      botMessageIds.set(result.id, true);
+      const quotedId = body.quoted?.id && typeof body.quoted.id === "string" ? body.quoted.id : null;
+      const quoted = quotedId
+        ? messageCache.get(quotedId) ?? { key: { remoteJid: body.to, id: quotedId, fromMe: false, participant: body.quoted.participant || undefined }, message: { conversation: "" } }
+        : undefined;
+      await session.sock.sendPresenceUpdate("composing", body.to).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 1500)));
+      const mentions = cleanMentions(body.mentions);
+      const hasImage = typeof body.image_base64 === "string" && body.image_base64.length > 0;
+      const hasDocument = typeof body.document_base64 === "string" && body.document_base64.length > 0;
+      let payload;
+      let messageType = "text";
+      let messageText = body.text;
+      if (hasDocument) {
+        const bytes = Buffer.from(body.document_base64, "base64");
+        if (!bytes.length) throw Object.assign(new Error("document_base64 is empty."), { status: 422 });
+        if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("document is too large."), { status: 413 });
+        const caption = String(body.caption ?? "").trim().slice(0, 1024);
+        payload = { document: bytes, fileName: body.filename, mimetype: body.mime, caption, ...(mentions.length ? { mentions } : {}) };
+        messageType = "document";
+        messageText = caption || body.filename;
+      } else if (hasImage) {
+        const bytes = Buffer.from(body.image_base64, "base64");
+        if (!bytes.length) throw Object.assign(new Error("image_base64 is empty."), { status: 422 });
+        if (bytes.length > MAX_MEDIA_BYTES) throw Object.assign(new Error("image is too large."), { status: 413 });
+        const caption = String(body.caption ?? body.text ?? "").trim().slice(0, 1024);
+        payload = { image: bytes, caption, mimetype: body.mime || "image/jpeg", ...(mentions.length ? { mentions } : {}) };
+        messageType = "image";
+        messageText = caption || null;
+      } else {
+        payload = { text: body.text, ...(mentions.length ? { mentions } : {}) };
+      }
+      const sent = await session.sock.sendMessage(body.to, payload, quoted ? { quoted } : {});
+      await session.sock.sendPresenceUpdate("paused", body.to).catch(() => {});
+      const messageId = sent?.key?.id ?? null;
+      if (!messageId) throw Object.assign(new Error("WhatsApp did not return a message id."), { status: 502 });
+      if (sent.status != null) noteMessageStatus(messageId, sent.status);
+      // Socket write alone is not delivery. Wait for server ack before logging success.
+      await waitForServerAck(messageId, sent.status ?? null);
+      botMessageIds.set(messageId, true);
       const quotedEntry = quotedId ? chatLog.list(body.to).find((entry) => entry.id === quotedId) : null;
       chatLog.add(body.to, {
-        id: result.id, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: messageType, text: messageText,
+        id: messageId, from: null, name: null, from_me: true, bot: true, ts: Math.floor(Date.now() / 1000), type: messageType, text: messageText,
         quoted: quotedId ? { id: quotedId, from: body.quoted?.participant ?? null, type: quotedEntry?.type ?? "image", text: quotedEntry?.text ?? null } : null,
         mentions
       });
       scheduleChatPersist(body.to);
+      const result = { id: messageId };
+      sentRefs.set(body.client_ref, result);
+      await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
+      return result;
+    } catch (error) {
+      // Release only a still-pending claim so a completed send is never forgotten.
+      if (sentRefs.get(body.client_ref)?.pending) sentRefs.delete(body.client_ref);
+      throw error;
+    } finally {
+      sendInFlight.delete(body.client_ref);
     }
-    sentRefs.set(body.client_ref, result);
-    await writeJsonAtomic(SENT_FILE, sentRefs.entries()).catch(() => {});
-    return result;
-  } catch (error) {
-    // Release only a still-pending claim so a completed send is never forgotten.
-    if (sentRefs.get(body.client_ref)?.pending) sentRefs.delete(body.client_ref);
-    throw error;
-  }
+  })();
+
+  sendInFlight.set(body.client_ref, work);
+  return work;
 }
 
 /** Retract one message previously sent by this linked account. The caller must
@@ -640,7 +722,11 @@ async function handle(req, res) {
       direct_jids: parseDirectAllowlist(process.env.DIRECT_ALERT_JIDS || "")
     });
     if (invalid) return json(res, 422, { error: invalid });
-    return json(res, 200, await sendToGroup(body));
+    try {
+      return json(res, 200, await sendToGroup(body));
+    } catch (error) {
+      return json(res, Number(error?.status) || 500, { error: error instanceof Error ? error.message : "Unable to send the message." });
+    }
   }
   if (req.method === "POST" && url.pathname === "/delete") {
     const body = await readBody(req);

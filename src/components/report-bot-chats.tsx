@@ -319,7 +319,7 @@ export function ReportBotChats({ groups, initialGroupId, manualPosts, workspace 
                 );
               })}
             </div>
-            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} connected={data?.connected ?? false} lastWorkerSeenAt={data?.last_worker_seen_at ?? null} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Group chat history</footer>}
+            {manualPosts ? <GroupComposer key={active.id} group={active} workspace={workspace} connected={data?.connected ?? false} lastWorkerSeenAt={data?.last_worker_seen_at ?? null} onSent={() => void load(active.id, true)} /> : <footer className={s.chatFoot}>Worker log of WhatsApp-acknowledged bot posts — open the phone WhatsApp group to confirm members see them.</footer>}
           </>
         ) : (
           <div className={s.chatEmpty}>
