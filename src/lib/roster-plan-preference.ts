@@ -57,6 +57,17 @@ export function compareRosterPlanPreference(
 ) {
   const datedOrder = Number(right?.roster_kind === "dated") - Number(left?.roster_kind === "dated");
   if (datedOrder) return datedOrder;
+  // Dated supersession retires the whole week version (unlike recurring, where
+  // superseded_at is an "active until" cutoff). Ops and People can mint separate
+  // revision sequences for the same station/week, so a superseded Ops plan with a
+  // higher revision_no must not beat the live People dated override after publish.
+  // Connect attendance must use the same rule or the app shows week-off from a
+  // retired revision while People scores Absent against the live working shift.
+  if (left?.roster_kind === "dated" && right?.roster_kind === "dated") {
+    const leftRetired = Boolean(left.superseded_at);
+    const rightRetired = Boolean(right.superseded_at);
+    if (leftRetired !== rightRetired) return leftRetired ? 1 : -1;
+  }
   const effectiveFromOrder = String(right?.effective_from ?? "").localeCompare(String(left?.effective_from ?? ""));
   // Recurring revisions are numbered per source plan, not globally. A newer
   // approved pattern wins for covered people while older patterns cover others.

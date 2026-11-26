@@ -81,3 +81,35 @@ test("newer approved effective date beats an old plan's higher revision number",
   const old=plan("old",{revision_no:50}), newer=plan("new",{revision_no:1});
   assert(compareRosterPlanPreference(newer,old)<0);
 });
+test("live dated plan beats a superseded dated plan with a higher revision (Suhail 01 Nov)",()=>{
+  const { preferActiveRosterRow } = load("./roster-plan-preference.ts");
+  const retiredWeekOff = {
+    day_type: "weekly_off",
+    plan: {
+      id: "retired",
+      status: "approved",
+      roster_kind: "dated",
+      effective_from: "2026-10-26",
+      superseded_at: "2026-10-31",
+      revision_no: 3,
+      updated_at: "2026-10-30T04:29:31.058Z"
+    }
+  };
+  const liveWorking = {
+    day_type: "working",
+    plan: {
+      id: "live",
+      status: "approved",
+      roster_kind: "dated",
+      effective_from: "2026-10-26",
+      superseded_at: null,
+      revision_no: 2,
+      updated_at: "2026-10-31T06:51:09.341Z"
+    }
+  };
+  assert(compareRosterPlanPreference(liveWorking.plan, retiredWeekOff.plan) < 0);
+  assert.equal(
+    preferActiveRosterRow([retiredWeekOff, liveWorking], "2026-11-01", (row) => row.plan)?.day_type,
+    "working"
+  );
+});
