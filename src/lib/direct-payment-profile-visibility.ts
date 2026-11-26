@@ -3,9 +3,6 @@ import { workforceProfileStatus, type WorkforceProfileStatusSource } from "./wor
 export type DirectPaymentAudience = "workforce" | "helpers";
 export type DirectPaymentProfileSource = WorkforceProfileStatusSource;
 
-function humanizedStatus(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
 
 /**
  * The direct-pay register follows the status shown by the corresponding
@@ -18,15 +15,24 @@ export function directPaymentProfileStatus(
 ) {
   if (audience === "workforce") return workforceProfileStatus(source);
   if (source.deleted_at || source.is_active !== true) return "Inactive";
-  const onboardingStatus = String(source.onboarding_status ?? "active").trim().toLowerCase() || "active";
-  return humanizedStatus(onboardingStatus);
+  return workforceProfileStatus(source);
 }
 
 export function directPaymentProfileIsVisible(
   source: DirectPaymentProfileSource,
   audience: DirectPaymentAudience
 ) {
-  return directPaymentProfileStatus(source, audience).toLowerCase() !== "inactive";
+  // Visibility is not payment eligibility: keep historical and view-only
+  // workflow records visible even when the simplified label is Inactive.
+  if (source.deleted_at) return false;
+  const onboarding = String(source.onboarding_status ?? "").trim().toLowerCase();
+  if (audience === "helpers") return source.is_active === true && onboarding !== "inactive";
+  const lifecycle = String(source.people_lifecycle_status ?? source.lifecycle_status ?? "").trim().toLowerCase();
+  if (lifecycle === "inactive") return false;
+  if (lifecycle && !["active", "onboarding"].includes(lifecycle)) return true;
+  if (onboarding === "inactive") return false;
+  if (onboarding && onboarding !== "active") return true;
+  return source.is_active === true;
 }
 
 /** Keep UI write eligibility aligned with the direct-allocation RPC policy. */

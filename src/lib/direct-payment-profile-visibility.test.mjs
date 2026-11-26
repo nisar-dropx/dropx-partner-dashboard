@@ -158,3 +158,5 @@ test("database direct-pay policy is independent of the Field Operations flag", (
   assert.match(independenceMigration, /v_new_direct_eligible := v_new_designation\.provider_mapping_required = false;/);
   assert.match(independenceMigration, /v_provider_mapping_required:=v_designation_is_active and coalesce\(v_designation\.provider_mapping_required,false\);/);
 });
+
+test('four-state labels do not hide historical Direct Pay records',()=>{const row={onboarding_status:'cancelled',lifecycle_status:'onboarding',is_active:false};assert.equal(directPaymentProfileStatus(row,'workforce'),'Inactive');assert.equal(directPaymentProfileIsVisible(row,'workforce'),true);assert.equal(directPaymentProfileIsEditable(row,'workforce'),false);});
