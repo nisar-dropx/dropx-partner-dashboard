@@ -26,7 +26,7 @@ test("exact 10:00 wall still includes hour 10 when the label is 10:00", () => {
   assert.equal(rows.at(-1)?.hour, 10);
 });
 
-test("midnight EOD scaffolds 06 through 23 and drops lone 00:00", () => {
+test("midnight EOD scaffolds 06 through 24 and maps hour 0 → 24:00", () => {
   const rows = buildPpiHourlyDisplay(
     [
       { hour: 0, order_count: 1, unit_count: 1, avg_ppt_seconds: 110 },
@@ -36,8 +36,9 @@ test("midnight EOD scaffolds 06 through 23 and drops lone 00:00", () => {
     { midnightEod: true }
   );
   assert.equal(rows[0]?.hour, 6);
-  assert.equal(rows.at(-1)?.hour, 23);
+  assert.equal(rows.at(-1)?.hour, 24);
   assert.ok(!rows.some((r) => r.hour === 0));
+  assert.equal(rows.find((r) => r.hour === 24)?.order_count, 1);
   assert.equal(rows.find((r) => r.hour === 22)?.order_count, 10);
   assert.equal(rows.find((r) => r.hour === 7)?.order_count, 0);
 });

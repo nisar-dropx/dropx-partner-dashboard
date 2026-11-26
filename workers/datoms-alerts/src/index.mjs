@@ -12,21 +12,80 @@ function datomsPassword(env) {
   return String(env.DATOMS_PASSWORD || env.DATOMS_PASSWORD_HASH || "").trim();
 }
 
-function makeDatomsClient(env) {
+function datomsEmail(env) {
+  return String(env.DATOMS_EMAIL || env.DATOMS_ID || "").trim();
+}
+
+export function makeDatomsClient(env) {
   const password = datomsPassword(env);
-  if (!env.DATOMS_EMAIL || !password) {
-    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing (plaintext password; DATOMS_PASSWORD_HASH alias accepted)");
+  const email = datomsEmail(env);
+  if (!email || !password) {
+    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing (plaintext password; DATOMS_ID / DATOMS_PASSWORD_HASH aliases accepted)");
   }
+  const supabaseUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
+  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
   return new DatomsClient({
-    email: env.DATOMS_EMAIL,
+    email,
     password,
     customerId: env.DATOMS_CUSTOMER_ID || "17428",
     applicationId: env.DATOMS_APPLICATION_ID || "16",
-    kv: env.ALERT_DEDUPE ?? null
+    companyId: env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997",
+    kv: env.ALERT_DEDUPE ?? null,
+    supabase: supabaseUrl && supabaseKey ? { url: supabaseUrl, serviceKey: supabaseKey } : null
   });
 }
 const DEDUPE_TTL_SEC = 7 * 24 * 60 * 60;
 const RECENT_PREFIX = "recent:";
+
+/** In-process KV stand-in when Cloudflare KV is unavailable (Vercel cron). */
+function createMemoryKv() {
+  const map = new Map();
+  return {
+    async get(key, type) {
+      const value = map.get(key);
+      if (value == null) return null;
+      if (type === "json") {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return null;
+        }
+      }
+      return value;
+    },
+    async put(key, value) {
+      map.set(key, typeof value === "string" ? value : JSON.stringify(value));
+    },
+    async delete(key) {
+      map.delete(key);
+    },
+    async list({ prefix = "", limit = 100 } = {}) {
+      const keys = [...map.keys()]
+        .filter((name) => name.startsWith(prefix))
+        .slice(0, limit)
+        .map((name) => ({ name }));
+      return { keys };
+    }
+  };
+}
+
+async function supabaseHasDedupe(env, dedupeKey) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return false;
+  const qs = new URLSearchParams({
+    company_id: `eq.${env.COMPANY_ID}`,
+    dedupe_key: `eq.${dedupeKey}`,
+    select: "dedupe_key",
+    limit: "1"
+  });
+  const res = await fetch(
+    `${String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "").replace(/\/$/, "")}/rest/v1/ds_datoms_alerts?${qs}`,
+    { headers: { ...headers, Prefer: "return=representation" } }
+  );
+  if (!res.ok) return false;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
+}
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -44,8 +103,9 @@ function adminOk(req, env) {
 }
 
 function sbHeaders(env) {
-  const key = env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key || !env.SUPABASE_URL) return null;
+  const key = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY;
+  const url = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL;
+  if (!key || !url) return null;
   return {
     apikey: key,
     Authorization: `Bearer ${key}`,
@@ -75,7 +135,8 @@ async function supabaseUpsertAlert(env, alert, meta) {
     notified_at: meta.notifiedAt,
     card_svg: meta.svg
   };
-  const url = `${String(env.SUPABASE_URL).replace(/\/$/, "")}/rest/v1/ds_datoms_alerts?on_conflict=company_id,dedupe_key`;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const url = `${base}/rest/v1/ds_datoms_alerts?on_conflict=company_id,dedupe_key`;
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(row) });
   if (!res.ok) {
     const body = await res.text();
@@ -86,7 +147,7 @@ async function supabaseUpsertAlert(env, alert, meta) {
 async function supabaseListAlerts(env, limit) {
   const headers = sbHeaders(env);
   if (!headers) return [];
-  const base = String(env.SUPABASE_URL).replace(/\/$/, "");
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
   const qs = new URLSearchParams({
     company_id: `eq.${env.COMPANY_ID}`,
     select: "dedupe_key,station_code,level,title,generated_at,site_name,asset_name,room_type,alert_text,notified_at",
@@ -155,6 +216,7 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
 
 export async function runPoll(env, { dryRun = false } = {}) {
   const client = makeDatomsClient(env);
+  const kv = env.ALERT_DEDUPE || createMemoryKv();
   const now = Date.now();
   const generatedAfter = new Date(now - POLL_WINDOW_MS).toISOString();
   const generatedBefore = new Date(now).toISOString();
@@ -170,7 +232,8 @@ export async function runPoll(env, { dryRun = false } = {}) {
       skipped.push({ reason: "filter", id: event?.entity_id ?? event?.id });
       continue;
     }
-    const dedupeHit = await env.ALERT_DEDUPE.get(alert.dedupeKey);
+    const dedupeHit = (await kv.get(alert.dedupeKey))
+      || (await supabaseHasDedupe(env, alert.dedupeKey));
     if (dedupeHit) {
       skipped.push({ reason: "dedupe", key: alert.dedupeKey });
       continue;
@@ -189,8 +252,8 @@ export async function runPoll(env, { dryRun = false } = {}) {
     try {
       // Send first so a WhatsApp failure does not permanently bury the alert in KV.
       await sendWhatsApp(env, alert, pngBytes, caption);
-      await env.ALERT_DEDUPE.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
-      await storeRecent(env.ALERT_DEDUPE, alert, { notifiedAt });
+      await kv.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
+      await storeRecent(kv, alert, { notifiedAt });
       try {
         await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt });
       } catch (error) {
@@ -227,7 +290,7 @@ export default {
     if (req.method === "GET" && url.pathname === "/health") {
       let session = null;
       try {
-        if (env.DATOMS_EMAIL && datomsPassword(env)) {
+        if (datomsEmail(env) && datomsPassword(env)) {
           session = await makeDatomsClient(env).sessionStatus();
         }
       } catch {
@@ -237,10 +300,11 @@ export default {
         ok: true,
         service: "dropx-datoms-alerts",
         has_kv: Boolean(env.ALERT_DEDUPE),
-        has_supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
+        has_supabase: Boolean((env.SUPABASE_URL || env.COMPANY_SUPABASE_URL) && (env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY)),
         has_report_bot: Boolean(env.REPORT_BOT_URL && env.REPORT_BOT_TOKEN),
         has_datoms_password: Boolean(datomsPassword(env)),
-        poll_cron: "*/5 * * * *",
+        // Schedule owned by OpsPulse Vercel cron (bom1 / India egress). CF cron disabled.
+        poll_cron: "vercel:/api/cron/datoms-alerts */5",
         session
       });
     }

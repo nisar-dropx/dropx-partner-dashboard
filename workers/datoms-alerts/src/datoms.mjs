@@ -3,8 +3,8 @@ import { generateKeyPair, exportJWK, SignJWT, importJWK } from "jose";
 const API_BASE = "https://app.datoms.io/-/api/iot-platform/v1.1.0";
 const SESSION_KV_KEY = "datoms:session:v1";
 const LOGIN_BACKOFF_KV_KEY = "datoms:login_backoff";
-/** Keep session across cron ticks; Datoms tokens typically last hours. */
-const SESSION_TTL_SEC = 6 * 60 * 60;
+/** KV is a short cache only; durable truth lives in Supabase ds_datoms_session. */
+const SESSION_KV_TTL_SEC = 6 * 60 * 60;
 /** After TOO_MANY_REQUESTS / 429, do not hit /accounts/login again for this long. */
 const LOGIN_BACKOFF_SEC = 20 * 60;
 
@@ -84,7 +84,9 @@ async function mintDpop(privateKey, method, url) {
  *   password: string,
  *   customerId: string,
  *   applicationId: string,
- *   kv?: { get: Function, put: Function, delete: Function } | null
+ *   companyId?: string,
+ *   kv?: { get: Function, put: Function, delete: Function } | null,
+ *   supabase?: { url: string, serviceKey: string } | null
  * }} cfg
  */
 export class DatomsClient {
@@ -93,11 +95,28 @@ export class DatomsClient {
     this.password = cfg.password;
     this.customerId = String(cfg.customerId);
     this.applicationId = String(cfg.applicationId);
+    this.companyId = String(cfg.companyId || "").trim() || null;
     this.kv = cfg.kv ?? null;
+    this.supabase = cfg.supabase?.url && cfg.supabase?.serviceKey
+      ? {
+          url: String(cfg.supabase.url).replace(/\/$/, ""),
+          serviceKey: String(cfg.supabase.serviceKey)
+        }
+      : null;
     this.authToken = null;
     this.privateKey = null;
     this.publicJwk = null;
     this.privateKeyJwk = null;
+  }
+
+  sbHeaders(extra = {}) {
+    if (!this.supabase) return null;
+    return {
+      apikey: this.supabase.serviceKey,
+      Authorization: `Bearer ${this.supabase.serviceKey}`,
+      "Content-Type": "application/json",
+      ...extra
+    };
   }
 
   sessionFingerprint() {
@@ -105,29 +124,98 @@ export class DatomsClient {
   }
 
   async readBackoffUntil() {
-    if (!this.kv) return 0;
-    const raw = await this.kv.get(LOGIN_BACKOFF_KV_KEY, "json");
-    const until = Number(raw?.untilMs ?? 0);
-    return Number.isFinite(until) ? until : 0;
+    if (this.kv) {
+      const raw = await this.kv.get(LOGIN_BACKOFF_KV_KEY, "json");
+      const until = Number(raw?.untilMs ?? 0);
+      if (Number.isFinite(until) && until > Date.now()) return until;
+    }
+    const headers = this.sbHeaders();
+    if (!headers || !this.companyId) return 0;
+    const qs = new URLSearchParams({
+      company_id: `eq.${this.companyId}`,
+      select: "login_backoff_until",
+      limit: "1"
+    });
+    const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?${qs}`, { headers });
+    if (!res.ok) return 0;
+    const rows = await res.json().catch(() => []);
+    const iso = rows?.[0]?.login_backoff_until;
+    const ms = iso ? Date.parse(iso) : 0;
+    return Number.isFinite(ms) ? ms : 0;
   }
 
   async writeLoginBackoff(reason) {
-    if (!this.kv) return;
     const untilMs = Date.now() + LOGIN_BACKOFF_SEC * 1000;
-    await this.kv.put(
-      LOGIN_BACKOFF_KV_KEY,
-      JSON.stringify({ untilMs, reason: String(reason ?? "").slice(0, 200), at: new Date().toISOString() }),
-      { expirationTtl: LOGIN_BACKOFF_SEC + 60 }
-    );
+    const reasonText = String(reason ?? "").slice(0, 200);
+    if (this.kv) {
+      await this.kv.put(
+        LOGIN_BACKOFF_KV_KEY,
+        JSON.stringify({ untilMs, reason: reasonText, at: new Date().toISOString() }),
+        { expirationTtl: LOGIN_BACKOFF_SEC + 60 }
+      );
+    }
+    // Patch backoff only — never overwrite a good token with placeholders.
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          login_backoff_until: new Date(untilMs).toISOString(),
+          login_backoff_reason: reasonText,
+          updated_at: new Date().toISOString()
+        })
+      }
+    ).catch(() => null);
   }
 
   async clearLoginBackoff() {
-    if (!this.kv) return;
-    try {
-      await this.kv.delete(LOGIN_BACKOFF_KV_KEY);
-    } catch {
-      /* ignore */
+    if (this.kv) {
+      try {
+        await this.kv.delete(LOGIN_BACKOFF_KV_KEY);
+      } catch {
+        /* ignore */
+      }
     }
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          login_backoff_until: null,
+          login_backoff_reason: null,
+          updated_at: new Date().toISOString()
+        })
+      }
+    ).catch(() => null);
+  }
+
+  async loadSessionFromSupabase() {
+    const headers = this.sbHeaders();
+    if (!headers || !this.companyId) return null;
+    const qs = new URLSearchParams({
+      company_id: `eq.${this.companyId}`,
+      select: "email,auth_token,private_key_jwk,public_jwk,saved_at,login_backoff_until",
+      limit: "1"
+    });
+    const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?${qs}`, { headers });
+    if (!res.ok) return null;
+    const rows = await res.json().catch(() => []);
+    const row = rows?.[0];
+    if (!row?.auth_token || !row?.private_key_jwk || row.auth_token === "backoff") return null;
+    if (row.email && String(row.email).toLowerCase() !== this.sessionFingerprint()) return null;
+    return {
+      email: String(row.email || this.sessionFingerprint()),
+      authToken: row.auth_token,
+      privateKeyJwk: row.private_key_jwk,
+      publicJwk: row.public_jwk ?? null,
+      savedAt: row.saved_at ?? null
+    };
   }
 
   async loadPersistedSession() {
@@ -135,11 +223,13 @@ export class DatomsClient {
     if (cached?.authToken && cached?.privateKeyJwk && cached?.email === this.sessionFingerprint()) {
       return cached;
     }
-    if (!this.kv) return null;
-    const row = await this.kv.get(SESSION_KV_KEY, "json");
-    if (!row?.authToken || !row?.privateKeyJwk) return null;
-    if (row.email && row.email !== this.sessionFingerprint()) return null;
-    return row;
+    if (this.kv) {
+      const row = await this.kv.get(SESSION_KV_KEY, "json");
+      if (row?.authToken && row?.privateKeyJwk && (!row.email || row.email === this.sessionFingerprint())) {
+        return row;
+      }
+    }
+    return this.loadSessionFromSupabase();
   }
 
   async applySession(row) {
@@ -151,21 +241,44 @@ export class DatomsClient {
       email: this.sessionFingerprint(),
       authToken: this.authToken,
       privateKeyJwk: this.privateKeyJwk,
-      publicJwk: this.publicJwk
+      publicJwk: this.publicJwk,
+      savedAt: row.savedAt ?? null
     };
   }
 
   async persistSession() {
+    const savedAt = new Date().toISOString();
     const row = {
       email: this.sessionFingerprint(),
       authToken: this.authToken,
       privateKeyJwk: this.privateKeyJwk,
       publicJwk: this.publicJwk,
-      savedAt: new Date().toISOString()
+      savedAt
     };
     globalThis.__datomsCache = row;
     if (this.kv) {
-      await this.kv.put(SESSION_KV_KEY, JSON.stringify(row), { expirationTtl: SESSION_TTL_SEC });
+      await this.kv.put(SESSION_KV_KEY, JSON.stringify(row), { expirationTtl: SESSION_KV_TTL_SEC });
+    }
+    const headers = this.sbHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" });
+    if (!headers || !this.companyId) return;
+    const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?on_conflict=company_id`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        company_id: this.companyId,
+        email: row.email,
+        auth_token: row.authToken,
+        private_key_jwk: row.privateKeyJwk,
+        public_jwk: row.publicJwk,
+        login_backoff_until: null,
+        login_backoff_reason: null,
+        saved_at: savedAt,
+        updated_at: savedAt
+      })
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("[datoms] supabase session upsert failed:", res.status, body.slice(0, 200));
     }
   }
 
@@ -182,6 +295,12 @@ export class DatomsClient {
         /* ignore */
       }
     }
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      { method: "DELETE", headers }
+    ).catch(() => null);
   }
 
   async loginAndBind() {
@@ -313,13 +432,18 @@ export class DatomsClient {
 
   /** Health / debug helpers for operators. */
   async sessionStatus() {
-    const row = await this.loadPersistedSession();
+    const memory = globalThis.__datomsCache;
+    let kv = null;
+    if (this.kv) kv = await this.kv.get(SESSION_KV_KEY, "json");
+    const sb = await this.loadSessionFromSupabase();
     const backoffUntil = await this.readBackoffUntil();
+    const row = memory?.authToken ? memory : kv?.authToken ? kv : sb;
     return {
-      has_memory_session: Boolean(globalThis.__datomsCache?.authToken),
-      has_kv_session: Boolean(row?.authToken),
-      session_email: row?.email ?? globalThis.__datomsCache?.email ?? null,
-      saved_at: row?.savedAt ?? null,
+      has_memory_session: Boolean(memory?.authToken),
+      has_kv_session: Boolean(kv?.authToken),
+      has_supabase_session: Boolean(sb?.authToken),
+      session_email: row?.email ?? null,
+      saved_at: row?.savedAt ?? sb?.savedAt ?? null,
       login_backoff_until: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null
     };
   }
@@ -328,7 +452,7 @@ export class DatomsClient {
 export const datomsAuthInternals = {
   SESSION_KV_KEY,
   LOGIN_BACKOFF_KV_KEY,
-  SESSION_TTL_SEC,
+  SESSION_KV_TTL_SEC,
   LOGIN_BACKOFF_SEC,
   isRateLimited,
   isAuthFailure,

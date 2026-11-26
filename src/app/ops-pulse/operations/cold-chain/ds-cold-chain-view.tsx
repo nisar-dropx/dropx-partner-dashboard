@@ -74,7 +74,7 @@ export function DsColdChainView({
       <div className="panel-body" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <strong>L2 / L3 violations</strong>
         <span className="subtle">{alerts.length} recent</span>
-        <span className="subtle">Auto-poll every 5 min via Cloudflare cron · list refreshes every 10s</span>
+        <span className="subtle">Auto-poll every 5 min via OpsPulse cron (India) · list refreshes every 10s</span>
         {workerConfigured ? (
           <button type="button" className="button" disabled={pending} onClick={runNow}>
             {pending ? "Polling…" : "Run once now"}

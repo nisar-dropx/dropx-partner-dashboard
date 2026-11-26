@@ -1,8 +1,18 @@
-# DropX Datoms L2/L3 alerts (Cloudflare Worker)
+# DropX Datoms L2/L3 alerts (Cloudflare Worker + OpsPulse cron)
 
-Polls Datoms IoT events every **5 minutes**, filters DropX dark-store **L2/L3** cold-chain violations, dedupes in KV, upserts `ds_datoms_alerts` in Supabase, and posts a PNG + caption to each station war room via the Report Bot worker.
+Polls Datoms IoT events every **5 minutes** from **OpsPulse Vercel (bom1 / India)** via `/api/cron/datoms-alerts`, filters DropX dark-store **L2/L3** cold-chain violations, dedupes, upserts `ds_datoms_alerts` in Supabase, and posts a PNG + caption to each station war room via the Report Bot worker.
 
-Auth token + DPoP keypair are **stored in KV** (`datoms:session:v1`) so cron ticks reuse the session instead of logging in every run. A 429 / “too many requests” response sets a **20-minute login backoff** in KV so the worker stops hammering Datoms (which also locks out browser OTP/password login).
+Cloudflare Worker cron is **disabled** on purpose: CF scheduled Workers often egress from US IPs (Datoms then emails “login from United States”). Manual `/run` on the Worker remains available as a backup.
+
+## Session storage (avoid re-login)
+
+Auth token + DPoP keypair are stored in:
+
+1. Process memory (hot path)
+2. Cloudflare KV `datoms:session:v1` (short cache, when running on CF)
+3. **Supabase `ds_datoms_session`** (durable — survives KV TTL / restarts)
+
+As long as Datoms accepts the stored token, polls do **not** call `/accounts/login`. A 429 sets a **20-minute login backoff**. Re-login only happens after auth failure or an empty session store.
 
 ## Setup
 
@@ -11,15 +21,15 @@ cd workers/datoms-alerts
 npm install
 ```
 
-Copy `.env.example` locally for `wrangler dev` (or use dashboard secrets in production).
+Apply migration `supabase/migrations/20261126113000_ds_datoms_session.sql` on the company Supabase project.
 
-Create a KV namespace and replace `REPLACE_ME` in `wrangler.toml`.
+## Secrets
 
-## Secrets (production)
+### Cloudflare Worker (manual `/run` / health)
 
 ```bash
 wrangler secret put DATOMS_EMAIL
-wrangler secret put DATOMS_PASSWORD   # plaintext account password (API login). Not a hash.
+wrangler secret put DATOMS_PASSWORD   # plaintext account password. Not a hash.
 wrangler secret put REPORT_BOT_URL
 wrangler secret put REPORT_BOT_TOKEN
 wrangler secret put ADMIN_KEY
@@ -27,28 +37,35 @@ wrangler secret put SUPABASE_URL
 wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 ```
 
-`DATOMS_PASSWORD_HASH` is accepted only as an alias for the same plaintext secret name some setups used by mistake — Datoms still expects the real password on `/accounts/login`.
+### OpsPulse Vercel (scheduled poll — India egress)
 
-After a password change or rate-limit lockout: `POST /session/reset` with `ADMIN_KEY` clears KV session + backoff, then wait for Datoms to unblock before the next login.
+Set on the OpsPulse project:
 
-Optional vars in `[vars]` or secrets: `DATOMS_CUSTOMER_ID` (default `17428`), `DATOMS_APPLICATION_ID` (default `16`), `COMPANY_ID`.
+- `DATOMS_EMAIL` (or `DATOMS_ID`)
+- `DATOMS_PASSWORD` (plaintext; `DATOMS_PASSWORD_HASH` alias accepted)
+- Company Supabase URL / service role (already present)
+- Report Bot URL/token come from `report_bot_settings` when available
 
-## Deploy
+`DATOMS_PASSWORD_HASH` is only a misnamed alias — Datoms still expects the real password on `/accounts/login`.
+
+After a password change or rate-limit lockout: `POST /session/reset` on the Worker with `ADMIN_KEY` clears KV + Supabase session/backoff, then wait for Datoms to unblock before the next login.
+
+## Deploy Worker (HTTP API only)
 
 ```bash
 npm run deploy
 ```
 
-## HTTP
+## HTTP (Worker)
 
 | Method | Path | Auth |
 |--------|------|------|
-| GET | `/health` | — (includes KV session + login-backoff status) |
+| GET | `/health` | — (includes KV + Supabase session + login-backoff status) |
 | GET | `/alerts?limit=50` | — |
 | POST | `/run` | `Authorization: Bearer $ADMIN_KEY` or `x-admin-key` |
-| POST | `/session/reset` | Admin — clear KV session + login backoff |
+| POST | `/session/reset` | Admin — clear KV + Supabase session + login backoff |
 
-`POST /run?dry_run=1` filters events without KV, Supabase, or WhatsApp side effects.
+`POST /run?dry_run=1` filters events without WhatsApp side effects.
 
 ## Tests
 
