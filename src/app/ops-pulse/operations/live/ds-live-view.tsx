@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Clock, Info, Loader2, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Clock, Info, Loader2, Package, RefreshCw, Timer, TrendingUp, Users } from "lucide-react";
 import { DsScopeFilters } from "@/app/ops-pulse/operations/ds-scope-filters";
 import { emptyDsScope, scopedDsStationCodes, type DsScope } from "@/lib/ops-pulse/ds-scope";
 import { formatOpsDate, formatOpsDateTime } from "@/lib/ops-pulse/date-format";
@@ -267,20 +267,39 @@ export function DsLiveView({ initial }: { initial: DsLiveNetwork }) {
 
       {error ? <p className={s.error} role="alert"><AlertTriangle size={14} aria-hidden />{error}</p> : null}
 
-      <section className={s.summary} aria-label="Network summary">
-        <div className={s.hero}>
-          <header className={s.label}>Network PPI</header>
-          <div className={s.heroFigure}>
-            <strong>{fmtPpt(data.avgPptSeconds)}</strong>
-            <span>order-weighted PPT · {count(data.storeCount)} stores</span>
-          </div>
+      {/* ── Network KPI stat cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }} aria-label="Network summary">
+        <div style={{ background: "linear-gradient(135deg, #fff7f2 0%, #fff 65%)", border: "1px solid #f0d4c5", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 4, boxShadow: "0 2px 8px rgba(222,90,22,0.08)", gridColumn: "span 1" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: "#de5a16", fontSize: 11, fontWeight: 650 }}><Timer size={13} aria-hidden /> Network PPT</span>
+          <strong style={{ fontSize: 28, fontWeight: 800, color: "#de5a16", letterSpacing: "-0.8px", lineHeight: 1.1 }}>{fmtPpt(data.avgPptSeconds)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>order-weighted · {count(data.storeCount)} stores</span>
         </div>
-        <div className={s.metric}><header>Orders</header><strong>{count(data.orderCount)}</strong><small>Completed today</small></div>
-        <div className={s.metric}><header>Units</header><strong>{count(data.unitCount)}</strong><small>Picked units</small></div>
-        <div className={s.metric}><header>Pickers</header><strong>{count(data.pickerCount)}</strong><small>With orders today</small></div>
-        <div className={s.metric}><header>Stale PPI</header><strong>{count(data.stalePpiStores)}</strong><small>Feeds behind schedule</small></div>
-        <div className={s.metric}><header>Acceptance</header><strong>{count(data.acceptanceBreaches)}</strong><small>Over SLA · {count(data.inboundOpenShipments)} inbound open</small></div>
-      </section>
+        <div style={{ background: "#fff", border: "1px solid var(--line, #e2e7ee)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--muted)", fontSize: 11, fontWeight: 650 }}><TrendingUp size={13} aria-hidden /> Orders</span>
+          <strong style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.3px" }}>{count(data.orderCount)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>completed today</span>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid var(--line, #e2e7ee)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--muted)", fontSize: 11, fontWeight: 650 }}><Package size={13} aria-hidden /> Units</span>
+          <strong style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.3px" }}>{count(data.unitCount)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>units picked</span>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid var(--line, #e2e7ee)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--muted)", fontSize: 11, fontWeight: 650 }}><Users size={13} aria-hidden /> Pickers</span>
+          <strong style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.3px" }}>{count(data.pickerCount)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>with orders today</span>
+        </div>
+        <div style={{ background: data.stalePpiStores > 0 ? "#fffbeb" : "#fff", border: `1px solid ${data.stalePpiStores > 0 ? "#fde68a" : "var(--line, #e2e7ee)"}`, borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: data.stalePpiStores > 0 ? "#d97706" : "var(--muted)", fontSize: 11, fontWeight: 650 }}><Activity size={13} aria-hidden /> Stale feeds</span>
+          <strong style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.3px", color: data.stalePpiStores > 0 ? "#d97706" : undefined }}>{count(data.stalePpiStores)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>behind schedule</span>
+        </div>
+        <div style={{ background: data.acceptanceBreaches > 0 ? "#fff1f0" : "#fff", border: `1px solid ${data.acceptanceBreaches > 0 ? "#fecdc9" : "var(--line, #e2e7ee)"}`, borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: data.acceptanceBreaches > 0 ? "#c0392b" : "var(--muted)", fontSize: 11, fontWeight: 650 }}><AlertTriangle size={13} aria-hidden /> Breaches</span>
+          <strong style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.3px", color: data.acceptanceBreaches > 0 ? "#c0392b" : undefined }}>{count(data.acceptanceBreaches)}</strong>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>over SLA · {count(data.inboundOpenShipments)} inbound</span>
+        </div>
+      </div>
 
       <div className={s.scopeRow}>
         <DsScopeFilters

@@ -216,8 +216,16 @@ export function DsWorkforcePulseView({ initial }: { initial: DsWorkforcePulsePay
               <MapPin size={14} style={{ verticalAlign: "middle", marginRight: 4, opacity: 0.6 }} aria-hidden />
               {selectedStore.stationCode} · Hourly HC plan
             </h3>
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              Target {selectedStore.targetOrdersPerAssociateHour} orders / associate-hour
+            <span style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "#de5a16", display: "inline-block" }} />
+                <span style={{ fontSize: 11 }}>Required HC</span>
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(37,99,235,0.2)", border: "1.5px solid rgba(37,99,235,0.3)", display: "inline-block" }} />
+                <span style={{ fontSize: 11 }}>Rostered</span>
+              </span>
+              <span style={{ color: "var(--muted)" }}>Target {selectedStore.targetOrdersPerAssociateHour} orders / assoc-hr</span>
               <Link className={s.link} href={`/rostering?station=${encodeURIComponent(selectedStore.stationCode)}`} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                 Open rostering <ChevronRight size={12} aria-hidden />
               </Link>
@@ -229,22 +237,26 @@ export function DsWorkforcePulseView({ initial }: { initial: DsWorkforcePulsePay
             <>
               <div className={ps.hcChart} aria-hidden>
                 {(() => {
-                  const maxReq = Math.max(...selectedStore.hourlyPlan.map(r => r.requiredHc), 1);
-                  return selectedStore.hourlyPlan.map((row) => (
-                    <div key={row.hour} className={ps.hcBar}>
-                      <div className={ps.hcBarInner}>
-                        {row.rosteredHc != null && (
-                          <span className={ps.hcRostered} style={{ height: `${Math.round((row.rosteredHc / maxReq) * 100)}%` }} title={`Rostered: ${row.rosteredHc}`} />
-                        )}
-                        <span
-                          className={ps.hcRequired}
-                          style={{ height: `${Math.round((row.requiredHc / maxReq) * 100)}%`, background: (row.variance ?? 0) < 0 ? "#c0392b" : "#de5a16" }}
-                          title={`Required: ${row.requiredHc}`}
-                        />
+                  const maxVal = Math.max(...selectedStore.hourlyPlan.map(r => Math.max(r.requiredHc, r.rosteredHc ?? 0)), 1);
+                  return selectedStore.hourlyPlan.map((row) => {
+                    const reqPct = Math.round((row.requiredHc / maxVal) * 90);
+                    const rosPct = row.rosteredHc != null ? Math.round((row.rosteredHc / maxVal) * 90) : null;
+                    const understaffed = row.variance != null && row.variance < 0;
+                    return (
+                      <div key={row.hour} className={ps.hcBar} title={`${String(row.hour).padStart(2, "0")}:00 · Req: ${row.requiredHc} · Ros: ${row.rosteredHc ?? "—"}`}>
+                        <div className={ps.hcBarInner}>
+                          {rosPct != null && (
+                            <span className={ps.hcRostered} style={{ height: `${rosPct}px` }} />
+                          )}
+                          <span
+                            className={ps.hcRequired}
+                            style={{ height: `${reqPct}px`, background: understaffed ? "#c0392b" : "#de5a16" }}
+                          />
+                        </div>
+                        <small>{String(row.hour).padStart(2, "0")}</small>
                       </div>
-                      <small>{String(row.hour).padStart(2, "0")}</small>
-                    </div>
-                  ));
+                    );
+                  });
                 })()}
               </div>
 
