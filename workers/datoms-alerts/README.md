@@ -14,6 +14,8 @@ Auth token + DPoP keypair are stored in:
 
 As long as Datoms accepts the stored token, polls do **not** call `/accounts/login`.
 
+**Keep-alive:** OpsPulse cron `/api/cron/datoms-session` every **5 minutes** pings Datoms with the stored token (tiny events window) and records `last_keepalive_at`. That prevents idle expiry without logging in again. Alert polling remains every 10 minutes.
+
 Rate-limit / account-lock protections:
 
 - **25-hour login backoff** after 429 / “too many requests” / “24-hour restriction” (matches Datoms support lock)

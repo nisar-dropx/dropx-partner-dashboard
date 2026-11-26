@@ -254,7 +254,7 @@ export class DatomsClient {
     if (!headers || !this.companyId) return null;
     const qs = new URLSearchParams({
       company_id: `eq.${this.companyId}`,
-      select: "email,auth_token,private_key_jwk,public_jwk,saved_at,login_backoff_until,login_lock_until",
+      select: "email,auth_token,private_key_jwk,public_jwk,saved_at,last_keepalive_at,login_backoff_until,login_lock_until",
       limit: "1"
     });
     const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?${qs}`, { headers });
@@ -272,6 +272,7 @@ export class DatomsClient {
       privateKeyJwk: row.private_key_jwk,
       publicJwk: row.public_jwk ?? null,
       savedAt: row.saved_at ?? null,
+      lastKeepAliveAt: row.last_keepalive_at ?? null,
       loginLockUntil: row.login_lock_until ?? null
     };
   }
@@ -548,7 +549,69 @@ export class DatomsClient {
       ?? data?.data?.events
       ?? data?.data
       ?? (Array.isArray(data) ? data : []);
+    await this.touchKeepAlive();
     return Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Lightweight authenticated ping so Datoms does not idle-expire the session.
+   * Never calls /accounts/login — session-reuse only.
+   */
+  async keepAlive() {
+    const previousAllow = this.allowLogin;
+    this.allowLogin = false;
+    try {
+      const row = await this.loadPersistedSession();
+      if (!row) {
+        return {
+          ok: false,
+          kept_alive: false,
+          reason: "no_stored_session",
+          session: await this.sessionStatus()
+        };
+      }
+      await this.applySession(row);
+      const now = Date.now();
+      // Tiny window — proves the token+DPoP still work and refreshes idle timers on Datoms.
+      await this.fetchEvents({
+        generatedAfter: new Date(now - 2 * 60 * 1000).toISOString(),
+        generatedBefore: new Date(now).toISOString()
+      });
+      return {
+        ok: true,
+        kept_alive: true,
+        session: await this.sessionStatus()
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        kept_alive: false,
+        reason: error instanceof Error ? error.message : String(error),
+        session: await this.sessionStatus().catch(() => null)
+      };
+    } finally {
+      this.allowLogin = previousAllow;
+    }
+  }
+
+  async touchKeepAlive() {
+    const at = new Date().toISOString();
+    if (globalThis.__datomsCache) {
+      globalThis.__datomsCache.lastKeepAliveAt = at;
+    }
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          last_keepalive_at: at,
+          updated_at: at
+        })
+      }
+    ).catch(() => null);
   }
 
   async sessionStatus() {
@@ -566,6 +629,7 @@ export class DatomsClient {
       allow_login: this.allowLogin,
       session_email: row?.email ?? sb?.email ?? null,
       saved_at: row?.savedAt ?? sb?.savedAt ?? null,
+      last_keepalive_at: memory?.lastKeepAliveAt ?? sb?.lastKeepAliveAt ?? null,
       login_backoff_until: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null,
       login_lock_until: sb?.loginLockUntil && Date.parse(sb.loginLockUntil) > Date.now()
         ? sb.loginLockUntil

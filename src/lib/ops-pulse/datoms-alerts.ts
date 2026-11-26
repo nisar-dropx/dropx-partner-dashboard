@@ -24,6 +24,8 @@ type DatomsRunPoll = (
   options?: { dryRun?: boolean; allowLogin?: boolean }
 ) => Promise<Record<string, unknown>>;
 
+type DatomsKeepAlive = (env: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
 function serviceDb() {
   const url = process.env.COMPANY_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const key = process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -102,4 +104,15 @@ export async function runPortalDatomsPoll(options?: { dryRun?: boolean; allowLog
 /** Manual cold-chain button — session reuse only, never login. */
 export async function triggerDatomsPoll() {
   return runPortalDatomsPoll({ allowLogin: false });
+}
+
+/** Ping Datoms with the stored token so the session does not idle-expire. Never logs in. */
+export async function runPortalDatomsKeepAlive() {
+  if (!datomsCredentialsConfigured()) {
+    throw new Error("DATOMS_EMAIL and DATOMS_PASSWORD are not configured on OpsPulse.");
+  }
+  const workerMod = await import("../../../workers/datoms-alerts/src/index.mjs");
+  const runKeepAlive = (workerMod as { runKeepAlive: DatomsKeepAlive }).runKeepAlive;
+  const env = await portalDatomsEnv();
+  return runKeepAlive(env);
 }

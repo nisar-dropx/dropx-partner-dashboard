@@ -9,6 +9,8 @@ declare module "*workers/datoms-alerts/src/index.mjs" {
     options?: { allowLogin?: boolean }
   ): unknown;
 
+  export function runKeepAlive(env: Record<string, unknown>): Promise<Record<string, unknown>>;
+
   const worker: {
     fetch: (request: Request, env: Record<string, unknown>) => Promise<Response>;
     scheduled: (

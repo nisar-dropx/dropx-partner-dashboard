@@ -224,6 +224,12 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
   return res.json().catch(() => ({ ok: true }));
 }
 
+/** Keep the stored Datoms session warm — never logs in. */
+export async function runKeepAlive(env) {
+  const client = makeDatomsClient(env, { allowLogin: false });
+  return client.keepAlive();
+}
+
 export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
   const client = makeDatomsClient(env, { allowLogin });
   const kv = env.ALERT_DEDUPE || createMemoryKv();
@@ -385,6 +391,15 @@ export default {
       try {
         const result = await runPoll(env, { dryRun, allowLogin });
         return json(result);
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/session/keepalive") {
+      if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
+      try {
+        return json(await runKeepAlive(env));
       } catch (error) {
         return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
       }
