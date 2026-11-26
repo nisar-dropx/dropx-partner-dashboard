@@ -43,7 +43,7 @@ export default async function DarkStoreMessagePoliciesPage() {
         <PageHead
           eyebrow="Ops Pulse · Dark Store"
           title="Message policies"
-          subtitle="Urgency, frequency and cooldown for WhatsApp alerts — cron jobs and monitors read these values instead of hardcoded env defaults."
+          subtitle="Urgency, frequency and cooldown for WhatsApp alerts — cron jobs and the Report Bot read these values instead of hardcoded env defaults."
           action={<span className="status-pill good">DB-backed</span>}
         />
         <DsOperationsTabs

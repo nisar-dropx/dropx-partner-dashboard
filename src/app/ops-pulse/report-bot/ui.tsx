@@ -2,7 +2,7 @@ import { reportBotHref, reportBotChatHref, type ReportBotWorkspace } from "@/lib
 import Link from "next/link";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
-import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Circle, FileText, Inbox, MessageCircle, Users } from "lucide-react";
+import { AlertTriangle, BellRing, CalendarCheck, CheckCircle2, ChevronRight, Circle, FileText, Inbox, MessageCircle, Users } from "lucide-react";
 import { CopyButton } from "@/components/report-bot-controls";
 import { aiKeyConfigured, aiKeyName, missingReportBotMigrations, reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
 import s from "./report-bot.module.css";
@@ -188,6 +188,11 @@ export function ReportBotNav({ active, waiting = 0, attention = 0, workspace = "
           {key === "review" && attention > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attention} need attention`}>{attention}</span> : null}
         </Link>
       ))}
+      {workspace === "dark_store" ? (
+        <Link href="/operations/message-policies" className={s.tab} aria-label="WhatsApp message policies">
+          <BellRing size={16} aria-hidden />Message policies
+        </Link>
+      ) : null}
     </nav>
   );
 }

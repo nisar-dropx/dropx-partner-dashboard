@@ -1,0 +1,89 @@
+/* Dark Store Operations — navigation tab bar */
+.nav {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding: 5px;
+  background: var(--surface-soft, #f4f6f9);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 14px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--muted, #667085);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.12s;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink, #1f2937);
+  background: rgba(255, 255, 255, 0.75);
+  border-color: var(--line, #e2e7ee);
+}
+
+.tab.active {
+  color: var(--brand-dark, #de5a16);
+  background: #ffffff;
+  border-color: #f0d4c5;
+  box-shadow: 0 1px 4px rgba(222, 90, 22, 0.08), 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.tab.active .icon {
+  opacity: 1;
+  color: var(--brand-dark, #de5a16);
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green, #087443);
+  box-shadow: 0 0 0 2px rgba(8, 116, 67, 0.18);
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .nav {
+    gap: 3px;
+    padding: 4px;
+    border-radius: 12px;
+  }
+
+  .tab {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+}
