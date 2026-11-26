@@ -8,6 +8,11 @@ export const maxDuration = 60;
 
 const COMPANY_ID = "43866344-b550-4e8a-9a2d-9d23f3d8a997";
 
+type DatomsRunPoll = (
+  env: Record<string, unknown>,
+  options?: { dryRun?: boolean }
+) => Promise<Record<string, unknown>>;
+
 /**
  * Datoms L2/L3 poll on OpsPulse (Vercel bom1 / India) so login + event pulls
  * do not come from Cloudflare US cron IPs. Session token lives in Supabase.
@@ -23,7 +28,9 @@ export async function GET(request: Request) {
 
   try {
     const settings = await loadReportBotSettings(COMPANY_ID);
-    const { runPoll } = await import("../../../../../workers/datoms-alerts/src/index.mjs");
+    // Worker entry is plain ESM; ambient types live in src/types/datoms-alerts-worker.d.ts
+    const workerMod = await import("../../../../../workers/datoms-alerts/src/index.mjs");
+    const runPoll = (workerMod as { runPoll: DatomsRunPoll }).runPoll;
     const env = {
       DATOMS_EMAIL: process.env.DATOMS_EMAIL || process.env.DATOMS_ID || "",
       DATOMS_PASSWORD: process.env.DATOMS_PASSWORD || process.env.DATOMS_PASSWORD_HASH || "",
