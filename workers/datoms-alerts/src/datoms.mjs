@@ -4,9 +4,14 @@ const API_BASE = "https://app.datoms.io/-/api/iot-platform/v1.1.0";
 const SESSION_KV_KEY = "datoms:session:v1";
 const LOGIN_BACKOFF_KV_KEY = "datoms:login_backoff";
 /** KV is a short cache only; durable truth lives in Supabase ds_datoms_session. */
-const SESSION_KV_TTL_SEC = 6 * 60 * 60;
-/** After TOO_MANY_REQUESTS / 429, do not hit /accounts/login again for this long. */
-const LOGIN_BACKOFF_SEC = 20 * 60;
+const SESSION_KV_TTL_SEC = 12 * 60 * 60;
+/**
+ * Datoms support: ~100 logins → 24h account lock. Match that window (+1h buffer)
+ * so our poller never retries login during the restriction.
+ */
+const LOGIN_BACKOFF_SEC = 25 * 60 * 60;
+/** Exclusive login lease so two cron ticks cannot login in parallel. */
+const LOGIN_LOCK_SEC = 90;
 
 /** Datoms rejects bare Worker fetches with LOGIN_CLIENT_NOT_ALLOWED without browser-like headers. */
 const BROWSER_HEADERS = {
@@ -39,13 +44,18 @@ function pickToken(body) {
 
 function isRateLimited(error) {
   const msg = String(error?.message ?? error ?? "");
-  return /\b429\b|too\s*many\s*requests|rate\s*limit|TOO_MANY/i.test(msg);
+  return /\b429\b|too\s*many\s*requests|rate\s*limit|TOO_MANY|24\s*-?\s*hour|login\s*restriction/i.test(msg);
 }
 
 function isAuthFailure(error) {
   const msg = String(error?.message ?? error ?? "");
   return /\b401\b|\b403\b|unauthorized|auth[_ ]?token|session\s*(expired|invalid)|LOGIN_/i.test(msg)
     && !isRateLimited(error);
+}
+
+function isPlaceholderToken(token) {
+  const value = String(token ?? "");
+  return !value || value === "backoff" || value === "none";
 }
 
 async function jsonFetch(url, { method = "GET", headers = {}, body } = {}) {
@@ -85,6 +95,7 @@ async function mintDpop(privateKey, method, url) {
  *   customerId: string,
  *   applicationId: string,
  *   companyId?: string,
+ *   allowLogin?: boolean,
  *   kv?: { get: Function, put: Function, delete: Function } | null,
  *   supabase?: { url: string, serviceKey: string } | null
  * }} cfg
@@ -96,6 +107,7 @@ export class DatomsClient {
     this.customerId = String(cfg.customerId);
     this.applicationId = String(cfg.applicationId);
     this.companyId = String(cfg.companyId || "").trim() || null;
+    this.allowLogin = cfg.allowLogin !== false;
     this.kv = cfg.kv ?? null;
     this.supabase = cfg.supabase?.url && cfg.supabase?.serviceKey
       ? {
@@ -107,6 +119,7 @@ export class DatomsClient {
     this.privateKey = null;
     this.publicJwk = null;
     this.privateKeyJwk = null;
+    this._loginInflight = null;
   }
 
   sbHeaders(extra = {}) {
@@ -144,31 +157,34 @@ export class DatomsClient {
     return Number.isFinite(ms) ? ms : 0;
   }
 
-  async writeLoginBackoff(reason) {
-    const untilMs = Date.now() + LOGIN_BACKOFF_SEC * 1000;
+  async writeLoginBackoff(reason, seconds = LOGIN_BACKOFF_SEC) {
+    const untilMs = Date.now() + seconds * 1000;
     const reasonText = String(reason ?? "").slice(0, 200);
     if (this.kv) {
       await this.kv.put(
         LOGIN_BACKOFF_KV_KEY,
         JSON.stringify({ untilMs, reason: reasonText, at: new Date().toISOString() }),
-        { expirationTtl: LOGIN_BACKOFF_SEC + 60 }
+        { expirationTtl: seconds + 60 }
       );
     }
-    // Patch backoff only — never overwrite a good token with placeholders.
-    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    const headers = this.sbHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" });
     if (!headers || !this.companyId) return;
-    await fetch(
-      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
-      {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          login_backoff_until: new Date(untilMs).toISOString(),
-          login_backoff_reason: reasonText,
-          updated_at: new Date().toISOString()
-        })
-      }
-    ).catch(() => null);
+    // Upsert backoff without wiping a real token when we already have one in memory/store.
+    const existing = await this.loadSessionFromSupabase({ allowPlaceholder: true });
+    await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?on_conflict=company_id`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        company_id: this.companyId,
+        email: this.sessionFingerprint(),
+        auth_token: this.authToken || existing?.authToken || "none",
+        private_key_jwk: this.privateKeyJwk || existing?.privateKeyJwk || {},
+        public_jwk: this.publicJwk || existing?.publicJwk || null,
+        login_backoff_until: new Date(untilMs).toISOString(),
+        login_backoff_reason: reasonText,
+        updated_at: new Date().toISOString()
+      })
+    }).catch(() => null);
   }
 
   async clearLoginBackoff() {
@@ -189,32 +205,74 @@ export class DatomsClient {
         body: JSON.stringify({
           login_backoff_until: null,
           login_backoff_reason: null,
+          login_lock_until: null,
           updated_at: new Date().toISOString()
         })
       }
     ).catch(() => null);
   }
 
-  async loadSessionFromSupabase() {
+  async acquireLoginLock() {
+    const headers = this.sbHeaders({ Prefer: "return=representation" });
+    if (!headers || !this.companyId) return true; // no durable lock available
+    const untilIso = new Date(Date.now() + LOGIN_LOCK_SEC * 1000).toISOString();
+    const existing = await this.loadSessionFromSupabase({ allowPlaceholder: true });
+    if (existing?.loginLockUntil && Date.parse(existing.loginLockUntil) > Date.now()) {
+      return false;
+    }
+    const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?on_conflict=company_id`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        company_id: this.companyId,
+        email: this.sessionFingerprint(),
+        auth_token: this.authToken || existing?.authToken || "none",
+        private_key_jwk: this.privateKeyJwk || existing?.privateKeyJwk || {},
+        public_jwk: this.publicJwk || existing?.publicJwk || null,
+        login_lock_until: untilIso,
+        updated_at: new Date().toISOString()
+      })
+    });
+    return res.ok;
+  }
+
+  async releaseLoginLock() {
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ login_lock_until: null, updated_at: new Date().toISOString() })
+      }
+    ).catch(() => null);
+  }
+
+  async loadSessionFromSupabase({ allowPlaceholder = false } = {}) {
     const headers = this.sbHeaders();
     if (!headers || !this.companyId) return null;
     const qs = new URLSearchParams({
       company_id: `eq.${this.companyId}`,
-      select: "email,auth_token,private_key_jwk,public_jwk,saved_at,login_backoff_until",
+      select: "email,auth_token,private_key_jwk,public_jwk,saved_at,login_backoff_until,login_lock_until",
       limit: "1"
     });
     const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?${qs}`, { headers });
     if (!res.ok) return null;
     const rows = await res.json().catch(() => []);
     const row = rows?.[0];
-    if (!row?.auth_token || !row?.private_key_jwk || row.auth_token === "backoff") return null;
+    if (!row) return null;
+    if (!allowPlaceholder && (isPlaceholderToken(row.auth_token) || !row.private_key_jwk || Object.keys(row.private_key_jwk || {}).length === 0)) {
+      return null;
+    }
     if (row.email && String(row.email).toLowerCase() !== this.sessionFingerprint()) return null;
     return {
       email: String(row.email || this.sessionFingerprint()),
       authToken: row.auth_token,
       privateKeyJwk: row.private_key_jwk,
       publicJwk: row.public_jwk ?? null,
-      savedAt: row.saved_at ?? null
+      savedAt: row.saved_at ?? null,
+      loginLockUntil: row.login_lock_until ?? null
     };
   }
 
@@ -233,6 +291,9 @@ export class DatomsClient {
   }
 
   async applySession(row) {
+    if (isPlaceholderToken(row.authToken) || !row.privateKeyJwk) {
+      throw new Error("Datoms session placeholder cannot be applied");
+    }
     this.authToken = row.authToken;
     this.privateKeyJwk = row.privateKeyJwk;
     this.publicJwk = row.publicJwk ?? null;
@@ -272,6 +333,7 @@ export class DatomsClient {
         public_jwk: row.publicJwk,
         login_backoff_until: null,
         login_backoff_reason: null,
+        login_lock_until: null,
         saved_at: savedAt,
         updated_at: savedAt
       })
@@ -282,7 +344,8 @@ export class DatomsClient {
     }
   }
 
-  async clearSession() {
+  /** Clear in-memory/KV only — keep Supabase token unless replace=true after a confirmed dead session. */
+  async clearLocalSession() {
     this.authToken = null;
     this.privateKey = null;
     this.publicJwk = null;
@@ -295,6 +358,10 @@ export class DatomsClient {
         /* ignore */
       }
     }
+  }
+
+  async clearSession() {
+    await this.clearLocalSession();
     const headers = this.sbHeaders({ Prefer: "return=minimal" });
     if (!headers || !this.companyId) return;
     await fetch(
@@ -304,74 +371,99 @@ export class DatomsClient {
   }
 
   async loginAndBind() {
+    if (!this.allowLogin) {
+      throw new Error("Datoms login is disabled for this run (session-reuse only).");
+    }
     const backoffUntil = await this.readBackoffUntil();
     if (backoffUntil > Date.now()) {
-      const waitMin = Math.ceil((backoffUntil - Date.now()) / 60000);
+      const waitHrs = Math.ceil((backoffUntil - Date.now()) / 3600000);
       throw new Error(
-        `Datoms login backed off for ~${waitMin}m after rate limiting. Wait, then retry. Do not hammer /accounts/login.`
+        `Datoms login backed off for ~${waitHrs}h after rate limiting / account lock. Reusing stored session only until then.`
       );
     }
 
-    const loginBody = {
-      email_id: this.email,
-      // Datoms expects the account password in plaintext — not a local hash.
-      password: this.password,
-      source: "website",
-      source_id: 1,
-      target: "https://app.datoms.io/"
-    };
-
-    let login;
-    try {
-      login = await jsonFetch(`${API_BASE}/accounts/login`, {
-        method: "POST",
-        body: loginBody
-      });
-    } catch (error) {
-      if (isRateLimited(error)) {
-        await this.writeLoginBackoff(error.message);
+    const locked = await this.acquireLoginLock();
+    if (!locked) {
+      // Another process is logging in — wait briefly then load their session.
+      await new Promise((r) => setTimeout(r, 2500));
+      const row = await this.loadPersistedSession();
+      if (row) {
+        await this.applySession(row);
+        return;
       }
-      throw error;
+      throw new Error("Datoms login already in progress on another worker. Try again shortly.");
     }
 
-    this.authToken = pickToken(login);
-    if (!this.authToken) throw new Error("Datoms login returned no auth token");
+    try {
+      // Re-check durable session under the lock — winner of a race may have finished.
+      const raced = await this.loadPersistedSession();
+      if (raced) {
+        await this.applySession(raced);
+        return;
+      }
 
-    const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
-    this.privateKey = privateKey;
-    const rawPublic = await exportJWK(publicKey);
-    this.publicJwk = {
-      crv: rawPublic.crv,
-      ext: true,
-      key_ops: [],
-      kty: rawPublic.kty,
-      x: rawPublic.x,
-      y: rawPublic.y
-    };
-    this.privateKeyJwk = await exportJWK(privateKey);
+      const loginBody = {
+        email_id: this.email,
+        password: this.password,
+        source: "website",
+        source_id: 1,
+        target: "https://app.datoms.io/"
+      };
 
-    const challengeUrl = `${API_BASE}/accounts/bind/challenge`;
-    const challengeDpop = await mintDpop(privateKey, "GET", challengeUrl);
-    const challenge = await jsonFetch(challengeUrl, {
-      headers: { auth_token: this.authToken, dpop: challengeDpop }
-    });
-    const bindNonce =
-      challenge?.bindNonce
-      ?? challenge?.bind_nonce
-      ?? challenge?.nonce
-      ?? challenge?.data?.bindNonce;
-    if (!bindNonce) throw new Error("Datoms bind challenge returned no bindNonce");
+      let login;
+      try {
+        login = await jsonFetch(`${API_BASE}/accounts/login`, {
+          method: "POST",
+          body: loginBody
+        });
+      } catch (error) {
+        if (isRateLimited(error)) {
+          await this.writeLoginBackoff(error.message, LOGIN_BACKOFF_SEC);
+        }
+        throw error;
+      }
 
-    const bindUrl = `${API_BASE}/accounts/bind`;
-    const bindDpop = await mintDpop(privateKey, "POST", bindUrl);
-    await jsonFetch(bindUrl, {
-      method: "POST",
-      headers: { auth_token: this.authToken, dpop: bindDpop },
-      body: { jwk: this.publicJwk, bindNonce }
-    });
+      this.authToken = pickToken(login);
+      if (!this.authToken) throw new Error("Datoms login returned no auth token");
 
-    await this.clearLoginBackoff();
-    await this.persistSession();
+      const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
+      this.privateKey = privateKey;
+      const rawPublic = await exportJWK(publicKey);
+      this.publicJwk = {
+        crv: rawPublic.crv,
+        ext: true,
+        key_ops: [],
+        kty: rawPublic.kty,
+        x: rawPublic.x,
+        y: rawPublic.y
+      };
+      this.privateKeyJwk = await exportJWK(privateKey);
+
+      const challengeUrl = `${API_BASE}/accounts/bind/challenge`;
+      const challengeDpop = await mintDpop(privateKey, "GET", challengeUrl);
+      const challenge = await jsonFetch(challengeUrl, {
+        headers: { auth_token: this.authToken, dpop: challengeDpop }
+      });
+      const bindNonce =
+        challenge?.bindNonce
+        ?? challenge?.bind_nonce
+        ?? challenge?.nonce
+        ?? challenge?.data?.bindNonce;
+      if (!bindNonce) throw new Error("Datoms bind challenge returned no bindNonce");
+
+      const bindUrl = `${API_BASE}/accounts/bind`;
+      const bindDpop = await mintDpop(privateKey, "POST", bindUrl);
+      await jsonFetch(bindUrl, {
+        method: "POST",
+        headers: { auth_token: this.authToken, dpop: bindDpop },
+        body: { jwk: this.publicJwk, bindNonce }
+      });
+
+      await this.clearLoginBackoff();
+      await this.persistSession();
+    } finally {
+      await this.releaseLoginLock();
+    }
   }
 
   async ensureSession({ forceLogin = false } = {}) {
@@ -385,7 +477,18 @@ export class DatomsClient {
       }
     }
 
-    await this.loginAndBind();
+    if (!this.allowLogin) {
+      throw new Error("No Datoms session in Supabase/KV and login is disabled for this run.");
+    }
+
+    if (this._loginInflight) {
+      await this._loginInflight;
+      if (this.authToken && this.privateKey) return;
+    }
+    this._loginInflight = this.loginAndBind().finally(() => {
+      this._loginInflight = null;
+    });
+    await this._loginInflight;
   }
 
   async authedFetch(path, { method = "GET", query = {} } = {}) {
@@ -406,7 +509,25 @@ export class DatomsClient {
       return await run();
     } catch (error) {
       if (!isAuthFailure(error)) throw error;
-      // Stale KV session — clear and login once.
+
+      // Stale local copy — reload durable session once. Do NOT delete Supabase yet.
+      await this.clearLocalSession();
+      const fresh = await this.loadPersistedSession();
+      if (fresh) {
+        await this.applySession(fresh);
+        try {
+          return await run();
+        } catch (retryError) {
+          if (!isAuthFailure(retryError)) throw retryError;
+        }
+      }
+
+      // Confirmed dead session — only then login (if allowed / not backed off).
+      if (!this.allowLogin || (await this.readBackoffUntil()) > Date.now()) {
+        throw new Error(
+          "Datoms session rejected and login is blocked (disabled or rate-limit backoff). Wait for lockout to clear."
+        );
+      }
       await this.clearSession();
       await this.ensureSession({ forceLogin: true });
       return run();
@@ -430,21 +551,25 @@ export class DatomsClient {
     return Array.isArray(list) ? list : [];
   }
 
-  /** Health / debug helpers for operators. */
   async sessionStatus() {
     const memory = globalThis.__datomsCache;
     let kv = null;
     if (this.kv) kv = await this.kv.get(SESSION_KV_KEY, "json");
-    const sb = await this.loadSessionFromSupabase();
+    const sb = await this.loadSessionFromSupabase({ allowPlaceholder: true });
     const backoffUntil = await this.readBackoffUntil();
-    const row = memory?.authToken ? memory : kv?.authToken ? kv : sb;
+    const usable = !isPlaceholderToken(sb?.authToken) && sb?.privateKeyJwk;
+    const row = memory?.authToken ? memory : kv?.authToken ? kv : usable ? sb : null;
     return {
       has_memory_session: Boolean(memory?.authToken),
       has_kv_session: Boolean(kv?.authToken),
-      has_supabase_session: Boolean(sb?.authToken),
-      session_email: row?.email ?? null,
+      has_supabase_session: Boolean(usable),
+      allow_login: this.allowLogin,
+      session_email: row?.email ?? sb?.email ?? null,
       saved_at: row?.savedAt ?? sb?.savedAt ?? null,
-      login_backoff_until: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null
+      login_backoff_until: backoffUntil > Date.now() ? new Date(backoffUntil).toISOString() : null,
+      login_lock_until: sb?.loginLockUntil && Date.parse(sb.loginLockUntil) > Date.now()
+        ? sb.loginLockUntil
+        : null
     };
   }
 }
@@ -454,7 +579,9 @@ export const datomsAuthInternals = {
   LOGIN_BACKOFF_KV_KEY,
   SESSION_KV_TTL_SEC,
   LOGIN_BACKOFF_SEC,
+  LOGIN_LOCK_SEC,
   isRateLimited,
   isAuthFailure,
+  isPlaceholderToken,
   pickToken
 };

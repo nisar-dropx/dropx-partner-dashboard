@@ -1,10 +1,10 @@
 # DropX Datoms L2/L3 alerts (Cloudflare Worker + OpsPulse cron)
 
-Polls Datoms IoT events every **5 minutes** from **OpsPulse Vercel (bom1 / India)** via `/api/cron/datoms-alerts`, filters DropX dark-store **L2/L3** cold-chain violations, dedupes, upserts `ds_datoms_alerts` in Supabase, and posts a PNG + caption to each station war room via the Report Bot worker.
+Polls Datoms IoT events every **10 minutes** from **OpsPulse Vercel (bom1 / India)** via `/api/cron/datoms-alerts`, filters DropX dark-store **L2/L3** cold-chain violations, dedupes, upserts `ds_datoms_alerts` in Supabase, and posts a PNG + caption to each station war room via the Report Bot worker.
 
-Cloudflare Worker cron is **disabled** on purpose: CF scheduled Workers often egress from US IPs (Datoms then emails “login from United States”). Manual `/run` on the Worker remains available as a backup.
+Cloudflare Worker cron is **disabled** on purpose: CF scheduled Workers often egress from US IPs (Datoms then emails “login from United States”). Manual Worker `/run` defaults to **session-reuse only** (`allow_login=1` required to login).
 
-## Session storage (avoid re-login)
+## Session storage (avoid re-login / rate limits)
 
 Auth token + DPoP keypair are stored in:
 
@@ -12,7 +12,15 @@ Auth token + DPoP keypair are stored in:
 2. Cloudflare KV `datoms:session:v1` (short cache, when running on CF)
 3. **Supabase `ds_datoms_session`** (durable — survives KV TTL / restarts)
 
-As long as Datoms accepts the stored token, polls do **not** call `/accounts/login`. A 429 sets a **20-minute login backoff**. Re-login only happens after auth failure or an empty session store.
+As long as Datoms accepts the stored token, polls do **not** call `/accounts/login`.
+
+Rate-limit / account-lock protections:
+
+- **25-hour login backoff** after 429 / “too many requests” / “24-hour restriction” (matches Datoms support lock)
+- **Distributed login lock** (`login_lock_until`) so parallel cron ticks cannot stampede login
+- UI “Refresh from Datoms” is **session-only** (never logs in)
+- Cron may login only when no durable session exists and backoff is clear
+- Optional kill switch: `DATOMS_ALLOW_LOGIN=0` on OpsPulse
 
 ## Setup
 

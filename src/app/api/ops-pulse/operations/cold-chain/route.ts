@@ -13,8 +13,8 @@ export async function GET() {
     const alerts = await loadDatomsAlerts(gate.authorization);
     return NextResponse.json({
       alerts,
-      /** Cloudflare worker cron polls Datoms every minute; UI only reads stored rows. */
-      poll: { mode: "cron", interval_seconds: 300 }
+      /** OpsPulse cron polls Datoms every 10 min (session reuse); UI only reads stored rows. */
+      poll: { mode: "cron", interval_seconds: 600 }
     });
   } catch (error) {
     return NextResponse.json(

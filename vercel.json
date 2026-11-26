@@ -105,7 +105,7 @@
     },
     {
       "path": "/api/cron/datoms-alerts",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/dark-store-shift-noshow",

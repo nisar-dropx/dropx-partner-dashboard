@@ -24,7 +24,7 @@ function datomsEmail(env) {
   return String(env.DATOMS_EMAIL || env.DATOMS_ID || "").trim();
 }
 
-export function makeDatomsClient(env) {
+export function makeDatomsClient(env, { allowLogin } = {}) {
   const password = datomsPassword(env);
   const email = datomsEmail(env);
   if (!email || !password) {
@@ -32,12 +32,14 @@ export function makeDatomsClient(env) {
   }
   const supabaseUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
   const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
+  const envAllow = String(env.DATOMS_ALLOW_LOGIN ?? "1").trim() !== "0";
   return new DatomsClient({
     email,
     password,
     customerId: env.DATOMS_CUSTOMER_ID || "17428",
     applicationId: env.DATOMS_APPLICATION_ID || "16",
     companyId: env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997",
+    allowLogin: allowLogin === false ? false : envAllow,
     kv: env.ALERT_DEDUPE ?? null,
     supabase: supabaseUrl && supabaseKey ? { url: supabaseUrl, serviceKey: supabaseKey } : null
   });
@@ -222,13 +224,32 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
   return res.json().catch(() => ({ ok: true }));
 }
 
-export async function runPoll(env, { dryRun = false } = {}) {
-  const client = makeDatomsClient(env);
+export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
+  const client = makeDatomsClient(env, { allowLogin });
   const kv = env.ALERT_DEDUPE || createMemoryKv();
   const now = Date.now();
   const generatedAfter = new Date(now - POLL_WINDOW_MS).toISOString();
   const generatedBefore = new Date(now).toISOString();
-  const events = await client.fetchEvents({ generatedAfter, generatedBefore });
+  let events;
+  try {
+    events = await client.fetchEvents({ generatedAfter, generatedBefore });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const session = await client.sessionStatus().catch(() => null);
+    // Soft-fail during lockout / missing session — do not escalate into more logins.
+    return {
+      ok: false,
+      skipped_login: true,
+      error: message,
+      session,
+      window: { generatedAfter, generatedBefore },
+      fetched: 0,
+      processed: 0,
+      alerts: [],
+      skipped_count: 0,
+      errors: [{ error: message }]
+    };
+  }
 
   const processed = [];
   const skipped = [];
@@ -344,7 +365,7 @@ export default {
         has_report_bot: Boolean(env.REPORT_BOT_URL && env.REPORT_BOT_TOKEN),
         has_datoms_password: Boolean(datomsPassword(env)),
         // Schedule owned by OpsPulse Vercel cron (bom1 / India egress). CF cron disabled.
-        poll_cron: "vercel:/api/cron/datoms-alerts */5",
+        poll_cron: "vercel:/api/cron/datoms-alerts */10",
         session
       });
     }
@@ -359,9 +380,23 @@ export default {
     if (req.method === "POST" && url.pathname === "/run") {
       if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
       const dryRun = url.searchParams.get("dry_run") === "1";
+      // Default session-reuse only — require allow_login=1 explicitly to hit /accounts/login.
+      const allowLogin = url.searchParams.get("allow_login") === "1";
       try {
-        const result = await runPoll(env, { dryRun });
+        const result = await runPoll(env, { dryRun, allowLogin });
         return json(result);
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    // Arm the 25h login backoff (Datoms account lock window) without deleting a good session.
+    if (req.method === "POST" && url.pathname === "/session/backoff") {
+      if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
+      try {
+        const client = makeDatomsClient(env, { allowLogin: false });
+        await client.writeLoginBackoff("manual 25h backoff after Datoms account lock", 25 * 60 * 60);
+        return json({ ok: true, session: await client.sessionStatus() });
       } catch (error) {
         return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
       }
@@ -371,7 +406,7 @@ export default {
     if (req.method === "POST" && url.pathname === "/session/reset") {
       if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
       try {
-        const client = makeDatomsClient(env);
+        const client = makeDatomsClient(env, { allowLogin: false });
         await client.clearSession();
         await client.clearLoginBackoff();
         return json({ ok: true, cleared: true });

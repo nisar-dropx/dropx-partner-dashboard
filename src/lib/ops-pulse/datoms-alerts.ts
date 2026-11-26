@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
 import type { AuthorizationContext } from "@/lib/authorization";
+import { loadReportBotSettings } from "@/lib/report-bot/settings";
 
 export type DatomsAlertRow = {
   id: string;
@@ -15,6 +16,13 @@ export type DatomsAlertRow = {
   notified_at: string | null;
   rule_name: string | null;
 };
+
+const COMPANY_ID = "43866344-b550-4e8a-9a2d-9d23f3d8a997";
+
+type DatomsRunPoll = (
+  env: Record<string, unknown>,
+  options?: { dryRun?: boolean; allowLogin?: boolean }
+) => Promise<Record<string, unknown>>;
 
 function serviceDb() {
   const url = process.env.COMPANY_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -43,34 +51,55 @@ export async function loadDatomsAlerts(
   return (data ?? []) as DatomsAlertRow[];
 }
 
-export function datomsWorkerConfigured() {
-  const url = (process.env.DATOMS_ALERTS_WORKER_URL || "").trim();
-  const key = (process.env.DATOMS_ALERTS_ADMIN_KEY || process.env.CASH_RECON_ADMIN_KEY || "").trim();
-  return Boolean(url && key);
+export function datomsCredentialsConfigured() {
+  const email = (process.env.DATOMS_EMAIL || process.env.DATOMS_ID || "").trim();
+  const password = (process.env.DATOMS_PASSWORD || process.env.DATOMS_PASSWORD_HASH || "").trim();
+  return Boolean(email && password);
 }
 
-export async function triggerDatomsPoll() {
-  const base = (process.env.DATOMS_ALERTS_WORKER_URL || "").trim().replace(/\/$/, "");
-  const key = (process.env.DATOMS_ALERTS_ADMIN_KEY || process.env.CASH_RECON_ADMIN_KEY || "").trim();
-  if (!base || !key) throw new Error("Datoms alerts worker is not configured.");
-  const res = await fetch(`${base}/run`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(55_000)
+/** @deprecated Prefer datomsCredentialsConfigured — CF worker URL is no longer required for polls. */
+export function datomsWorkerConfigured() {
+  return datomsCredentialsConfigured();
+}
+
+async function portalDatomsEnv() {
+  const settings = await loadReportBotSettings(COMPANY_ID);
+  return {
+    DATOMS_EMAIL: process.env.DATOMS_EMAIL || process.env.DATOMS_ID || "",
+    DATOMS_PASSWORD: process.env.DATOMS_PASSWORD || process.env.DATOMS_PASSWORD_HASH || "",
+    DATOMS_CUSTOMER_ID: process.env.DATOMS_CUSTOMER_ID || "17428",
+    DATOMS_APPLICATION_ID: process.env.DATOMS_APPLICATION_ID || "16",
+    DATOMS_ALLOW_LOGIN: process.env.DATOMS_ALLOW_LOGIN || "1",
+    COMPANY_ID,
+    SUPABASE_URL: process.env.COMPANY_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+    SUPABASE_SERVICE_ROLE_KEY:
+      process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+    COMPANY_SUPABASE_URL: process.env.COMPANY_SUPABASE_URL || "",
+    COMPANY_SUPABASE_SERVICE_ROLE_KEY: process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "",
+    REPORT_BOT_URL: settings.worker_url || process.env.REPORT_BOT_URL || "",
+    REPORT_BOT_TOKEN: settings.worker_token || process.env.REPORT_BOT_TOKEN || "",
+    ALERT_DEDUPE: null
+  };
+}
+
+/**
+ * Run the Datoms poll on OpsPulse (India egress).
+ * Manual UI calls use allowLogin:false so they never burn /accounts/login.
+ */
+export async function runPortalDatomsPoll(options?: { dryRun?: boolean; allowLogin?: boolean }) {
+  if (!datomsCredentialsConfigured()) {
+    throw new Error("DATOMS_EMAIL and DATOMS_PASSWORD are not configured on OpsPulse.");
+  }
+  const workerMod = await import("../../../workers/datoms-alerts/src/index.mjs");
+  const runPoll = (workerMod as { runPoll: DatomsRunPoll }).runPoll;
+  const env = await portalDatomsEnv();
+  return runPoll(env, {
+    dryRun: options?.dryRun === true,
+    allowLogin: options?.allowLogin === true
   });
-  const text = await res.text();
-  let body: unknown = null;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = { raw: text };
-  }
-  if (!res.ok) {
-    const msg = body && typeof body === "object" && "error" in body
-      ? String((body as { error?: unknown }).error)
-      : text.slice(0, 200);
-    throw new Error(msg || `Worker ${res.status}`);
-  }
-  return body;
+}
+
+/** Manual cold-chain button — session reuse only, never login. */
+export async function triggerDatomsPoll() {
+  return runPortalDatomsPoll({ allowLogin: false });
 }

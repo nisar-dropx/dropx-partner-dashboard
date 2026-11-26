@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
-import { loadReportBotSettings } from "@/lib/report-bot/settings";
+import { runPortalDatomsPoll } from "@/lib/ops-pulse/datoms-alerts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const COMPANY_ID = "43866344-b550-4e8a-9a2d-9d23f3d8a997";
-
-type DatomsRunPoll = (
-  env: Record<string, unknown>,
-  options?: { dryRun?: boolean }
-) => Promise<Record<string, unknown>>;
-
 /**
- * Datoms L2/L3 poll on OpsPulse (Vercel bom1 / India) so login + event pulls
- * do not come from Cloudflare US cron IPs. Session token lives in Supabase.
+ * Datoms L2/L3 poll on OpsPulse (Vercel bom1 / India).
+ * May login only when no durable Supabase session exists and login backoff is clear.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -27,29 +20,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const settings = await loadReportBotSettings(COMPANY_ID);
-    // Worker entry is plain ESM; ambient types live in src/types/datoms-alerts-worker.d.ts
-    const workerMod = await import("../../../../../workers/datoms-alerts/src/index.mjs");
-    const runPoll = (workerMod as { runPoll: DatomsRunPoll }).runPoll;
-    const env = {
-      DATOMS_EMAIL: process.env.DATOMS_EMAIL || process.env.DATOMS_ID || "",
-      DATOMS_PASSWORD: process.env.DATOMS_PASSWORD || process.env.DATOMS_PASSWORD_HASH || "",
-      DATOMS_CUSTOMER_ID: process.env.DATOMS_CUSTOMER_ID || "17428",
-      DATOMS_APPLICATION_ID: process.env.DATOMS_APPLICATION_ID || "16",
-      COMPANY_ID,
-      SUPABASE_URL: process.env.COMPANY_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-      SUPABASE_SERVICE_ROLE_KEY:
-        process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-      COMPANY_SUPABASE_URL: process.env.COMPANY_SUPABASE_URL || "",
-      COMPANY_SUPABASE_SERVICE_ROLE_KEY: process.env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "",
-      REPORT_BOT_URL: settings.worker_url || process.env.REPORT_BOT_URL || "",
-      REPORT_BOT_TOKEN: settings.worker_token || process.env.REPORT_BOT_TOKEN || "",
-      // No CF KV on Vercel — Supabase session + alert table are durable stores.
-      ALERT_DEDUPE: null
-    };
-
     const dryRun = new URL(request.url).searchParams.get("dry_run") === "1";
-    const result = await runPoll(env, { dryRun });
+    // Cron may refresh a dead session once; 25h backoff + login lock prevent storms.
+    const result = await runPortalDatomsPoll({ dryRun, allowLogin: true });
     return NextResponse.json({ ok: true, egress: "vercel-opspulse", ...result });
   } catch (error) {
     return NextResponse.json(

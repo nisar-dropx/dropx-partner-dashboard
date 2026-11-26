@@ -1,10 +1,13 @@
 declare module "*workers/datoms-alerts/src/index.mjs" {
   export function runPoll(
     env: Record<string, unknown>,
-    options?: { dryRun?: boolean }
+    options?: { dryRun?: boolean; allowLogin?: boolean }
   ): Promise<Record<string, unknown>>;
 
-  export function makeDatomsClient(env: Record<string, unknown>): unknown;
+  export function makeDatomsClient(
+    env: Record<string, unknown>,
+    options?: { allowLogin?: boolean }
+  ): unknown;
 
   const worker: {
     fetch: (request: Request, env: Record<string, unknown>) => Promise<Response>;
