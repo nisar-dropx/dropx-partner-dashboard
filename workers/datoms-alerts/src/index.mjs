@@ -3,6 +3,14 @@ import { filterDatomsEvent, formatCaption } from "./filter.mjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
 import { clientRefForAlert } from "./client-ref.mjs";
+import {
+  datomsLevelMessageType,
+  decideDsMessageSend,
+  fallbackDsMessagePolicy,
+  fetchDsMessagePolicy,
+  fetchLastDsMessageSentAt,
+  recordDsMessageSendRest
+} from "../../ds-message-policy-rest.mjs";
 
 /** Overlap the every-5-minute cron so a slow/failed tick still catches L2/L3 events. */
 const POLL_WINDOW_MS = 15 * 60 * 1000;
@@ -250,6 +258,28 @@ export async function runPoll(env, { dryRun = false } = {}) {
     }
 
     try {
+      const companyId = env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997";
+      const sbUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
+      const sbKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
+      const messageType = datomsLevelMessageType(alert.level) ?? "datoms_l2";
+      let policy = fallbackDsMessagePolicy(messageType);
+      const fromDb = await fetchDsMessagePolicy({ url: sbUrl, key: sbKey, companyId, messageType });
+      if (fromDb) policy = fromDb;
+      let lastSent = null;
+      if (sbKey) {
+        lastSent = await fetchLastDsMessageSentAt({
+          url: sbUrl,
+          key: sbKey,
+          companyId,
+          messageType,
+          stationCode: alert.station
+        });
+      }
+      const decision = decideDsMessageSend({ policy, lastSentAtMs: lastSent });
+      if (!decision.allowSend) {
+        skipped.push({ reason: decision.reason, key: alert.dedupeKey, station: alert.station });
+        continue;
+      }
       // Send first so a WhatsApp failure does not permanently bury the alert in KV.
       await sendWhatsApp(env, alert, pngBytes, caption);
       await kv.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
@@ -259,6 +289,16 @@ export async function runPoll(env, { dryRun = false } = {}) {
       } catch (error) {
         console.error("[datoms-alerts] supabase upsert failed:", error?.message || error);
       }
+      await recordDsMessageSendRest({
+        url: sbUrl,
+        key: sbKey,
+        companyId,
+        messageType,
+        stationCode: alert.station,
+        policyVersion: policy.version,
+        dedupeKey: alert.dedupeKey,
+        meta: { level: alert.level, title: alert.title }
+      });
       processed.push({
         dedupe_key: alert.dedupeKey,
         station: alert.station,

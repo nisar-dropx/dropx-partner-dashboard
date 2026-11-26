@@ -38,6 +38,13 @@ import {
   mapActiveOrders as mapActiveOrdersBase,
   parseLaborAssociates
 } from "./site-summary-map.mjs";
+import {
+  decideDsMessageSend,
+  fallbackDsMessagePolicy,
+  fetchDsMessagePolicy,
+  fetchLastDsMessageSentAt,
+  recordDsMessageSendRest
+} from "../ds-message-policy-rest.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -63,8 +70,11 @@ if (storeFlagIdx >= 0 && (!argStore || argStore.startsWith("--"))) {
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const THRESHOLD_S    = Math.max(1, Number(process.env.ACCEPTANCE_THRESHOLD_SECONDS ?? 15));
-const COOLDOWN_MS    = Math.max(60, Number(process.env.ALERT_COOLDOWN_MINUTES ?? 5)) * 60_000;
+const THRESHOLD_ENV  = Math.max(1, Number(process.env.ACCEPTANCE_THRESHOLD_SECONDS ?? 15));
+const COOLDOWN_ENV_MS = Math.max(60, Number(process.env.ALERT_COOLDOWN_MINUTES ?? 5)) * 60_000;
+let THRESHOLD_S = THRESHOLD_ENV;
+let COOLDOWN_MS = COOLDOWN_ENV_MS;
+let acceptancePolicy = fallbackDsMessagePolicy("site_summary_acceptance");
 const POLL_MS        = Math.max(10, Number(process.env.POLL_INTERVAL_SECONDS ?? 60)) * 1_000;
 const WA_URL         = (process.env.WHATSAPP_WORKER_URL ?? "").replace(/\/$/, "");
 const WA_TOKEN       = process.env.WHATSAPP_WORKER_TOKEN ?? "";
@@ -477,6 +487,31 @@ async function sbUpsert(table, rows, onConflict) {
   if (!r.ok) throw new Error(`Supabase upsert ${table}: ${r.status} ${await r.text()}`);
 }
 
+async function sbInsertReturning(table, rows) {
+  if (!SB_HEADERS || !rows.length) return [];
+  if (dryRun) {
+    console.log(`  [dry-run] insert ${rows.length} → ${table}`);
+    return rows.map((row, i) => ({ ...row, id: `dry-run-${i}` }));
+  }
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: "POST",
+    headers: { ...SB_HEADERS, Prefer: "return=representation" },
+    body: JSON.stringify(rows)
+  });
+  if (!r.ok) throw new Error(`Supabase insert ${table}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+async function sbSelect(table, query) {
+  if (!SB_HEADERS) return [];
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: "GET",
+    headers: SB_HEADERS
+  });
+  if (!r.ok) throw new Error(`Supabase select ${table}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
 async function sbDelete(table, filter) {
   if (!SB_HEADERS) return;
   if (dryRun) { console.log(`  [dry-run] delete ${table}?${filter}`); return; }
@@ -487,18 +522,66 @@ async function sbDelete(table, filter) {
   if (!r.ok) throw new Error(`Supabase delete ${table}: ${r.status} ${await r.text()}`);
 }
 
+/** In-memory throttle state for history archives (restart-safe via DB lookback). */
+const lastHistoryArchive = new Map(); // station → { atMs, signature }
+const HISTORY_MIN_INTERVAL_MS = Math.max(60_000, Number(process.env.SITE_SUMMARY_HISTORY_INTERVAL_MS ?? 120_000));
+
+function siteSummaryArchiveSignature(parts) {
+  return [parts.activeOrders, parts.pendingAcceptance, parts.totalAssociates, parts.waitingForOrders, parts.picking].join("|");
+}
+
+function shouldArchiveSiteSummaryHistory(input) {
+  const minInterval = input.minIntervalMs ?? HISTORY_MIN_INTERVAL_MS;
+  if (input.previousSignature != null && input.previousSignature !== input.nextSignature) return true;
+  if (input.lastArchivedAtMs == null) return true;
+  return input.nowMs - input.lastArchivedAtMs >= minInterval;
+}
+
+async function archiveSiteSummaryHistory(stationCode, snapshotRow, orderRows, signature) {
+  const inserted = await sbInsertReturning("ds_site_summary_snapshot_history", [snapshotRow]);
+  const snapshotId = inserted?.[0]?.id;
+  if (!snapshotId) return;
+  if (orderRows.length) {
+    await sbInsertReturning(
+      "ds_site_summary_order_history",
+      orderRows.map((o) => ({
+        snapshot_id: snapshotId,
+        company_id: o.company_id,
+        station_code: o.station_code,
+        oid: o.oid,
+        picker: o.picker,
+        items: o.items,
+        elapsed_seconds: o.elapsed_seconds,
+        pct_complete: o.pct_complete,
+        status: o.status,
+        acceptance_seconds: o.acceptance_seconds,
+        picking_seconds: o.picking_seconds,
+        pack_rack_seconds: o.pack_rack_seconds,
+        total_seconds: o.total_seconds,
+        acceptance_target_seconds: o.acceptance_target_seconds,
+        picking_target_seconds: o.picking_target_seconds,
+        pack_rack_target_seconds: o.pack_rack_target_seconds,
+        total_target_seconds: o.total_target_seconds,
+        fetched_at: o.fetched_at
+      }))
+    );
+  }
+  lastHistoryArchive.set(stationCode, { atMs: Date.now(), signature });
+}
+
 async function persistSiteSummary(stationCode, summaries, pending, activeOrders, associates) {
   if (!SUPABASE_KEY) {
     console.warn(`[${stationCode}] SUPABASE_SERVICE_KEY missing — skip Live Performance upsert`);
     return;
   }
   const fetchedAt = new Date().toISOString();
+  const nowMs = Date.parse(fetchedAt);
   const breaching = pending.filter((o) => o.elapsedS >= THRESHOLD_S);
   const worst = pending[0]?.elapsedS ?? null;
   const assoc = associates?.source && associates.source !== "none"
     ? associates
     : deriveAssociatesFromOrders(activeOrders);
-  await sbUpsert("ds_site_summary_snapshots", [{
+  const snapshotRow = {
     company_id: COMPANY_ID,
     station_code: stationCode,
     fetched_at: fetchedAt,
@@ -530,7 +613,8 @@ async function persistSiteSummary(stationCode, summaries, pending, activeOrders,
         total: assoc.total_associates
       }
     }
-  }], "company_id,station_code");
+  };
+  await sbUpsert("ds_site_summary_snapshots", [snapshotRow], "company_id,station_code");
 
   const orderRows = activeOrders.map((o) => ({
     company_id: COMPANY_ID,
@@ -567,6 +651,49 @@ async function persistSiteSummary(stationCode, summaries, pending, activeOrders,
       "ds_site_summary_orders",
       `company_id=eq.${COMPANY_ID}&station_code=eq.${stationCode}`
     );
+  }
+
+  // Append-only history (throttle ~2 min or on material change).
+  try {
+    const nextSignature = siteSummaryArchiveSignature({
+      activeOrders: summaries.length,
+      pendingAcceptance: pending.length,
+      totalAssociates: assoc.total_associates,
+      waitingForOrders: assoc.waiting_for_orders,
+      picking: assoc.picking_associates
+    });
+    let cached = lastHistoryArchive.get(stationCode) ?? null;
+    if (!cached) {
+      const recent = await sbSelect(
+        "ds_site_summary_snapshot_history",
+        `company_id=eq.${COMPANY_ID}&station_code=eq.${stationCode}&select=fetched_at,active_orders,pending_acceptance,total_associates,waiting_for_orders,picking_associates&order=fetched_at.desc&limit=1`
+      );
+      const row = recent?.[0];
+      if (row) {
+        cached = {
+          atMs: Date.parse(row.fetched_at),
+          signature: siteSummaryArchiveSignature({
+            activeOrders: Number(row.active_orders ?? 0),
+            pendingAcceptance: Number(row.pending_acceptance ?? 0),
+            totalAssociates: Number(row.total_associates ?? 0),
+            waitingForOrders: Number(row.waiting_for_orders ?? 0),
+            picking: Number(row.picking_associates ?? 0)
+          })
+        };
+        lastHistoryArchive.set(stationCode, cached);
+      }
+    }
+    if (shouldArchiveSiteSummaryHistory({
+      lastArchivedAtMs: cached?.atMs ?? null,
+      nowMs,
+      minIntervalMs: HISTORY_MIN_INTERVAL_MS,
+      previousSignature: cached?.signature ?? null,
+      nextSignature
+    })) {
+      await archiveSiteSummaryHistory(stationCode, snapshotRow, orderRows, nextSignature);
+    }
+  } catch (histErr) {
+    console.warn(`[${stationCode}] History archive skipped — ${histErr.message}`);
   }
 }
 
@@ -709,19 +836,47 @@ async function sendWhatsApp({ to, clientRef, imageBase64, caption }) {
   return JSON.parse(body || "{}");
 }
 
-// ── Cooldown state ────────────────────────────────────────────────────────────
-// Key: stationCode — value: timestamp of last sent alert
+// ── Policy + cooldown ───────────────────────────────────────────────────────────
 const lastAlertAt = new Map();
 
-function cooldownKey(station) { return station; }
-function isOnCooldown(station) {
-  const last = lastAlertAt.get(cooldownKey(station)) ?? 0;
-  return Date.now() - last < COOLDOWN_MS;
+async function ensureAcceptancePolicy() {
+  const row = await fetchDsMessagePolicy({
+    url: SUPABASE_URL,
+    key: SUPABASE_KEY,
+    companyId: COMPANY_ID,
+    messageType: "site_summary_acceptance"
+  });
+  if (row) {
+    acceptancePolicy = row;
+    if (row.thresholdSeconds != null) THRESHOLD_S = Math.max(1, Number(row.thresholdSeconds));
+    if (row.cooldownMinutes != null) COOLDOWN_MS = Math.max(60, Number(row.cooldownMinutes)) * 60_000;
+  } else {
+    acceptancePolicy = fallbackDsMessagePolicy("site_summary_acceptance");
+    THRESHOLD_S = acceptancePolicy.thresholdSeconds ?? THRESHOLD_ENV;
+    COOLDOWN_MS = Math.max(60, acceptancePolicy.cooldownMinutes) * 60_000;
+  }
 }
-function markSent(station) { lastAlertAt.set(cooldownKey(station), Date.now()); }
+
+async function shouldSkipAlert(station) {
+  let lastMs = lastAlertAt.get(station) ?? null;
+  if (SUPABASE_KEY) {
+    const fromDb = await fetchLastDsMessageSentAt({
+      url: SUPABASE_URL,
+      key: SUPABASE_KEY,
+      companyId: COMPANY_ID,
+      messageType: "site_summary_acceptance",
+      stationCode: station
+    });
+    if (fromDb != null) lastMs = lastMs == null ? fromDb : Math.max(lastMs, fromDb);
+  }
+  const decision = decideDsMessageSend({ policy: acceptancePolicy, lastSentAtMs: lastMs });
+  return decision.allowSend ? null : decision;
+}
 
 // ── Main poll ─────────────────────────────────────────────────────────────────
 async function pollOnce() {
+  await ensureAcceptancePolicy().catch(() => null);
+
   let cookies;
   try {
     cookies = await getMonsCookies();
@@ -755,8 +910,9 @@ async function pollOnce() {
       }
 
       if (breaching.length === 0) continue;
-      if (isOnCooldown(station)) {
-        console.log(`[${station}] On cooldown — skipping alert`);
+      const skip = await shouldSkipAlert(station);
+      if (skip) {
+        console.log(`[${station}] Policy skip — ${skip.reason}`);
         continue;
       }
 
@@ -779,7 +935,17 @@ async function pollOnce() {
       if (!to) { console.error(`[${station}] No WhatsApp group JID configured — skipping`); continue; }
 
       await sendWhatsApp({ to, clientRef, imageBase64, caption });
-      markSent(station);
+      lastAlertAt.set(station, Date.now());
+      await recordDsMessageSendRest({
+        url: SUPABASE_URL,
+        key: SUPABASE_KEY,
+        companyId: COMPANY_ID,
+        messageType: "site_summary_acceptance",
+        stationCode: station,
+        policyVersion: acceptancePolicy.version,
+        dedupeKey: clientRef,
+        meta: { breaching: breaching.length, worst_seconds: worst.elapsedS }
+      });
       console.log(`[${station}] Alert sent → ${to} (worst: ${worstClock})`);
 
     } catch (e) {

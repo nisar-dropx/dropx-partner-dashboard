@@ -19,6 +19,8 @@ export default async function DarkStorePpiPage({
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
   const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
+  const canViewPulse = canViewDsOperations(authorization, "ds_workforce_pulse");
+  const canViewPolicies = canViewDsOperations(authorization, "ds_message_policies");
   const date = String(searchParams?.date ?? "").trim();
   const station = String(searchParams?.station ?? "").trim().toUpperCase();
 
@@ -48,7 +50,7 @@ export default async function DarkStorePpiPage({
           subtitle="Pick-per-item report for the selected store — associate output, sum PPT, and hourly rollups from the VM feed."
           action={<span className="status-pill good">FSD · Admin · IST</span>}
         />
-        <DsOperationsTabs active="ppi" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} />
+        <DsOperationsTabs active="ppi" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} canViewPulse={canViewPulse} canViewPolicies={canViewPolicies} />
         {error ? (
           <section className="panel message-panel error">
             <div className="panel-body">

@@ -13,15 +13,16 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const date = url.searchParams.get("date")?.trim() || undefined;
+    const asOf = url.searchParams.get("asOf")?.trim() || undefined;
     const station = url.searchParams.get("station")?.trim().toUpperCase() || "";
 
     if (station) {
-      const detail = await loadDsLiveStoreDetail(authorization, station, { businessDate: date });
+      const detail = await loadDsLiveStoreDetail(authorization, station, { businessDate: date, asOf });
       if (!detail) return NextResponse.json({ error: "Store not in scope." }, { status: 404 });
       return NextResponse.json({ detail });
     }
 
-    const payload = await loadDsLivePerformance(authorization, { businessDate: date });
+    const payload = await loadDsLivePerformance(authorization, { businessDate: date, asOf });
     return NextResponse.json(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load Dark Store live performance.";

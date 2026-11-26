@@ -1,5 +1,6 @@
 import type { ReportBotWorkspace } from "./workspace";
-// Pure Report Bot rules. No imports, so node --test can load this file directly.
+import { reportBotCategoryNeedsApproval, type DsMessagePolicy } from "../ops-pulse/ds-message-policy.ts";
+// Pure Report Bot rules (ds-message-policy is pure — safe for node --test).
 
 export type BotMode = "off" | "listen" | "live";
 /** Per-group operating mode for the TCC3 pilot. Company mode remains the master switch. */
@@ -333,7 +334,19 @@ export type DeliveryContext = {
   autoReplyPolicy?: AutoReplyPolicy | null;
   category?: string | null;
   highRiskActions?: boolean;
+  /** When set (e.g. dark_store workspace), high-risk categories follow DB urgency policy. */
+  dsMessagePolicies?: DsMessagePolicy[];
 };
+
+/** Report Bot category → needs approval; falls back to HIGH_RISK_CATEGORIES when policies are absent. */
+export function categoryHighRiskForDelivery(
+  category: string | null | undefined,
+  policies?: DsMessagePolicy[] | null
+): boolean {
+  if (category == null || category === "") return false;
+  if (policies?.length) return reportBotCategoryNeedsApproval(category, policies);
+  return HIGH_RISK_CATEGORIES.has(category);
+}
 
 /**
  * Final send decision after company mode, group mode and high-risk policy.
@@ -346,7 +359,7 @@ export function decideGroupDelivery(analysis: Analysis, settings: DeliverySettin
   if (context.groupMode === "observe" || context.companyMode === "listen") return "needs_approval";
   if (context.autoReplyPolicy === "silent") return "silent";
   const highRisk = context.autoReplyPolicy === "never"
-    || (context.category != null && HIGH_RISK_CATEGORIES.has(context.category))
+    || categoryHighRiskForDelivery(context.category, context.dsMessagePolicies)
     || context.highRiskActions === true
     || analysis.open_actions.some((action) => action.high_risk);
   if (highRisk) return "needs_approval";

@@ -5,6 +5,7 @@ import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { buildDsStoreMeta, dsRegionKey, type DsManagerOption, type DsStoreMeta } from "@/lib/ops-pulse/ds-scope";
 import { loadDsManagerOptions } from "@/lib/ops-pulse/load-ds-manager-options";
 import { buildPpiHourlyDisplay, istParts } from "@/lib/ops-pulse/ds-ppi-hourly-display";
+import { nearestSnapshotBefore, parseSiteSummaryAsOf } from "@/lib/ops-pulse/ds-site-summary-history";
 
 /** PPI feed older than this is called out as stale (VM polls ~30 min). */
 export const DS_PPI_STALE_MS = 75 * 60 * 1000;
@@ -118,6 +119,9 @@ export type DsLiveInsight = {
 
 export type DsLiveNetwork = {
   businessDate: string;
+  /** ISO instant used for Site Summary history (null = live / latest tables). */
+  asOf: string | null;
+  mode: "live" | "historical";
   generatedAt: string;
   storeCount: number;
   orderCount: number;
@@ -314,9 +318,11 @@ function buildInsights(stores: DsLiveStore[]): DsLiveInsight[] {
   return insights;
 }
 
-function emptyNetwork(businessDate: string, insightDetail: string): DsLiveNetwork {
+function emptyNetwork(businessDate: string, insightDetail: string, asOf: string | null = null): DsLiveNetwork {
   return {
     businessDate,
+    asOf,
+    mode: asOf ? "historical" : "live",
     generatedAt: new Date().toISOString(),
     storeCount: 0,
     orderCount: 0,
@@ -335,19 +341,65 @@ function emptyNetwork(businessDate: string, insightDetail: string): DsLiveNetwor
   };
 }
 
+type HistorySnapRow = SnapshotRow & { id: string };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadHistoricalSnapshots(
+  db: any,
+  companyId: string,
+  codes: string[],
+  asOfMs: number
+): Promise<Map<string, SnapshotRow & { id: string }>> {
+  const asOfIso = new Date(asOfMs).toISOString();
+  const lookbackIso = new Date(asOfMs - 36 * 3600 * 1000).toISOString();
+  const out = new Map<string, SnapshotRow & { id: string }>();
+  if (!codes.length) return out;
+
+  // Per-station queries so a busy store cannot crowd others out of a shared limit.
+  const batches = await Promise.all(
+    codes.map((code) =>
+      db
+        .from("ds_site_summary_snapshot_history")
+        .select("id,station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
+        .eq("company_id", companyId)
+        .eq("station_code", code)
+        .lte("fetched_at", asOfIso)
+        .gte("fetched_at", lookbackIso)
+        .order("fetched_at", { ascending: false })
+        .limit(40)
+        .then((res: { data: HistorySnapRow[] | null; error: { message: string } | null }) => ({
+          code,
+          rows: (res.error ? [] : res.data ?? []) as HistorySnapRow[]
+        }))
+    )
+  );
+
+  for (const { code, rows } of batches) {
+    const nearest = nearestSnapshotBefore(rows, asOfMs);
+    if (!nearest) continue;
+    const full = rows.find((r: HistorySnapRow) => r.id === nearest.id);
+    if (full) out.set(code, full);
+  }
+  return out;
+}
+
 /**
  * Light network board load — aggregates only. No per-order / hourly detail
  * so polling cannot hang Postgres or pile work onto the VM path.
  */
 export async function loadDsLivePerformance(
   authorization: AuthorizationContext,
-  options?: { businessDate?: string }
+  options?: { businessDate?: string; asOf?: string | null }
 ): Promise<DsLiveNetwork> {
   const scope = await darkStoreScope(authorization);
   const businessDate = options?.businessDate && /^\d{4}-\d{2}-\d{2}$/.test(options.businessDate)
     ? options.businessDate
     : todayKolkata();
-  const now = Date.now();
+  const asOfRaw = String(options?.asOf ?? "").trim();
+  const historical = Boolean(asOfRaw);
+  const asOfMs = historical ? parseSiteSummaryAsOf(asOfRaw) : Date.now();
+  const asOfIso = historical ? new Date(asOfMs).toISOString() : null;
+  const now = historical ? asOfMs : Date.now();
   const codes = scope.locations.map((l) => l.station_code);
   const nameByCode = new Map(scope.locations.map((l) => [l.station_code, {
     name: l.station_name || l.station_code,
@@ -364,7 +416,7 @@ export async function loadDsLivePerformance(
   })));
 
   if (!codes.length) {
-    return emptyNetwork(businessDate, "No NOW stores are available for your access.");
+    return emptyNetwork(businessDate, "No NOW stores are available for your access.", asOfIso);
   }
 
   const db = scope.db;
@@ -374,17 +426,20 @@ export async function loadDsLivePerformance(
   );
 
   // Board queries only — keep columns narrow and avoid order-level tables.
-  const [dailyRes, inboundRes, snapshotsRes, runsRes] = await Promise.all([
+  const [dailyRes, inboundRes, snapshotsRes, runsRes, historyMap] = await Promise.all([
     db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,total_ppt_ms,avg_ppt_seconds,fetched_at")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).in("station_code", codes),
     db.from("ds_inbound_shipments").select("id,station_code,pct_completion,status")
       .eq("company_id", scope.companyId).in("station_code", codes)
       .or("status.is.null,status.neq.complete"),
-    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
-      .eq("company_id", scope.companyId).in("station_code", codes),
+    historical
+      ? Promise.resolve({ data: [], error: null })
+      : db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
+        .eq("company_id", scope.companyId).in("station_code", codes),
     db.from("ds_fetch_runs").select("station_code,run_type,status,finished_at,started_at")
       .eq("company_id", scope.companyId).in("station_code", codes).eq("run_type", "ppi")
-      .order("started_at", { ascending: false }).limit(Math.min(80, codes.length * 3))
+      .order("started_at", { ascending: false }).limit(Math.min(80, codes.length * 3)),
+    historical ? loadHistoricalSnapshots(db, scope.companyId, codes, asOfMs) : Promise.resolve(new Map<string, SnapshotRow & { id: string }>())
   ]);
 
   for (const result of [dailyRes, inboundRes, runsRes]) {
@@ -393,7 +448,9 @@ export async function loadDsLivePerformance(
 
   const daily = (dailyRes.data ?? []) as DailyRow[];
   const inboundLite = (inboundRes.data ?? []) as Pick<InboundRow, "id" | "station_code" | "pct_completion" | "status">[];
-  const snapshots = (snapshotsRes.error ? [] : snapshotsRes.data ?? []) as SnapshotRow[];
+  const snapshots = historical
+    ? [...historyMap.values()]
+    : ((snapshotsRes.error ? [] : snapshotsRes.data ?? []) as SnapshotRow[]);
   const runs = (runsRes.data ?? []) as FetchRunRow[];
 
   // Recon totals only for open shipments — one grouped pass, capped.
@@ -443,9 +500,9 @@ export async function loadDsLivePerformance(
       pickerCount: pickersDaily.filter((r) => Number(r.order_count ?? 0) > 0).length,
       avgPptSeconds,
       ppiFetchedAt,
-      ppiStale: ageMs(ppiFetchedAt ?? lastFetchAt, now) > DS_PPI_STALE_MS,
+      ppiStale: historical ? false : ageMs(ppiFetchedAt ?? lastFetchAt, now) > DS_PPI_STALE_MS,
       siteFetchedAt: snap?.fetched_at ?? null,
-      siteStale: !snap || ageMs(snap?.fetched_at, now) > DS_SITE_SUMMARY_STALE_MS,
+      siteStale: historical ? false : (!snap || ageMs(snap?.fetched_at, now) > DS_SITE_SUMMARY_STALE_MS),
       activeOrders: Number(snap?.active_orders ?? 0),
       pendingAcceptance: Number(snap?.pending_acceptance ?? 0),
       breachingCount: Number(snap?.breaching_count ?? 0),
@@ -473,6 +530,8 @@ export async function loadDsLivePerformance(
 
   return {
     businessDate,
+    asOf: asOfIso,
+    mode: historical ? "historical" : "live",
     generatedAt: new Date().toISOString(),
     storeCount: stores.length,
     orderCount: stores.reduce((s, r) => s + r.orderCount, 0),
@@ -495,7 +554,7 @@ export async function loadDsLivePerformance(
 export async function loadDsLiveStoreDetail(
   authorization: AuthorizationContext,
   stationCode: string,
-  options?: { businessDate?: string }
+  options?: { businessDate?: string; asOf?: string | null }
 ): Promise<DsLiveStoreDetail | null> {
   const code = stationCode.trim().toUpperCase();
   if (!code) return null;
@@ -507,10 +566,17 @@ export async function loadDsLiveStoreDetail(
   const businessDate = options?.businessDate && /^\d{4}-\d{2}-\d{2}$/.test(options.businessDate)
     ? options.businessDate
     : todayKolkata();
-  const now = Date.now();
+  const asOfRaw = String(options?.asOf ?? "").trim();
+  const historical = Boolean(asOfRaw);
+  const asOfMs = historical ? parseSiteSummaryAsOf(asOfRaw) : Date.now();
+  const now = historical ? asOfMs : Date.now();
   const db = scope.db;
 
-  const [dailyRes, hourlyRes, ordersRes, inboundRes, snapRes, siteOrdersRes, runRes] = await Promise.all([
+  const historyPending = historical
+    ? loadHistoricalSnapshots(db, scope.companyId, [code], asOfMs)
+    : Promise.resolve(new Map<string, SnapshotRow & { id: string }>());
+
+  const [dailyRes, hourlyRes, ordersRes, inboundRes, snapRes, siteOrdersRes, runRes, historyMap] = await Promise.all([
     db.from("ds_ppi_daily").select("station_code,username,order_count,unit_count,total_ppt_ms,avg_ppt_seconds,fetched_at")
       .eq("company_id", scope.companyId).eq("business_date", businessDate).eq("station_code", code),
     db.from("ds_ppi_hourly").select("station_code,hour,order_count,unit_count,total_ppt_ms,avg_ppt_seconds")
@@ -521,14 +587,19 @@ export async function loadDsLiveStoreDetail(
     db.from("ds_inbound_shipments").select("id,station_code,amazon_shipment_ref_id,status,pct_completion,total_units,estimated_arrival_time,receive_time")
       .eq("company_id", scope.companyId).eq("station_code", code)
       .or("status.is.null,status.neq.complete").limit(30),
-    db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
-      .eq("company_id", scope.companyId).eq("station_code", code).maybeSingle(),
-    db.from("ds_site_summary_orders").select("station_code,oid,picker,items,elapsed_seconds,pct_complete,status,acceptance_seconds,picking_seconds,pack_rack_seconds,total_seconds,acceptance_target_seconds,picking_target_seconds,pack_rack_target_seconds,total_target_seconds")
-      .eq("company_id", scope.companyId).eq("station_code", code)
-      .order("elapsed_seconds", { ascending: false }).limit(80),
+    historical
+      ? Promise.resolve({ data: null, error: null })
+      : db.from("ds_site_summary_snapshots").select("station_code,fetched_at,active_orders,pending_acceptance,breaching_count,worst_elapsed_seconds,sla_seconds,waiting_for_orders,on_break,offered_associates,picking_associates,packing_racking,other_activities,total_associates")
+        .eq("company_id", scope.companyId).eq("station_code", code).maybeSingle(),
+    historical
+      ? Promise.resolve({ data: [], error: null })
+      : db.from("ds_site_summary_orders").select("station_code,oid,picker,items,elapsed_seconds,pct_complete,status,acceptance_seconds,picking_seconds,pack_rack_seconds,total_seconds,acceptance_target_seconds,picking_target_seconds,pack_rack_target_seconds,total_target_seconds")
+        .eq("company_id", scope.companyId).eq("station_code", code)
+        .order("elapsed_seconds", { ascending: false }).limit(80),
     db.from("ds_fetch_runs").select("station_code,run_type,status,finished_at,started_at")
       .eq("company_id", scope.companyId).eq("station_code", code).eq("run_type", "ppi")
-      .order("started_at", { ascending: false }).limit(1)
+      .order("started_at", { ascending: false }).limit(1),
+    historyPending
   ]);
 
   if (dailyRes.error) throw new Error(dailyRes.error.message);
@@ -540,8 +611,20 @@ export async function loadDsLiveStoreDetail(
   const hourly = (hourlyRes.data ?? []) as HourlyRow[];
   const orders = (ordersRes.data ?? []) as OrderRow[];
   const inbound = (inboundRes.data ?? []) as InboundRow[];
-  const siteOrders = (siteOrdersRes.error ? [] : siteOrdersRes.data ?? []) as SiteOrderRow[];
-  const snap = (snapRes.error ? null : snapRes.data) as SnapshotRow | null;
+  const histSnap = historical ? historyMap.get(code) ?? null : null;
+  let siteOrders = (siteOrdersRes.error ? [] : siteOrdersRes.data ?? []) as SiteOrderRow[];
+  const snap = historical
+    ? (histSnap as SnapshotRow | null)
+    : ((snapRes.error ? null : snapRes.data) as SnapshotRow | null);
+  if (historical && histSnap && "id" in histSnap) {
+    const histOrdersRes = await db
+      .from("ds_site_summary_order_history")
+      .select("station_code,oid,picker,items,elapsed_seconds,pct_complete,status,acceptance_seconds,picking_seconds,pack_rack_seconds,total_seconds,acceptance_target_seconds,picking_target_seconds,pack_rack_target_seconds,total_target_seconds")
+      .eq("snapshot_id", (histSnap as { id: string }).id)
+      .order("elapsed_seconds", { ascending: false })
+      .limit(80);
+    siteOrders = (histOrdersRes.error ? [] : histOrdersRes.data ?? []) as SiteOrderRow[];
+  }
   const run = ((runRes.data ?? []) as FetchRunRow[])[0] ?? null;
 
   const shipmentIds = inbound.map((r) => r.id);
@@ -580,9 +663,9 @@ export async function loadDsLiveStoreDetail(
     pickerCount: daily.filter((r) => Number(r.order_count ?? 0) > 0).length,
     avgPptSeconds,
     ppiFetchedAt,
-    ppiStale: ageMs(ppiFetchedAt ?? lastFetchAt, now) > DS_PPI_STALE_MS,
+    ppiStale: historical ? false : ageMs(ppiFetchedAt ?? lastFetchAt, now) > DS_PPI_STALE_MS,
     siteFetchedAt: snap?.fetched_at ?? null,
-    siteStale: Boolean(snap) && ageMs(snap?.fetched_at, now) > DS_SITE_SUMMARY_STALE_MS,
+    siteStale: historical ? false : (!snap || ageMs(snap?.fetched_at, now) > DS_SITE_SUMMARY_STALE_MS),
     activeOrders: Number(snap?.active_orders ?? 0),
     pendingAcceptance: Number(snap?.pending_acceptance ?? 0),
     breachingCount: Number(snap?.breaching_count ?? 0),

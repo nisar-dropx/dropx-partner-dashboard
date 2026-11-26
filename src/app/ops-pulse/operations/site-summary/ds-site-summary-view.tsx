@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import type { DsLiveNetwork, DsLiveSiteOrder, DsLiveStoreDetail } from "@/lib/ops-pulse/ds-live-performance";
 import s from "./ds-ops.module.css";
@@ -36,8 +37,18 @@ function ageLabel(iso: string | null | undefined) {
   return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
 }
 
+function istPartsFromMs(ms: number) {
+  const ist = new Date(ms + 5.5 * 3600 * 1000);
+  return {
+    date: ist.toISOString().slice(0, 10),
+    hour: ist.getUTCHours(),
+    minute: ist.getUTCMinutes()
+  };
+}
+
 /** Advance running clocks since the last VM poll so DropX tracks Amazon between fetches. */
-function liveOrders(orders: DsLiveSiteOrder[], fetchedAt: string | null | undefined, nowMs: number): DsLiveSiteOrder[] {
+function liveOrders(orders: DsLiveSiteOrder[], fetchedAt: string | null | undefined, nowMs: number, live: boolean): DsLiveSiteOrder[] {
+  if (!live) return orders;
   const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : NaN;
   const dt = Number.isFinite(fetchedMs) ? Math.max(0, (nowMs - fetchedMs) / 1000) : 0;
   if (dt < 0.5) return orders;
@@ -71,27 +82,43 @@ function liveOrders(orders: DsLiveSiteOrder[], fetchedAt: string | null | undefi
 export function DsSiteSummaryView({
   network,
   initialDetail,
-  initialStation
+  initialStation,
+  initialAsOf
 }: {
   network: DsLiveNetwork;
   initialDetail: DsLiveStoreDetail | null;
   initialStation: string;
+  initialAsOf?: string | null;
 }) {
+  const router = useRouter();
+  const isLive = network.mode !== "historical" && !initialAsOf;
+  const seedParts = initialAsOf
+    ? istPartsFromMs(Date.parse(initialAsOf) || Date.now())
+    : istPartsFromMs(Date.now());
   const [station, setStation] = useState(initialStation || network.stores[0]?.stationCode || "");
   const [detail, setDetail] = useState(initialDetail);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [histDate, setHistDate] = useState(seedParts.date);
+  const [histTime, setHistTime] = useState(
+    `${String(seedParts.hour).padStart(2, "0")}:${String(seedParts.minute).padStart(2, "0")}`
+  );
 
-  async function loadStation(next: string) {
+  function asOfParam() {
+    if (isLive) return "";
+    return `${histDate}T${histTime}`;
+  }
+
+  async function loadStation(next: string, asOfOverride?: string | null) {
     setStation(next);
     setError(null);
     setPending(true);
     try {
-      const res = await fetch(
-        `/api/ops-pulse/ds-live?date=${encodeURIComponent(network.businessDate)}&station=${encodeURIComponent(next)}`,
-        { cache: "no-store" }
-      );
+      const asOf = asOfOverride === undefined ? asOfParam() : (asOfOverride ?? "");
+      const qs = new URLSearchParams({ date: network.businessDate, station: next });
+      if (asOf) qs.set("asOf", asOf);
+      const res = await fetch(`/api/ops-pulse/ds-live?${qs.toString()}`, { cache: "no-store" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String((body as { error?: string }).error ?? "Site Summary load failed"));
       setDetail((body as { detail: DsLiveStoreDetail }).detail);
@@ -103,14 +130,28 @@ export function DsSiteSummaryView({
     }
   }
 
+  function goLive() {
+    const qs = new URLSearchParams();
+    if (station) qs.set("station", station);
+    router.push(`/operations/site-summary${qs.toString() ? `?${qs}` : ""}`);
+  }
+
+  function applyHistory() {
+    const qs = new URLSearchParams();
+    if (station) qs.set("station", station);
+    qs.set("date", histDate);
+    qs.set("asOf", `${histDate}T${histTime}`);
+    router.push(`/operations/site-summary?${qs.toString()}`);
+  }
+
   useEffect(() => {
-    if (!station) return;
+    if (!station || !isLive) return;
     let cancelled = false;
     let inFlight = false;
     const id = window.setInterval(() => {
       if (cancelled || inFlight) return;
       inFlight = true;
-      void loadStation(station).finally(() => {
+      void loadStation(station, "").finally(() => {
         inFlight = false;
       });
     }, POLL_MS);
@@ -119,12 +160,13 @@ export function DsSiteSummaryView({
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [station, network.businessDate]);
+  }, [station, network.businessDate, isLive]);
 
   useEffect(() => {
+    if (!isLive) return;
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [isLive]);
 
   const associates = detail?.associates ?? {
     waitingForOrders: 0,
@@ -136,7 +178,7 @@ export function DsSiteSummaryView({
     total: 0
   };
   const pendingAcceptance = detail?.pendingAcceptance ?? 0;
-  const orders = liveOrders(detail?.siteOrders ?? [], detail?.siteFetchedAt, nowMs);
+  const orders = liveOrders(detail?.siteOrders ?? [], detail?.siteFetchedAt, nowMs, isLive);
 
   return (
     <div className={s.report}>
@@ -144,12 +186,16 @@ export function DsSiteSummaryView({
         <div className={s.title}>
           <h2>Site Summary</h2>
           <p>
-            <i className={pending ? undefined : s.live} aria-hidden />
-            {pending ? "Updating…" : "Live"}
+            <i className={pending || !isLive ? undefined : s.live} aria-hidden />
+            {pending ? "Updating…" : isLive ? "Live" : `As of ${histDate} ${histTime} IST`}
             <span aria-hidden>·</span>
             Feed {ageLabel(detail?.siteFetchedAt)}
-            <span aria-hidden>·</span>
-            Poll 10s
+            {isLive ? (
+              <>
+                <span aria-hidden>·</span>
+                Poll 10s
+              </>
+            ) : null}
           </p>
         </div>
         <div className={s.actions}>
@@ -167,10 +213,37 @@ export function DsSiteSummaryView({
               ))}
             </select>
           </label>
-          <button type="button" className={s.primary} onClick={() => void loadStation(station)} disabled={pending || !station}>
-            {pending ? <Loader2 size={14} className="spin" aria-hidden /> : <RefreshCw size={14} aria-hidden />}
-            Refresh
+          <label className={s.label} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Date
+            <input
+              type="date"
+              value={histDate}
+              onChange={(e) => setHistDate(e.target.value)}
+              style={{ height: 36, borderRadius: 10, border: "1px solid var(--line)", padding: "0 10px", font: "inherit" }}
+            />
+          </label>
+          <label className={s.label} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Time IST
+            <input
+              type="time"
+              value={histTime}
+              onChange={(e) => setHistTime(e.target.value)}
+              style={{ height: 36, borderRadius: 10, border: "1px solid var(--line)", padding: "0 10px", font: "inherit" }}
+            />
+          </label>
+          <button type="button" className={s.primary} onClick={applyHistory} disabled={pending || !station}>
+            View history
           </button>
+          {!isLive ? (
+            <button type="button" className={s.primary} onClick={goLive} disabled={pending}>
+              Back to live
+            </button>
+          ) : (
+            <button type="button" className={s.primary} onClick={() => void loadStation(station, "")} disabled={pending || !station}>
+              {pending ? <Loader2 size={14} className="spin" aria-hidden /> : <RefreshCw size={14} aria-hidden />}
+              Refresh
+            </button>
+          )}
         </div>
       </div>
 
@@ -263,8 +336,10 @@ export function DsSiteSummaryView({
         ) : (
           <p className={s.empty}>
             {detail?.siteFetchedAt
-              ? "No active orders in the latest Site Summary poll."
-              : "Site Summary has not been ingested for this store yet. Keep the VM monitor running."}
+              ? "No active orders in this Site Summary snapshot."
+              : isLive
+                ? "Site Summary has not been ingested for this store yet. Keep the VM monitor running."
+                : "No Site Summary history found at or before this time."}
           </p>
         )}
       </section>

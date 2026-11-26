@@ -19,6 +19,8 @@ export default async function DarkStoreLivePerformancePage({
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
   const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
+  const canViewPulse = canViewDsOperations(authorization, "ds_workforce_pulse");
+  const canViewPolicies = canViewDsOperations(authorization, "ds_message_policies");
   const date = String(searchParams?.date ?? "").trim();
 
   let error: string | null = null;
@@ -40,7 +42,7 @@ export default async function DarkStoreLivePerformancePage({
           subtitle="Network PPI, Site Summary acceptance, and inbound from the WorkSpaces VM — board polls lightly; store detail loads on select."
           action={<span className="status-pill good">FSD · Admin · IST</span>}
         />
-        <DsOperationsTabs active="live" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} />
+        <DsOperationsTabs active="live" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} canViewPulse={canViewPulse} canViewPolicies={canViewPolicies} />
         {error ? (
           <section className="panel message-panel error">
             <div className="panel-body">

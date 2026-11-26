@@ -11,7 +11,7 @@ function compile(file,mocks={}) {
   return module.exports;
 }
 const appNav=compile('../lib/app-navigation.ts');
-const nav=compile('../lib/ops-pulse/navigation.ts',{'@/lib/app-navigation':appNav,'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:auth=>auth.allowCod},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:email=>Boolean(email)},'@/lib/ops-pulse/ds-live-performance-access':{DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary','ds_cold_chain_alerts'],canViewDsOperations:()=>true,canViewDsLivePerformance:()=>true}});
+const nav=compile('../lib/ops-pulse/navigation.ts',{'@/lib/app-navigation':appNav,'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:auth=>auth.allowCod},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:email=>Boolean(email)},'@/lib/ops-pulse/ds-live-performance-access':{DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary','ds_cold_chain_alerts','ds_workforce_pulse','ds_message_policies'],canViewDsOperations:()=>true,canViewDsLivePerformance:()=>true}});
 const views=['amazon_edsp','amazon_now','flipkart_odh_mdh'].map(key=>({key,label:key,items:nav.opsNavCatalogForMode(key)}));
 const codes=[...new Set(views.flatMap(view=>view.items.flatMap(item=>[item.code,...(item.permissionCodes??[]),...(item.children??[]).flatMap(child=>[child.code,...(child.permissionSections??[]).map(section=>section.code)])])))].filter(Boolean);
 const pages=codes.map(code=>({id:code,code,name:`Permission ${code}`}));

@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
+import { decideDsMessageSend } from "@/lib/ops-pulse/ds-message-policy";
+import {
+  getDsMessagePolicy,
+  lastDsMessageSentAt,
+  recordDsMessageSend
+} from "@/lib/ops-pulse/ds-message-policy-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -87,12 +93,21 @@ export async function GET(request: Request) {
 
   const { data: stationRows, error: stErr } = await admin
     .from("stations")
-    .select("id,company_id")
+    .select("id,company_id,station_code")
     .in("id", locationIds)
-    .limit(1);
+    .limit(50);
   if (stErr) return NextResponse.json({ error: stErr.message }, { status: 500 });
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
   const companyId = stationRows[0].company_id as string;
+  const stationCodeByLocation = new Map(
+    stationRows.map((s) => [s.id as string, String(s.station_code ?? "").trim().toUpperCase()])
+  );
+  let opsIncompletePolicy: Awaited<ReturnType<typeof getDsMessagePolicy>> | null = null;
+  try {
+    opsIncompletePolicy = await getDsMessagePolicy(companyId, "ops_incomplete");
+  } catch (policyErr) {
+    console.warn("[ops-incomplete] policy load failed:", policyErr instanceof Error ? policyErr.message : policyErr);
+  }
 
   // Store Operations = one checklist per store per work_date. Submitted (or cancelled) counts as done.
   const { data: checklists, error: clErr } = await admin
@@ -141,18 +156,49 @@ export async function GET(request: Request) {
     const reason = !status ? "not started" : status === "open" ? "started but not submitted" : `status ${status}`;
     const text = `Store operations in Ops Pulse for yesterday not completed. Why?`;
     const label = `${group.groupName}`;
+    const stationCode = stationCodeByLocation.get(locationId) ?? null;
 
     sendTasks.push(
-      workerRequest<{ id: string }>(settings, "/send", {
-        method: "POST",
-        body: { to: toGroup, text, client_ref: clientRef },
-        timeoutMs: 45_000
-      })
-        .then(() => { sent++; results.push(`${label}: ${reason} — sent`); })
-        .catch((err) => {
+      (async () => {
+        if (opsIncompletePolicy) {
+          try {
+            const lastSent = await lastDsMessageSentAt(companyId, "ops_incomplete", stationCode);
+            const decision = decideDsMessageSend({ policy: opsIncompletePolicy, lastSentAtMs: lastSent });
+            if (!decision.allowSend) {
+              results.push(`${label}: skipped — ${decision.reason}`);
+              return;
+            }
+          } catch (gateErr) {
+            console.warn(`[ops-incomplete] policy gate failed for ${label}:`, gateErr);
+          }
+        }
+        try {
+          await workerRequest<{ id: string }>(settings, "/send", {
+            method: "POST",
+            body: { to: toGroup, text, client_ref: clientRef },
+            timeoutMs: 45_000
+          });
+          sent++;
+          results.push(`${label}: ${reason} — sent`);
+          if (opsIncompletePolicy) {
+            try {
+              await recordDsMessageSend(
+                companyId,
+                "ops_incomplete",
+                stationCode,
+                opsIncompletePolicy.version,
+                clientRef,
+                { work_date: yesterday, reason }
+              );
+            } catch (logErr) {
+              console.warn("[ops-incomplete] send log failed:", logErr);
+            }
+          }
+        } catch (err) {
           const msg = err instanceof WorkerError ? err.message : String(err);
           results.push(`${label}: send failed — ${msg}`);
-        })
+        }
+      })()
     );
   }
 

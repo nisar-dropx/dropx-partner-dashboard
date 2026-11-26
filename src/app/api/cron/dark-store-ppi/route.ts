@@ -95,6 +95,7 @@ export async function GET(request: Request) {
   // Run cleanup at 3am IST (hour === 3) — deletes data older than yesterday
   if (hour === 3) {
     await db.rpc("ds_ppi_cleanup");
+    await db.rpc("ds_site_summary_history_cleanup", { p_keep_days: 31 });
   }
 
   const { data: groups } = await db.from("report_bot_groups")

@@ -198,7 +198,9 @@ define(
     "/operations/live",
     "/operations/ppi",
     "/operations/site-summary",
+    "/operations/workforce-pulse",
     "/operations/cold-chain",
+    "/operations/message-policies",
     "/performance/review-status",
     "/performance/cortex",
     "/?view=hourly",
@@ -252,7 +254,7 @@ define(
   "Review request",
 );
 define(
-  ["/cps", "/cpu", "/cps/adhoc-activity"],
+  ["/cps", "/cpu", "/cps/adhoc-activity", "/cps/fixed-pay-da"],
   "cost",
   "Trace unit economics to the volumes and cost components in this sample.",
   ["Component", "Units", "Amount", "Cost / unit"],

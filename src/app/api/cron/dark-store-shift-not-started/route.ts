@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
+import { decideDsMessageSend } from "@/lib/ops-pulse/ds-message-policy";
+import {
+  getDsMessagePolicy,
+  lastDsMessageSentAt,
+  recordDsMessageSend
+} from "@/lib/ops-pulse/ds-message-policy-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -92,12 +98,21 @@ export async function GET(request: Request) {
   // --- 2. Find company_id ---
   const { data: stationRows, error: stErr } = await admin
     .from("stations")
-    .select("id,company_id")
+    .select("id,company_id,station_code")
     .in("id", locationIds)
-    .limit(1);
+    .limit(50);
   if (stErr) return NextResponse.json({ error: stErr.message }, { status: 500 });
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
   const companyId = stationRows[0].company_id as string;
+  const stationCodeByLocation = new Map(
+    stationRows.map((s) => [s.id as string, String(s.station_code ?? "").trim().toUpperCase()])
+  );
+  let shiftNotStartedPolicy: Awaited<ReturnType<typeof getDsMessagePolicy>> | null = null;
+  try {
+    shiftNotStartedPolicy = await getDsMessagePolicy(companyId, "shift_not_started");
+  } catch (policyErr) {
+    console.warn("[shift-not-started] policy load failed:", policyErr instanceof Error ? policyErr.message : policyErr);
+  }
 
   // --- 3. Load report-bot settings for worker client ---
   const settings = await loadReportBotSettings(companyId);
@@ -178,18 +193,49 @@ export async function GET(request: Request) {
         ? `Shift operations in Ops Pulse for ${slot} hrs shift not yet started. Why?`
         : `Shift operations in Ops Pulse for ${slot} hrs shift not completed. Why?`;
       const label = `${group.groupName} ${slot}`;
+      const stationCode = stationCodeByLocation.get(locationId) ?? null;
 
       sendTasks.push(
-        workerRequest<{ id: string }>(settings, "/send", {
-          method: "POST",
-          body: { to: toGroup, text, client_ref: clientRef },
-          timeoutMs: 45_000
-        })
-          .then(() => { sent++; results.push(`${label}: ${reason} — sent`); })
-          .catch((err) => {
+        (async () => {
+          if (shiftNotStartedPolicy) {
+            try {
+              const lastSent = await lastDsMessageSentAt(companyId, "shift_not_started", stationCode);
+              const decision = decideDsMessageSend({ policy: shiftNotStartedPolicy, lastSentAtMs: lastSent });
+              if (!decision.allowSend) {
+                results.push(`${label}: skipped — ${decision.reason}`);
+                return;
+              }
+            } catch (gateErr) {
+              console.warn(`[shift-not-started] policy gate failed for ${label}:`, gateErr);
+            }
+          }
+          try {
+            await workerRequest<{ id: string }>(settings, "/send", {
+              method: "POST",
+              body: { to: toGroup, text, client_ref: clientRef },
+              timeoutMs: 45_000
+            });
+            sent++;
+            results.push(`${label}: ${reason} — sent`);
+            if (shiftNotStartedPolicy) {
+              try {
+                await recordDsMessageSend(
+                  companyId,
+                  "shift_not_started",
+                  stationCode,
+                  shiftNotStartedPolicy.version,
+                  clientRef,
+                  { slot, shift_date: shiftDate, reason }
+                );
+              } catch (logErr) {
+                console.warn("[shift-not-started] send log failed:", logErr);
+              }
+            }
+          } catch (err) {
             const msg = err instanceof WorkerError ? err.message : String(err);
             results.push(`${label}: send failed — ${msg}`);
-          })
+          }
+        })()
       );
     }
   }

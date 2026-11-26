@@ -28,6 +28,7 @@ import {
   type LocalClock
 } from "@/lib/report-bot/logic";
 import { reportBotDb, type ReportBotSettings } from "@/lib/report-bot/settings";
+import { loadDsMessagePolicies } from "@/lib/ops-pulse/ds-message-policy-store";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 
 type GroupRow = { workspace: ReportBotWorkspace; id: string; company_id: string; wa_group_id: string; group_name: string | null; location_id: string | null; is_enabled: boolean; bot_in_group: boolean; mode?: GroupMode };
@@ -342,12 +343,21 @@ export async function processSubmissions(settings: ReportBotSettings, deadline: 
       const reportType = candidates.find((candidate) => candidate.id === analysis.matched_report_type_id) ?? null;
       const request = reportType ? requests.find((row) => row.report_type_id === reportType.id) ?? null : null;
       const groupMode = group.mode ?? "observe";
+      let dsMessagePolicies;
+      if (group.workspace === "dark_store") {
+        try {
+          dsMessagePolicies = await loadDsMessagePolicies(settings.company_id);
+        } catch {
+          dsMessagePolicies = undefined;
+        }
+      }
       const decision = decideGroupDelivery(analysis, settings, {
         companyMode: settings.mode,
         groupMode,
         autoReplyPolicy: reportType?.auto_reply_policy,
         category: reportType?.category,
-        highRiskActions: analysis.open_actions.some((action) => action.high_risk)
+        highRiskActions: analysis.open_actions.some((action) => action.high_risk),
+        dsMessagePolicies
       });
       const feedback = decision === "silent" ? null : composeFeedback(settings, {
         verdict: analysis.verdict,

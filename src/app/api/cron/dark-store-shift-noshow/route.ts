@@ -3,6 +3,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 import { biometricEnrolmentIdCandidates, normalizeBiometricEnrolmentId } from "@/lib/biometric/enrolment-resolution";
+import { decideDsMessageSend } from "@/lib/ops-pulse/ds-message-policy";
+import {
+  getDsMessagePolicy,
+  lastDsMessageSentAt,
+  recordDsMessageSend
+} from "@/lib/ops-pulse/ds-message-policy-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -79,6 +85,15 @@ export async function GET(request: Request) {
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
 
   const companyId = stationRows[0].company_id as string;
+  const stationCodeByLocation = new Map(
+    stationRows.map((s) => [s.id as string, String(s.station_code ?? "").trim().toUpperCase()])
+  );
+  let shiftNoshowPolicy: Awaited<ReturnType<typeof getDsMessagePolicy>> | null = null;
+  try {
+    shiftNoshowPolicy = await getDsMessagePolicy(companyId, "shift_noshow");
+  } catch (policyErr) {
+    console.warn("[shift-noshow] policy load failed:", policyErr instanceof Error ? policyErr.message : policyErr);
+  }
 
   // location_id → { waGroupId, groupName } — skip groups with no WA group ID
   const groupByLocation = new Map(
@@ -322,17 +337,48 @@ export async function GET(request: Request) {
       const clientRef = `ssn-${locShort}-${dateShort}-${shiftKey.replace(":", "")}${testMode ? "-t" : forceMode ? "-f" : ""}`;
       const toGroup = testMode ? testingGroupJid : group.waGroupId;
       const label = `${group.groupName} ${shiftKey}`;
+      const stationCode = stationCodeByLocation.get(locationId) ?? null;
 
       sendTasks.push(
-        workerRequest<{ id: string }>(settings, "/send", {
-          method: "POST",
-          body: { to: toGroup, text, client_ref: clientRef },
-        })
-          .then(() => { sent++; results.push(`${label}: ${notReported.length} not reported — sent`); })
-          .catch((err) => {
+        (async () => {
+          if (shiftNoshowPolicy) {
+            try {
+              const lastSent = await lastDsMessageSentAt(companyId, "shift_noshow", stationCode);
+              const decision = decideDsMessageSend({ policy: shiftNoshowPolicy, lastSentAtMs: lastSent });
+              if (!decision.allowSend) {
+                results.push(`${label}: skipped — ${decision.reason}`);
+                return;
+              }
+            } catch (gateErr) {
+              console.warn(`[shift-noshow] policy gate failed for ${label}:`, gateErr);
+            }
+          }
+          try {
+            await workerRequest<{ id: string }>(settings, "/send", {
+              method: "POST",
+              body: { to: toGroup, text, client_ref: clientRef },
+            });
+            sent++;
+            results.push(`${label}: ${notReported.length} not reported — sent`);
+            if (shiftNoshowPolicy) {
+              try {
+                await recordDsMessageSend(
+                  companyId,
+                  "shift_noshow",
+                  stationCode,
+                  shiftNoshowPolicy.version,
+                  clientRef,
+                  { shift: shiftKey, not_reported: notReported.length }
+                );
+              } catch (logErr) {
+                console.warn("[shift-noshow] send log failed:", logErr);
+              }
+            }
+          } catch (err) {
             const msg = err instanceof WorkerError ? err.message : String(err);
             results.push(`${label}: send failed — ${msg}`);
-          })
+          }
+        })()
       );
     }
   }

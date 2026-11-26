@@ -5,13 +5,17 @@ export function DsOperationsTabs({
   canViewLive = false,
   canViewPpi = false,
   canViewSite = false,
-  canViewColdChain = false
+  canViewColdChain = false,
+  canViewPulse = false,
+  canViewPolicies = false
 }: {
-  active: "live" | "ppi" | "site" | "cold-chain";
+  active: "live" | "ppi" | "site" | "cold-chain" | "pulse" | "policies";
   canViewLive?: boolean;
   canViewPpi?: boolean;
   canViewSite?: boolean;
   canViewColdChain?: boolean;
+  canViewPulse?: boolean;
+  canViewPolicies?: boolean;
 }) {
   return (
     <nav className="workspace-tabs" aria-label="Dark Store Operations">
@@ -30,9 +34,19 @@ export function DsOperationsTabs({
           Site Summary
         </Link>
       ) : null}
+      {canViewPulse ? (
+        <Link className={active === "pulse" ? "active" : ""} href="/operations/workforce-pulse">
+          Workforce Pulse
+        </Link>
+      ) : null}
       {canViewColdChain ? (
         <Link className={active === "cold-chain" ? "active" : ""} href="/operations/cold-chain">
           Cold chain alerts
+        </Link>
+      ) : null}
+      {canViewPolicies ? (
+        <Link className={active === "policies" ? "active" : ""} href="/operations/message-policies">
+          Message policies
         </Link>
       ) : null}
     </nav>

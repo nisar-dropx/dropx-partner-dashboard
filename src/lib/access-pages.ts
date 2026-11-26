@@ -42,6 +42,8 @@ export const accessPages = [
   { code: "ds_ppi", name: "Dark Store · PPI", sort_order: 84 },
   { code: "ds_site_summary", name: "Dark Store · Site Summary", sort_order: 84 },
   { code: "ds_cold_chain_alerts", name: "Dark Store · Cold chain alerts", sort_order: 84 },
+  { code: "ds_workforce_pulse", name: "Dark Store · Workforce Pulse", sort_order: 84 },
+  { code: "ds_message_policies", name: "Dark Store · Message policies", sort_order: 84 },
   { code: "capacity", name: "Capacity", sort_order: 84 },
   { code: "capacity_overview", name: "Capacity Overview", sort_order: 84 },
   { code: "capacity_associates", name: "Associate SPR", sort_order: 84 },
@@ -685,7 +687,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
-    // ds_live_performance / ds_ppi / ds_site_summary / ds_cold_chain_alerts are role-gated (FSD / Admin) — not seeded from Review Desk.
+    // ds_live_performance / ds_ppi / ds_site_summary / ds_cold_chain_alerts / ds_workforce_pulse / ds_message_policies are role-gated (FSD / Admin) — not seeded from Review Desk.
     // Settings can grant them later via the page matrix without another code change.
     await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], "station_edd");
     for (const code of ["edd_live_ops", "edd_station_board", "edd_ageing", "edd_performance", "edd_edds", "edd_scorecard", "edd_scrub"]) {

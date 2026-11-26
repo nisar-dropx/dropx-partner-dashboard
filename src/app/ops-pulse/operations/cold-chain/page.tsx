@@ -15,6 +15,8 @@ export default async function DarkStoreColdChainPage() {
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
   const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
+  const canViewPulse = canViewDsOperations(authorization, "ds_workforce_pulse");
+  const canViewPolicies = canViewDsOperations(authorization, "ds_message_policies");
 
   let error: string | null = null;
   let alerts: Awaited<ReturnType<typeof loadDatomsAlerts>> = [];
@@ -39,6 +41,8 @@ export default async function DarkStoreColdChainPage() {
           canViewPpi={canViewPpi}
           canViewSite={canViewSite}
           canViewColdChain={canViewColdChain}
+          canViewPulse={canViewPulse}
+          canViewPolicies={canViewPolicies}
         />
         {error ? (
           <section className="panel message-panel error">

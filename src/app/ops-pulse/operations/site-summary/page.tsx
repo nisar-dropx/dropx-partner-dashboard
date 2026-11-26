@@ -12,28 +12,35 @@ export const maxDuration = 45;
 export default async function DarkStoreSiteSummaryPage({
   searchParams
 }: {
-  searchParams?: { station?: string; date?: string };
+  searchParams?: { station?: string; date?: string; asOf?: string };
 }) {
   const authorization = await requireDsOperationsAccess("ds_site_summary");
   const canViewLive = canViewDsOperations(authorization, "ds_live_performance");
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
   const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
+  const canViewPulse = canViewDsOperations(authorization, "ds_workforce_pulse");
+  const canViewPolicies = canViewDsOperations(authorization, "ds_message_policies");
   const station = String(searchParams?.station ?? "").trim().toUpperCase();
   const date = String(searchParams?.date ?? "").trim();
+  const asOf = String(searchParams?.asOf ?? "").trim() || undefined;
 
   let error: string | null = null;
   let network = null;
   let detail = null;
   try {
     network = await loadDsLivePerformance(authorization, {
-      businessDate: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined
+      businessDate: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+      asOf
     });
     const selected = station && network.stores.some((s) => s.stationCode === station)
       ? station
       : network.stores[0]?.stationCode ?? "";
     if (selected) {
-      detail = await loadDsLiveStoreDetail(authorization, selected, { businessDate: network.businessDate });
+      detail = await loadDsLiveStoreDetail(authorization, selected, {
+        businessDate: network.businessDate,
+        asOf
+      });
     }
   } catch (err) {
     error = err instanceof Error ? err.message : "Unable to load Site Summary.";
@@ -45,10 +52,18 @@ export default async function DarkStoreSiteSummaryPage({
         <PageHead
           eyebrow="Ops Pulse · Dark Store"
           title="Site Summary"
-          subtitle="Associate status and active orders from the Site Summary monitor — Actual / Target clocks highlight SLA breaches."
-          action={<span className="status-pill good">Live feed · IST</span>}
+          subtitle="Associate status and active orders from the Site Summary monitor — browse history by IST date/time or stay on Live."
+          action={<span className={`status-pill ${asOf ? "watch" : "good"}`}>{asOf ? "Historical · IST" : "Live feed · IST"}</span>}
         />
-        <DsOperationsTabs active="site" canViewLive={canViewLive} canViewPpi={canViewPpi} canViewSite={canViewSite} canViewColdChain={canViewColdChain} />
+        <DsOperationsTabs
+          active="site"
+          canViewLive={canViewLive}
+          canViewPpi={canViewPpi}
+          canViewSite={canViewSite}
+          canViewColdChain={canViewColdChain}
+          canViewPulse={canViewPulse}
+          canViewPolicies={canViewPolicies}
+        />
         {error ? (
           <section className="panel message-panel error">
             <div className="panel-body">
@@ -57,7 +72,12 @@ export default async function DarkStoreSiteSummaryPage({
             </div>
           </section>
         ) : network ? (
-          <DsSiteSummaryView network={network} initialDetail={detail} initialStation={detail?.stationCode ?? station} />
+          <DsSiteSummaryView
+            network={network}
+            initialDetail={detail}
+            initialStation={detail?.stationCode ?? station}
+            initialAsOf={network.asOf}
+          />
         ) : null}
       </main>
     </AppShell>

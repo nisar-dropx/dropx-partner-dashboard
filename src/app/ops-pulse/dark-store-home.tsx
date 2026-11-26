@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { ArrowUpRight, Store, Clock3 } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
 import { hasPermission, type AuthorizationContext } from '@/lib/authorization';
+import { canViewDsOperations } from '@/lib/ops-pulse/ds-live-performance-access';
 import { todayKolkata, type CodLocationRow } from '@/lib/ops-pulse/cod';
 import { validMonth } from '@/lib/finance/pricing';
 import { loadDsCommandData } from '@/lib/ops-pulse/ds-command-data';
@@ -86,13 +87,15 @@ export function DarkStoreHome({authorization:a,locations,searchParams={}}:Props)
   const links=[
     ['ops_rostering','Shift Attendance',`/ops-pulse?view=manpower&date=${today}${selected.length===1?`&location=${encodeURIComponent(selected[0].id)}`:''}`],
     ['ops_rostering','Rostering',`/rostering${selected.length===1?`?station=${encodeURIComponent(selected[0].station_code)}`:''}`],
+    canViewDsOperations(a,'ds_workforce_pulse')?['ds_workforce_pulse','Workforce Pulse','/operations/workforce-pulse']:null,
+    canViewDsOperations(a,'ds_site_summary')?['ds_site_summary','Site Summary','/operations/site-summary']:null,
     ['si_handover','Activities & Handover','/si-handover?view=start'],
     ['store_audits','Store Audits','/store-audits'],
     ['performance_review','Performance',`/performance?view=reviews&date=${performanceDate}${selected.length===1?`&review=${encodeURIComponent(selected[0].station_code)}`:''}`],
     ['payment_approvals','Payment Approvals','/payments/approvals'],
     ['cpu_overview','CPU',`/cpu?period=monthly&month=${month}&scope=${encodeURIComponent(selected.map(l=>l.station_code).join(','))}`],
     ['ops_report_bot','Report Bot','/report-bot']
-  ].filter(([code])=>hasPermission(a,code,'access'));
+  ].filter((row):row is [string,string,string]=>Boolean(row)).filter(([code])=>code.startsWith('ds_')?true:hasPermission(a,code,'access'));
   return <AppShell active="Command Center" pageCode="ops_pulse"><div className={styles.command}>
     <header className={styles.hero}><div><p className={styles.eyebrow}><span className={styles.workspaceMark}><Store size={13}/> DS</span> DARK STORE OPERATIONS</p><h1>Command center</h1><p>Your priorities first. Open a section to act or inspect actuals.</p></div><div className={styles.today}><span><Clock3 size={15}/>{date(today)} · IST</span><DarkStoreRefresh/></div></header>
     <OpsWorkspaceShortcuts items={links.map(([,label,href])=>({label,href}))}/>

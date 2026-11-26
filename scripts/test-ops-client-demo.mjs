@@ -28,7 +28,7 @@ const nav = load("src/lib/ops-pulse/navigation.ts", {
   "@/lib/ops-pulse/cod-pending-access": { canAccessDailyCodPending: fail },
   "@/lib/ops-pulse/last-mile-report-bot-access": { canAccessLastMileReportBot: fail },
   "@/lib/ops-pulse/ds-live-performance-access": {
-    DS_OPERATIONS_PAGE_CODES: ["ds_live_performance", "ds_ppi", "ds_site_summary", "ds_cold_chain_alerts"],
+    DS_OPERATIONS_PAGE_CODES: ["ds_live_performance", "ds_ppi", "ds_site_summary", "ds_cold_chain_alerts", "ds_workforce_pulse", "ds_message_policies"],
     canViewDsOperations: () => false,
     canViewDsLivePerformance: () => false,
   },

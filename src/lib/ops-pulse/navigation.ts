@@ -104,7 +104,8 @@ const cps: NavItem = {
   icon: "C",
   children: [
     { code: "cps_overview", label: "Cost overview", href: "/cps" },
-    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" }
+    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" },
+    { code: "cps_overview", label: "Fixed Pay DA", href: "/cps/fixed-pay-da" }
 
   ]
 };
@@ -252,7 +253,9 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
         { code: "ds_live_performance", label: "Live performance", href: "/operations/live" },
         { code: "ds_ppi", label: "PPI", href: "/operations/ppi" },
         { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" },
-        { code: "ds_cold_chain_alerts", label: "Cold chain alerts", href: "/operations/cold-chain" }
+        { code: "ds_workforce_pulse", label: "Workforce Pulse", href: "/operations/workforce-pulse" },
+        { code: "ds_cold_chain_alerts", label: "Cold chain alerts", href: "/operations/cold-chain" },
+        { code: "ds_message_policies", label: "Message policies", href: "/operations/message-policies" }
       ]
     },
     {

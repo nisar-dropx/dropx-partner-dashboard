@@ -3,6 +3,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 import { biometricEnrolmentIdCandidates, normalizeBiometricEnrolmentId } from "@/lib/biometric/enrolment-resolution";
+import { decideDsMessageSend } from "@/lib/ops-pulse/ds-message-policy";
+import {
+  getDsMessagePolicy,
+  lastDsMessageSentAt,
+  recordDsMessageSend
+} from "@/lib/ops-pulse/ds-message-policy-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -64,6 +70,15 @@ export async function GET(request: Request) {
   if (!stationRows?.length) return NextResponse.json({ ok: true, sent: 0, reason: "no stations found" });
 
   const companyId = stationRows[0].company_id as string;
+  const stationCodeByLocation = new Map(
+    stationRows.map((s) => [s.id as string, String(s.station_code ?? "").trim().toUpperCase()])
+  );
+  let shiftNoRosterPolicy: Awaited<ReturnType<typeof getDsMessagePolicy>> | null = null;
+  try {
+    shiftNoRosterPolicy = await getDsMessagePolicy(companyId, "shift_no_roster");
+  } catch (policyErr) {
+    console.warn("[no-roster] policy load failed:", policyErr instanceof Error ? policyErr.message : policyErr);
+  }
 
   const groupByLocation = new Map(
     groups
@@ -235,19 +250,48 @@ export async function GET(request: Request) {
     const toGroup = testMode ? testingGroupJid : group.waGroupId;
     const label = group.groupName;
 
+    const stationCode = stationCodeByLocation.get(locationId) ?? null;
+
     sendTasks.push(
-      workerRequest<{ id: string }>(settings, "/send", {
-        method: "POST",
-        body: { to: toGroup, text, client_ref: clientRef },
-      })
-        .then(() => {
+      (async () => {
+        if (shiftNoRosterPolicy) {
+          try {
+            const lastSent = await lastDsMessageSentAt(companyId, "shift_no_roster", stationCode);
+            const decision = decideDsMessageSend({ policy: shiftNoRosterPolicy, lastSentAtMs: lastSent });
+            if (!decision.allowSend) {
+              results.push(`${label}: skipped — ${decision.reason}`);
+              return;
+            }
+          } catch (gateErr) {
+            console.warn(`[no-roster] policy gate failed for ${label}:`, gateErr);
+          }
+        }
+        try {
+          await workerRequest<{ id: string }>(settings, "/send", {
+            method: "POST",
+            body: { to: toGroup, text, client_ref: clientRef },
+          });
           sent++;
           results.push(`${label}: ${noRoster.length} no-roster, ${unapproved.length} unapproved — sent`);
-        })
-        .catch((err) => {
+          if (shiftNoRosterPolicy) {
+            try {
+              await recordDsMessageSend(
+                companyId,
+                "shift_no_roster",
+                stationCode,
+                shiftNoRosterPolicy.version,
+                clientRef,
+                { flagged: flagged.length, no_roster: noRoster.length, unapproved: unapproved.length }
+              );
+            } catch (logErr) {
+              console.warn("[no-roster] send log failed:", logErr);
+            }
+          }
+        } catch (err) {
           const msg = err instanceof WorkerError ? err.message : String(err);
           results.push(`${label}: send failed — ${msg}`);
-        })
+        }
+      })()
     );
   }
 
