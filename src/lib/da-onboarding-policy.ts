@@ -7,7 +7,7 @@ export const workforceQueues:{id:WorkforceQueue;label:string}[]=[{id:'attention'
 export function workforceStage(row:DARow):Exclude<WorkforceQueue,'attention'>{
  const lifecycle=(row.owner?.lifecycle_status||'').toLowerCase();
  if(['offboarded','closed','exited','cancelled'].includes(lifecycle)||(!row.owner&&row.guided?.closed_at))return 'offboarded';
- if(['inactive','suspended','offboarding','resignation_pending'].includes(lifecycle))return 'inactive';
+ if(['inactive','suspended','offboarding'].includes(lifecycle))return 'inactive';
  if(row.owner?.is_active===false&&row.owner?.onboarding_status==='active')return 'inactive';
  // Legacy profiles keep lifecycle=onboarding even after approved activation. Use the established registration + active flags.
  if(row.owner?.onboarding_status==='active'&&row.owner.is_active===true)return 'active';

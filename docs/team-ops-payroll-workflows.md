@@ -1,14 +1,19 @@
-## Workforce bank-file eligibility — 26 November 2026
-
-Registration and employment status alone no longer block payment of an otherwise
-eligible published Workforce balance. This includes pending/returned registration,
-resignation pending and inactive/departed profiles. Both profile and location-row
-candidate writers retain deleted-profile exclusion, publication freshness, balances,
-existing processing/paid instructions, bank details, PAN, holds, location scope and
-company access. Helper policy is unchanged. No profiles are reactivated. Migration:
-`20261126104243_workforce_bank_pay_nonactive_profiles.sql`.
-
 # Team Ops, People and payroll workflows (October 2026)
+
+## Four profile statuses and Active-only Workforce bank files — 26 November 2026
+
+Profile status is Pending, Active, Returned or Inactive. Registration submitted,
+under review and approved-awaiting-activation display as Pending; rejected/returned
+registration displays as Returned. A completed registration with its enabled flag
+and pending resignation/termination/settlement stays Active until its exit is
+completed or the profile is explicitly deactivated. Completed exits, suspension,
+archival and inactive flags display Inactive. Exit case status/history is retained
+separately; no request is silently approved, rejected or discarded.
+People registers and payout rows share this status projection. Workforce bank files
+again require Active, including pending exits, with all existing publication, PAN,
+bank, balance, hold and payment-processing checks. Pending/Returned/Inactive cannot
+generate files. Helper bank policy is unchanged. This supersedes the earlier
+non-active bank allowance. Migration: `20261126112024_workforce_four_profile_statuses_active_bank.sql`.
 
 ## Provider-member Nill Map — 25 November 2026
 

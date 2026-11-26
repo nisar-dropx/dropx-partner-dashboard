@@ -3256,5 +3256,23 @@ await db.query('update public.workforce set deleted_at=null where id=$1',[atomic
 const nonActiveBatch=await createProfileBatch({operation:id(990),fingerprint:'9'.repeat(64),workforceIds:[atomicUnderReviewWorkforce]});
 assert.equal(nonActiveBatch.items.length,1,'a non-active payable profile can generate a bank instruction');
 assert.equal((await previewProfile(atomicUnderReviewWorkforce)).eligible,false,'the new processing instruction cannot be paid twice');
+// Current four-state profile policy: pending exit remains Active; other profiles cannot bank.
+const activeOnlyMigration=readFileSync(new URL('../supabase/migrations/20261126112024_workforce_four_profile_statuses_active_bank.sql',import.meta.url),'utf8');
+await db.exec(activeOnlyMigration);await db.exec(activeOnlyMigration);
+await transitionPayment({operation:id(2000),paymentItemId:nonActiveBatch.items[0].item_id,outcome:'cancelled',remarks:'Policy fixture reset'});
+for(const [onboarding,lifecycle,active,expected] of [
+ ['active','resignation_pending',true,true],['active','active',true,true],['active','onboarding',true,true],['active','settlement_pending',true,true],
+ ['pending','onboarding',true,false],['returned','onboarding',true,false],['under_review','onboarding',false,false],['active','inactive',false,false],['active','exited',false,false]
+]) {
+ await db.query('update public.workforce set onboarding_status=$1,lifecycle_status=$2,is_active=$3 where id=$4',[onboarding,lifecycle,active,atomicUnderReviewWorkforce]);
+ assert.equal((await previewProfile(atomicUnderReviewWorkforce)).eligible,expected,JSON.stringify({onboarding,lifecycle,active}));
+ const rows=await db.query('select * from public.workforce_preview_payout_payment_rows($1,$2::date,$3::date,$4::jsonb)',[company,periodStart,periodEnd,JSON.stringify([{workforce_id:atomicUnderReviewWorkforce,station_id:kbweStation}])]);
+ assert.equal(rows.rows[0].eligible,expected,JSON.stringify(rows.rows));
+}
+await assert.rejects(createProfileBatch({operation:id(2001),fingerprint:'8'.repeat(64),workforceIds:[atomicUnderReviewWorkforce]}),/Only Active Workforce/);
+await db.query("update public.workforce set onboarding_status='active',lifecycle_status='resignation_pending',is_active=true where id=$1",[atomicUnderReviewWorkforce]);
+const pendingExitBatch=await createProfileBatch({operation:id(2002),fingerprint:'7'.repeat(64),workforceIds:[atomicUnderReviewWorkforce]});
+assert.equal(pendingExitBatch.items.length,1,'pending resignation does not prevent Active bank generation');
+assert.equal((await previewProfile(atomicUnderReviewWorkforce)).eligible,false,'processing still prevents duplicate bank generation');
 await db.close();
 console.log("Workforce payout bank payment ledger verification passed.");

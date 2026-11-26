@@ -213,6 +213,9 @@ function publicationRefreshPending(row: WorkforcePayoutRow) {
   return row.paymentSummary?.eligible === false
     && row.paymentSummary.eligibilityCode?.trim().toLowerCase() === "publication_refresh_pending";
 }
+function hasActiveWorkforceProfileStatus(row: WorkforcePayoutRow) {
+  return row.dropxStatus.trim().toLowerCase() === "active";
+}
 function normalizedPayoutStatus(status: unknown) {
   return String(status ?? "").trim().toLowerCase();
 }
@@ -273,6 +276,7 @@ function canCreateBankPayment(
     || isPayoutOnHoldStatus(visibleStatus)
     || (audience === "workforce" && visibleStatus === "pan not linked");
   return Boolean(row.reviewSubjectId && (audience === "helpers" || row.paymentDetailsAvailable))
+    && (audience === "helpers" || hasActiveWorkforceProfileStatus(row))
     && (audience === "helpers" || row.publicationLockState === "locked")
     && row.paymentSummary?.status !== "Payment Processing"
     && !paymentStatusBlocked

@@ -1,3 +1,4 @@
+import { workforceProfileStatus } from "@/lib/workforce-register-policy";
 import { OpsPendingRegistrations } from "@/components/ops-pending-registrations";
 import { pendingWorkforceRegistration, registrationFilledFields, registrationProgress } from "@/lib/workforce-registration-progress";
 import { workforceProfileFields } from "@/lib/profile-field-rules";
@@ -215,24 +216,7 @@ function fieldExecutiveStatus(
   executive: Pick<ExecutiveRow, "is_active" | "onboarding_status" | "people_lifecycle_status">,
   canonicalWorkforce = false
 ) {
-  const lifecycleStatus = String(executive.people_lifecycle_status ?? "").trim().toLowerCase();
-  if (lifecycleStatus === "offboarding") return "Offboarding";
-  if (lifecycleStatus === "offboarded") return "Offboarded";
-  if (lifecycleStatus === "suspended") return "Suspended";
-  const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
-  if (canonicalWorkforce) {
-    if (onboardingStatus === "pending") return "Pending";
-    if (onboardingStatus === "under_review") return "Workforce approval pending";
-    if (onboardingStatus === "returned") return "Correction requested";
-    if (onboardingStatus === "approved") return "Activation pending";
-    if (onboardingStatus === "rejected") return "Rejected";
-    if (onboardingStatus === "cancelled") return "Inactive";
-    if (onboardingStatus === "active") return executive.is_active ? "Active" : "Activation pending";
-  }
-  if (onboardingStatus === "under_review") return "Under review";
-  if (onboardingStatus === "returned") return "Returned";
-  if (!executive.is_active) return "Inactive";
-  return onboardingStatus === "active" ? "Active" : "Pending";
+  return workforceProfileStatus(executive);
 }
 
 function WorkforceRegisterSummary({ rows }: { rows: FieldExecutiveListRow[] }) {
@@ -854,7 +838,7 @@ async function loadFieldExecutiveData(
       registrationDraftAt: draftsByWorkforce.get(executive.id)?.updated_at ?? null,
       registrationPending: pendingWorkforceRegistration(executive),
       registrationFields: accessSurface === "ops" ? registrationFilledFields(executive, draftsByWorkforce.get(executive.id)) : undefined,
-      status: partnerStates.get(executive.id)?.label || fieldExecutiveStatus(executive, targetRegister === "workforce"),
+      status: fieldExecutiveStatus(executive, targetRegister === "workforce"),
       partnerOnboarding: partnerStates.get(executive.id),
       canQueueAmazonId: !authorization.readOnly && Boolean(authorization.permissions.delivery_associates?.canEdit && partnerStates.get(executive.id)?.can_trigger)
     };

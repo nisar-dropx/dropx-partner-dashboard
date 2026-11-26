@@ -26,7 +26,7 @@ export function mergeDARegistry(amazon:AmazonDaPerson[],guided:GuidedDA[],owners
   linked.sort((a,b)=>Number(b.status==='ACTIVE')-Number(a.status==='ACTIVE')||a.providerId.localeCompare(b.providerId));
   const a=linked[0]||null,lifecycle=(o?.lifecycle_status||'').toLowerCase();
   const status=['offboarded','closed','exited','cancelled'].includes(lifecycle)||(!o&&g?.closed_at)?'OFFBOARDED':
-   ['inactive','suspended','offboarding','resignation_pending'].includes(lifecycle)||(o?.onboarding_status==='active'&&o.is_active===false)?'INACTIVE':
+   ['inactive','suspended','offboarding'].includes(lifecycle)||(o?.onboarding_status==='active'&&o.is_active===false)?'INACTIVE':
    o?.onboarding_status==='active'&&o.is_active===true?'ACTIVE':'ONBOARDING';
   return {key:o?.id||g!.id,name:o?.full_name||g!.full_name,email:g?.alias_email||o?.email||null,phone:o?.mobile||g?.mobile||null,
    amazon:a,linkedAmazon:linked,guided:g,owner:o,conflict,status,origin:g?'System invitation':'Existing DropX profile',next:conflict?'Review identity link':status==='ACTIVE'?'Check setup progress':'Complete DropX registration'};

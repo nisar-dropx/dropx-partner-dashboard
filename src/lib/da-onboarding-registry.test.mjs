@@ -13,3 +13,5 @@ test('duplicate managed email keeps invitations separate and flags conflict',()=
 test('closed invitations and failed source updates stay visible',()=>{const rows=mergeDARegistry([],[g({closed_at:'2026-11-08'}),g({id:'failed',syncError:'unavailable'})],[],[]);assert.equal(rows.find(r=>r.key==='guided1').status,'OFFBOARDED');assert.equal(daNeedsAttention(rows.find(r=>r.key==='failed')),true);});
 test('same email with conflicting driver ID does not attach another account',()=>{const [row]=mergeDARegistry([a()],[g({driverId:'DIFFERENT'})],[],[]);assert.equal(row.conflict,true);assert.equal(row.amazon,null);});
 test('an active canonical ID stays active despite Amazon onboarding status',()=>{const [row]=mergeDARegistry([a({status:'ONBOARDING'})],[g()],[o({onboarding_status:'active',is_active:true,lifecycle_status:'onboarding'})],[]);assert.equal(row.status,'ACTIVE');});
+
+test('pending resignation does not move an Active profile into the inactive queue',()=>{const [row]=mergeDARegistry([],[],[o({onboarding_status:'active',is_active:true,lifecycle_status:'resignation_pending'})],[]);assert.equal(row.status,'ACTIVE');});

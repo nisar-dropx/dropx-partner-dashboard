@@ -45,11 +45,11 @@ test("Now policy tolerates relationship arrays and canonical model aliases", () 
 test("onboarding status takes precedence over the activation flag", () => {
   assert.equal(workforceProfileStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: false }), "Pending");
   assert.equal(workforceProfileStatus({ onboarding_status: "pending", lifecycle_status: "onboarding", is_active: true }), "Pending");
-  assert.equal(workforceProfileStatus({ onboarding_status: "under_review", is_active: false }), "Under Review");
+  assert.equal(workforceProfileStatus({ onboarding_status: "under_review", is_active: false }), "Pending");
   assert.equal(workforceProfileStatus({ onboarding_status: "returned", is_active: false }), "Returned");
   assert.equal(workforceProfileStatus({ onboarding_status: "active", is_active: true }), "Active");
   assert.equal(workforceProfileStatus({ onboarding_status: "active", is_active: false }), "Inactive");
-  assert.equal(workforceProfileStatus({ onboarding_status: "pending", people_lifecycle_status: "offboarded", is_active: false }), "Offboarded");
+  assert.equal(workforceProfileStatus({ onboarding_status: "pending", people_lifecycle_status: "offboarded", is_active: false }), "Inactive");
 });
 
 import { pendingWorkforceRegistration, activeWorkforceRegistration, registrationFilledFields, registrationProgress } from "./workforce-registration-progress.ts";
@@ -86,4 +86,12 @@ test("progress counts only configured fields and distinguishes required missing 
   ]);
   assert.equal(result.filled, 1); assert.equal(result.total, 2); assert.equal(result.missingRequired, 1);
   assert.deepEqual(result.groups[1].missing, ["Bank account"]);
+});
+
+test('profile status has four values and pending exit is still Active',()=>{
+ for(const lifecycle_status of ['active','onboarding','resignation_pending','termination_pending','settlement_pending']) assert.equal(workforceProfileStatus({onboarding_status:'active',is_active:true,lifecycle_status}),'Active',lifecycle_status);
+ for(const lifecycle_status of ['inactive','resigned','exited','offboarded','settled','terminated','suspended']) assert.equal(workforceProfileStatus({onboarding_status:'active',is_active:true,lifecycle_status}),'Inactive',lifecycle_status);
+ for(const onboarding_status of ['pending','submitted','under_review','approved']) assert.equal(workforceProfileStatus({onboarding_status,is_active:true}),'Pending',onboarding_status);
+ assert.equal(workforceProfileStatus({onboarding_status:'rejected',is_active:true}),'Returned');
+ assert.equal(workforceProfileStatus({onboarding_status:'active',lifecycle_status:'resignation_pending',is_active:false}),'Inactive','an explicit deactivation remains inactive');
 });

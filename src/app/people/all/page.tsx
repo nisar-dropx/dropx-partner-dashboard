@@ -1,3 +1,4 @@
+import { workforceProfileStatus } from "@/lib/workforce-register-policy";
 import { AppShell } from "@/components/app-shell";
 import { AllPeopleRegister, type AllPeopleRow } from "@/components/all-people-register";
 import { PageHead } from "@/components/page-head";
@@ -30,9 +31,8 @@ function first<T>(value: T | T[] | null | undefined) {
 }
 
 function stationDetails(value: unknown) {  const station = first(value as { station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null } | Array<{ station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null }> | null);  const modelRecord = first(station?.location_models);  return {    location: String(station?.station_code ?? "-"),    model: String(modelRecord?.code ?? modelRecord?.name ?? "-"),    provider: String(first(station?.providers)?.name ?? "-")  };}function displayStatus(value: unknown, active: boolean) {
-  if (!active) return "Inactive";
-  const text = String(value ?? "pending").replaceAll("_", " ");
-  return text.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const registration = String(value ?? "pending").trim().toLowerCase();
+  return workforceProfileStatus({ onboarding_status: ["complete", "completed", "verified"].includes(registration) ? "active" : registration, is_active: active });
 }
 
 function profileActionHref(basePath: string, action: "view" | "edit", profileId: unknown) {

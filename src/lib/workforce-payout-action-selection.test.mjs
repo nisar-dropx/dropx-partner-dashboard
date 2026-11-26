@@ -328,7 +328,7 @@ test("publication-refresh-pending rows remain explicit preliminary bank candidat
     payoutTable,
     /const canRefreshCandidate = audience === "workforce"[\s\S]*?publicationRefreshPending\(row\)[\s\S]*?preliminaryAvailableToPay > 0/
   );
-  assert.doesNotMatch(payoutTable, /hasActiveWorkforceProfileStatus/);
+  assert.match(payoutTable, /hasActiveWorkforceProfileStatus/);
 
   assert.match(payoutTable, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);
   assert.match(payoutTable, /visibleStatus === "payment processing"/);
@@ -381,13 +381,14 @@ test("published mapping corrections are audited, company-wide and explicitly rel
   assert.match(payoutTable, /silent payout revision in Dashboard and DropX One/i);
 });
 
-test('non-active Workforce statuses can select an otherwise eligible bank balance',async()=>{
+test('only Active Workforce statuses can select an otherwise eligible bank balance',async()=>{
  const ts=await import('typescript');
  const fn=payoutTable.match(/function canCreateBankPayment[\s\S]*?\n}/)[0];
  const compiled=ts.transpileModule(fn,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
- const canCreate=new Function('publicationRefreshPending','isPayoutOnHoldStatus',compiled+';return canCreateBankPayment;')(()=>false,s=>['on hold','payment on hold'].includes(s));
- const row={reviewSubjectId:'worker',paymentDetailsAvailable:true,publicationPaymentReady:true,publicationLockState:'locked',panAadhaarStatus:'LINKED',paymentSummary:{eligible:true,availableToPay:7177.5,status:'Payment Published'}};
- for(const dropxStatus of ['Active','Resignation Pending','Returned','Pending','Inactive','Offboarded']) assert.equal(canCreate({...row,dropxStatus},'workforce'),true,dropxStatus);
+ const canCreate=new Function('publicationRefreshPending','isPayoutOnHoldStatus','hasActiveWorkforceProfileStatus',compiled+';return canCreateBankPayment;')(()=>false,s=>['on hold','payment on hold'].includes(s),r=>r.dropxStatus==='Active');
+ const row={dropxStatus:'Active',reviewSubjectId:'worker',paymentDetailsAvailable:true,publicationPaymentReady:true,publicationLockState:'locked',panAadhaarStatus:'LINKED',paymentSummary:{eligible:true,availableToPay:7177.5,status:'Payment Published'}};
+ assert.equal(canCreate({...row,dropxStatus:'Active'},'workforce'),true);
+ for(const dropxStatus of ['Returned','Pending','Inactive','Offboarded','Resignation Pending']) assert.equal(canCreate({...row,dropxStatus},'workforce'),false,dropxStatus);
  assert.equal(canCreate({...row,panAadhaarStatus:'NOT LINKED'},'workforce'),false);
  assert.equal(canCreate({...row,paymentSummary:{eligible:false,availableToPay:0,status:'Payment On Hold'}},'workforce'),false);
  assert.equal(canCreate({...row,publicationLockState:'unlocked'},'workforce'),false);
