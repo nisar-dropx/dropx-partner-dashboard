@@ -4,7 +4,7 @@ import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
 import { clientRefForAlert } from "./client-ref.mjs";
 
-/** Overlap the */5 cron so a slow/failed tick still catches L2/L3 events. */
+/** Overlap the every-5-minute cron so a slow/failed tick still catches L2/L3 events. */
 const POLL_WINDOW_MS = 15 * 60 * 1000;
 
 /** Plaintext Datoms password. Accept misnamed DATOMS_PASSWORD_HASH secret (not a hash). */
