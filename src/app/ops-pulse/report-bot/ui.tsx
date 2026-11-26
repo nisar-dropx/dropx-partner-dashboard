@@ -175,7 +175,10 @@ const NAV = [
   { key: "reports", label: "Reports & schedules", icon: FileText, href: "/report-bot?tab=reports" },
   { key: "chats", label: "Chats", icon: MessageCircle, href: "/report-bot/chats" }
 ] as const;
-export type NavKey = (typeof NAV)[number]["key"];
+const DS_ONLY_NAV = [
+  { key: "policies", label: "Message policies", icon: BellRing }
+] as const;
+export type NavKey = (typeof NAV)[number]["key"] | "policies";
 
 /** Report Bot's tab bar, shared by the main page and the Chats page. */
 export function ReportBotNav({ active, waiting = 0, attention = 0, workspace = "dark_store" }: { workspace?: ReportBotWorkspace; active: NavKey; waiting?: number; attention?: number }) {
@@ -188,11 +191,11 @@ export function ReportBotNav({ active, waiting = 0, attention = 0, workspace = "
           {key === "review" && attention > 0 ? <span className={`${s.count} ${s.countMuted}`} aria-label={`${attention} need attention`}>{attention}</span> : null}
         </Link>
       ))}
-      {workspace === "dark_store" ? (
-        <Link href="/operations/message-policies" className={s.tab} aria-label="WhatsApp message policies">
-          <BellRing size={16} aria-hidden />Message policies
+      {workspace === "dark_store" ? DS_ONLY_NAV.map(({ key, label, icon: Icon }) => (
+        <Link key={key} href={reportBotHref(workspace, key)} className={`${s.tab} ${active === key ? s.tabActive : ""}`} aria-current={active === key ? "page" : undefined}>
+          <Icon size={16} aria-hidden />{label}
         </Link>
-      ) : null}
+      )) : null}
     </nav>
   );
 }

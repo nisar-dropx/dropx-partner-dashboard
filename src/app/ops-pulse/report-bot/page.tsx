@@ -27,6 +27,9 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { ActionButton } from "@/components/report-bot-controls";
 import { LastMileGroupDirectory } from "@/components/last-mile-group-directory";
+import { loadDsMessagePolicies } from "@/lib/ops-pulse/ds-message-policy-store";
+import { hasDsOperationsRole } from "@/lib/ops-pulse/ds-live-performance-access";
+import { DsMessagePoliciesView } from "../operations/message-policies/ds-message-policies-view";
 import { GroupPicker } from "@/components/report-bot-group-picker";
 import { ReportThumb, ViewImageButton } from "@/components/report-bot-image-viewer";
 import { ReminderTimesField } from "@/components/report-bot-reminder-times";
@@ -74,7 +77,8 @@ const TABS = [
   { key: "actions", label: "Open actions", icon: AlertTriangle },
   { key: "summary", label: "Site summary", icon: FileText },
   { key: "groups", label: "Groups", icon: Users },
-  { key: "reports", label: "Reports & schedules", icon: FileText }
+  { key: "reports", label: "Reports & schedules", icon: FileText },
+  { key: "policies", label: "Message policies", icon: FileText }
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -231,7 +235,7 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
         </div> : null}
         <FlashMessage />
 
-        <ReportBotNav workspace={workspace} active={tab === "actions" || tab === "summary" ? "review" : tab} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
+        <ReportBotNav workspace={workspace} active={tab === "actions" || tab === "summary" ? "review" : tab as Parameters<typeof ReportBotNav>[0]["active"]} waiting={waitingCount.count ?? 0} attention={attentionCount.count ?? 0} />
         <div className={s.formActions} style={{ marginBottom: 8 }}>
           {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotHref(workspace,"groups")}>Choose WhatsApp groups</Link>}
           {workspace === "last_mile" && <Link className={s.button+" "+s.small} href={reportBotChatHref(workspace)}>Open group chats</Link>}
@@ -254,9 +258,23 @@ export default async function ReportBotPage({ searchParams }: { searchParams?: {
           {deliveries.data?.length ? <details className={s.cardBody}><summary>Recent dispatches</summary>{deliveries.data.map(r=><p key={r.route_id+r.day+r.slot}>{groups.find(g=>g.id===dispatchRoutes.find(d=>d.id===r.route_id)?.group_id)?.group_name} · {r.day} {r.slot} IST · {r.status} · {r.detail}</p>)}</details> : null}
         </>}
         {tab === "reports" ? <ReportsTab workspace={workspace} groups={groups} reportTypes={reportTypes} schedules={schedules} lookup={lookup} canEdit={canEdit} /> : null}
+        {tab === "policies" && workspace === "dark_store" ? await PoliciesTab({ companyId, authorization }) : null}
       </div>
     </AppShell>
   );
+}
+
+async function PoliciesTab({ companyId, authorization }: { companyId: string; authorization: AuthorizationContext }) {
+  const canEdit = hasDsOperationsRole(authorization) || Boolean(authorization.permissions?.ds_message_policies?.canEdit || authorization.permissions?.ds_message_policies?.canAdd);
+  let error: string | null = null;
+  let policies: Awaited<ReturnType<typeof loadDsMessagePolicies>> = [];
+  try {
+    policies = await loadDsMessagePolicies(companyId);
+  } catch (err) {
+    error = err instanceof Error ? err.message : "Unable to load message policies.";
+  }
+  if (error) return <p role="alert" style={{ color: "var(--red, #c0392b)", fontSize: 13 }}>{error}</p>;
+  return <DsMessagePoliciesView initialPolicies={policies} canEdit={canEdit} />;
 }
 
 async function TodayTab({ workspace, companyId, groupIds, lookup, settings, canEdit }: { workspace: ReportBotWorkspace; companyId: string; groupIds: string[]; lookup: Lookup; settings: ReportBotSettings; canEdit: boolean }) {
