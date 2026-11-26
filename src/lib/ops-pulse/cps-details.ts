@@ -7,7 +7,7 @@ export type CpsProductionDetail = {
 };
 export type CpsDaDay = {
   worker_id: string; dropx_id: string; name: string; station_code: string; date: string;
-  provider_ids: string[]; cohort: "variable" | "guarantee"; worked: boolean;
+  pay_type?: string; provider_ids: string[]; cohort: "variable" | "guarantee"; worked: boolean;
   work_basis: "attendance" | "shipment activity" | "no work evidence";
   deliveries: number; customer_returns: number; seller_pickups: number; seller_returns: number;
   salary: number; variable: number; fuel: number; van: number;
@@ -31,11 +31,11 @@ const amounts = ["deliveries", "customer_returns", "seller_pickups", "seller_ret
 export function summarizeDaDetails(days: CpsDaDay[]): CpsDaDetail[] {
   const groups = new Map<string, CpsDaDetail>();
   for (const d of days) {
-    const k = `${d.worker_id}|${d.station_code}|${d.cohort}`;
+    const k = `${d.worker_id}|${d.station_code}|${d.cohort}|${d.pay_type ?? ""}`;
     let g = groups.get(k);
     if (!g) {
       g = { worker_id:d.worker_id, dropx_id:d.dropx_id, name:d.name, station_code:d.station_code,
-        cohort:d.cohort, provider_ids:[], work_dates:[], cost_dates:[], work_bases:[], periods:[],
+        cohort:d.cohort, pay_type:d.pay_type, provider_ids:[], work_dates:[], cost_dates:[], work_bases:[], periods:[],
         deliveries:0, customer_returns:0, seller_pickups:0, seller_returns:0, salary:0, variable:0, fuel:0, van:0 };
       groups.set(k,g);
     }

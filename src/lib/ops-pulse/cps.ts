@@ -203,7 +203,7 @@ export function mergeCpsMonths(parts: CpsSnapshot[]): CpsSnapshot {
     ) as CpsSnapshot["source_dates"],
     advertising: parts.flatMap((p) => p.advertising ?? []),
     associates: parts.flatMap((p) => p.associates ?? []),
-    da_details: merge(parts.flatMap(p=>p.da_details??[]), p=>`${p.worker_id}|${p.station_code}|${p.cohort}`, (a,b)=>({
+    da_details: merge(parts.flatMap(p=>p.da_details??[]), p=>`${p.worker_id}|${p.station_code}|${p.cohort}|${p.pay_type ?? ""}`, (a,b)=>({
       ...a, provider_ids:[...new Set([...a.provider_ids,...b.provider_ids])],
       work_dates:[...new Set([...a.work_dates,...b.work_dates])], cost_dates:[...new Set([...a.cost_dates,...b.cost_dates])],
       work_bases:[...new Set([...a.work_bases,...b.work_bases])], periods:[...a.periods,...b.periods],

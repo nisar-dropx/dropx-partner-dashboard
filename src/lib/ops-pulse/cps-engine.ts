@@ -596,7 +596,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       if(review)gap(`Low deliveries · below ${review.threshold}`,row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),0,'Workforce attendance');
       if(pendingFixed) gap('Fixed pay attendance missing',row.station_code,g.date,row.provider_employee_id,g.worker.full_name,g.worker.dropx_id,num(row.total_delivery),row.da_total_pay,'Workforce attendance');
       detailDays.push({worker_id:g.worker.id,dropx_id:g.worker.dropx_id,name:g.worker.full_name,
-        station_code:row.station_code,date:g.date,provider_ids:[row.provider_employee_id],
+        station_code:row.station_code,date:g.date,pay_type:employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`) ? 'People DA CTC' : card!.pay_type || 'Fixed / MG',provider_ids:[row.provider_employee_id],
         cohort:hasFixedDaPay(card!,cs)||employeeCostDays.has(`${g.worker.source_profile_id}|${g.date}`)?'guarantee':'variable',
         worked,work_basis:attendanceWorked?'attendance':worked?'shipment activity':'no work evidence',
         deliveries:num(row.total_delivery),customer_returns:num(row.c_return),seller_pickups:0,seller_returns:0,
@@ -703,7 +703,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
       if(!result.total&&!result.present&&!result.lines.some(line=>line.schedule==='per_month')) continue;
       const synthetic={id:`direct:${w.id}:${date}`,client:'Direct',work_date:date,station_code:station,provider_employee_id:'',provider_employee_name:w.full_name,dropx_name:w.full_name,dropx_emp_code:w.dropx_id,pay_type:'DIRECT',total_delivery:0,total_activity:result.present?1:0,c_return:0,mfn:0,mfn_return:0,variable_pay:0,mg_pay:salary,fuel_pay:fuel,van_pay:van,da_total_pay:salary+fuel,mapping_status:'Mapped'} as LiveAssociate;
       associates.push(synthetic);
-      detailDays.push({worker_id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,date,provider_ids:[],
+      detailDays.push({worker_id:w.id,dropx_id:w.dropx_id,name:w.full_name,station_code:station,date,pay_type:salaryCoveredByPeople ? 'People DA CTC' : latest.pay_type || latest.payment_method_name || 'Direct fixed pay',provider_ids:[],
         cohort:'guarantee',worked:result.present,work_basis:result.present?'attendance':'no work evidence',
         deliveries:0,customer_returns:0,seller_pickups:0,seller_returns:0,salary,variable:0,fuel,van,
         pending_fixed_pay:Boolean(directRange&&!directRange.complete),source:'Direct workforce allocation',card_from:latest.effective_from,rates:detailRates(paymentCard(latest,directComponents,w.id,date),directComponents,'Direct')});
@@ -788,7 +788,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
         const k=`${linkedWorkforce?.id??e.id}|${station}`,p=people.get(k)??{id:linkedWorkforce?.id??e.id,dropx_id:e.employee_code,name:e.full_name,station_code:station,salary:0,variable:0,fuel:0,van:0,deliveries:0,customer_returns:0,paid_days:0,zero_delivery_days:0};
         if(head==='Van')p.van+=amount;else p.salary+=amount;people.set(k,p);
         if(head==='DA') detailDays.push({worker_id:linkedWorkforce?.id??e.id,dropx_id:linkedWorkforce?.dropx_id??e.employee_code,
-          name:linkedWorkforce?.full_name??e.full_name,station_code:station,date,provider_ids:[],cohort:'guarantee',
+          name:linkedWorkforce?.full_name??e.full_name,station_code:station,date,pay_type:'People DA CTC',provider_ids:[],cohort:'guarantee',
           worked:false,work_basis:'no work evidence',deliveries:0,customer_returns:0,seller_pickups:0,seller_returns:0,
           salary:amount,variable:0,fuel:0,van:0,source:'People CTC',card_from:salary.effective_from,
           rates:[{label:'People DA CTC',rate:num(salary.monthly_ctc),basis:'per calendar month · allocated station share'}]});

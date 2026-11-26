@@ -14,7 +14,7 @@ export function CpsAssociateTable({rows,component,source}:{rows:CpsDaDetail[];so
     <p className="cps-footnote">Calculated payout for the selected dates, before payroll settlement. DA CPS = included DA pay ÷ (deliveries, including SWA, + customer returns). SWA is counted once within deliveries. Fixed / MG pay and fuel can raise CPS above the package rate. Seller pickup / MFN and seller-return activity is excluded from CPS. Vehicle rent stays under Van CPS.</p>
     {!visible.length?<p className="panel-body">No mapped associate costs in this group.</p>:<>
     <div className="cps-da-column-head"><span>Associate · expand for rate card</span><span>Worked days</span><span>Delivered / returns</span><span>{component?`${component==='salary'?'Fixed':component[0].toUpperCase()+component.slice(1)} component`:"Calculated payout"}</span><span>DA CPS</span></div>
-    {visible.map(r=><details className="cps-da-person" key={`${r.worker_id}|${r.station_code}|${r.cohort}`}>
+    {visible.map(r=><details className="cps-da-person" key={`${r.worker_id}|${r.station_code}|${r.cohort}|${r.pay_type ?? ""}`}>
       <summary>
         <span><strong>{r.name}</strong><small>{r.dropx_id} · {r.cohort==='variable'?'Variable pay':'Salary / minimum guarantee'}</small></span>
         <span>{r.work_dates.length}<small>{r.work_bases.join(" / ")||"No work evidence"}</small></span>
