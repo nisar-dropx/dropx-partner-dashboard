@@ -4,6 +4,7 @@ import { darkStoreScope } from "@/lib/ops-pulse/dark-store";
 import { todayKolkata } from "@/lib/ops-pulse/cod";
 import { buildDsStoreMeta, dsRegionKey, type DsManagerOption, type DsStoreMeta } from "@/lib/ops-pulse/ds-scope";
 import { loadDsManagerOptions } from "@/lib/ops-pulse/load-ds-manager-options";
+import { buildPpiHourlyDisplay, istParts } from "@/lib/ops-pulse/ds-ppi-hourly-display";
 
 /** PPI feed older than this is called out as stale (VM polls ~30 min). */
 export const DS_PPI_STALE_MS = 75 * 60 * 1000;
@@ -604,13 +605,26 @@ export async function loadDsLiveStoreDetail(
         avgPptSeconds: r.avg_ppt_seconds == null ? null : Number(r.avg_ppt_seconds)
       }))
       .sort((a, b) => b.orderCount - a.orderCount || b.unitCount - a.unitCount),
-    hourly: hourly.map((r) => ({
-      hour: Number(r.hour),
-      orderCount: Number(r.order_count ?? 0),
-      unitCount: Number(r.unit_count ?? 0),
-      totalPptSeconds: pptSecondsFromMs(r.total_ppt_ms),
-      avgPptSeconds: r.avg_ppt_seconds == null ? null : Number(r.avg_ppt_seconds)
-    })),
+    hourly: (() => {
+      const isToday = businessDate === todayKolkata();
+      const wallHour = isToday ? istParts().hour : 23;
+      return buildPpiHourlyDisplay(
+        hourly.map((r) => ({
+          hour: Number(r.hour),
+          order_count: Number(r.order_count ?? 0),
+          unit_count: Number(r.unit_count ?? 0),
+          avg_ppt_seconds: r.avg_ppt_seconds == null ? null : Number(r.avg_ppt_seconds)
+        })),
+        wallHour,
+        { midnightEod: !isToday }
+      ).map((row) => ({
+        hour: row.hour,
+        orderCount: row.order_count,
+        unitCount: row.unit_count,
+        totalPptSeconds: row.sum_ppt_seconds,
+        avgPptSeconds: row.avg_ppt_seconds
+      }));
+    })(),
     recentOrders: orders.map((r) => ({
       procurementListId: r.procurement_list_id,
       username: r.username,

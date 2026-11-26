@@ -5,7 +5,8 @@ compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
 [triggers]
-crons = ["*/1 * * * *"]
+# Every 5 minutes — session is KV-persisted so we do not re-login each tick.
+crons = ["*/5 * * * *"]
 
 [vars]
 DATOMS_CUSTOMER_ID = "17428"

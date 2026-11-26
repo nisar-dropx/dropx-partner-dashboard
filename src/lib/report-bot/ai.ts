@@ -3,7 +3,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { analysisJsonSchema, extractJsonText, parseAnalysis, type Analysis } from "@/lib/report-bot/logic";
 import { extractReportImageText } from "@/lib/report-bot/image-ocr";
-import { analyseWithImageScraper, scrapableCandidates } from "@/lib/report-bot/image-scraper";
+import { analyseWithImageScraper, looksLikeAutomationFlash, scrapableCandidates } from "@/lib/report-bot/image-scraper";
 import type { ReportBotSettings } from "@/lib/report-bot/settings";
 
 /** retryable: try again later. blocked: nothing will work until settings change. */
@@ -328,6 +328,23 @@ export async function analyseOperationalReport(settings: ReportBotSettings, inpu
   // Never fall through to Gemini/Groq for these — free-tier quotas are exhausted.
   const scrapable = scrapableCandidates(input.candidates);
   if (scrapable.length) {
+    const flashText = [input.caption, input.text, ...(input.bundleTexts ?? [])].filter(Boolean).join("\n");
+    // PPI / Site Summary cards are bot-owned — skip OCR entirely (quota burn + false matches).
+    if (looksLikeAutomationFlash(flashText)) {
+      return {
+        is_report: false,
+        matched_report_type_id: null,
+        verdict: "not_report",
+        confidence: 0.99,
+        checks: [],
+        extracted_summary: "Automated PPI or Site Summary flash — not a completion report.",
+        extracted_fields: [],
+        feedback: "",
+        open_actions: [],
+        source: "scraper"
+      };
+    }
+
     let ocrText = "";
     let ocrErrorMessage: string | null = null;
     if (input.image?.length && input.mime) {
@@ -336,6 +353,21 @@ export async function analyseOperationalReport(settings: ReportBotSettings, inpu
       } catch (error) {
         ocrErrorMessage = error instanceof Error ? error.message : "OCR failed";
       }
+    }
+    // OCR of a PPI/SS card with a thin caption — still skip as not_report.
+    if (looksLikeAutomationFlash(ocrText)) {
+      return {
+        is_report: false,
+        matched_report_type_id: null,
+        verdict: "not_report",
+        confidence: 0.99,
+        checks: [],
+        extracted_summary: "Automated PPI or Site Summary flash — not a completion report.",
+        extracted_fields: [],
+        feedback: "",
+        open_actions: [],
+        source: "scraper"
+      };
     }
     const scraped = analyseWithImageScraper({
       candidates: scrapable,

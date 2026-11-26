@@ -7,6 +7,7 @@ import {
   analyseStowingPendency,
   analyseWithImageScraper,
   istWallClockMs,
+  looksLikeAutomationFlash,
   matchScrapable,
   parseExpiryDates,
   parseStowingQuantity,
@@ -277,5 +278,29 @@ describe("match + orchestrate", () => {
       ocrText: ""
     });
     assert.equal(result?.verdict, "pass");
+  });
+
+  test("PPI / Site Summary captions are never matched as completion reports", () => {
+    assert.equal(looksLikeAutomationFlash("TCD4\n• PPI today as of 10:00 hrs: 62.25s"), true);
+    assert.equal(looksLikeAutomationFlash("ssmon_TCD4 active orders"), true);
+    const matched = matchScrapable({
+      candidates: [{ ...cycle, requestStatus: "pending" }, { ...expiry, requestStatus: "pending" }],
+      businessDate: "2026-11-26",
+      hasImage: true,
+      caption: "*TCD4*\n• PPI today as of 10:00 hrs: 62.25s",
+      ocrText: "DropX Dark Store | Total Performance"
+    });
+    assert.equal(matched, null);
+  });
+
+  test("image without OCR does not steal a waiting cycle-count slot", () => {
+    const matched = matchScrapable({
+      candidates: [{ ...cycle, requestStatus: "pending" }, { ...expiry, requestStatus: "received" }],
+      businessDate: "2026-11-26",
+      hasImage: true,
+      caption: "photo",
+      ocrText: ""
+    });
+    assert.equal(matched, null);
   });
 });

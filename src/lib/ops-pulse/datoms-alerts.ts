@@ -56,7 +56,8 @@ export async function triggerDatomsPoll() {
   const res = await fetch(`${base}/run`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(55_000)
   });
   const text = await res.text();
   let body: unknown = null;

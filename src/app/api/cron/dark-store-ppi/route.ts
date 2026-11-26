@@ -4,6 +4,7 @@ import { join } from "path";
 import { reportBotDb, loadReportBotSettings } from "@/lib/report-bot/settings";
 import { workerRequest, WorkerError } from "@/lib/report-bot/worker-client";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
+import { buildPpiHourlyDisplay } from "@/lib/ops-pulse/ds-ppi-hourly-display";
 
 // Loaded once — satori needs the font buffer at call time
 let _fonts: { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[] | null = null;
@@ -183,7 +184,8 @@ export async function GET(request: Request) {
       const diff        = null as null; // trend comparison removed — show current values only
       const trend       = "";
       const trendColor  = "#9ca3af";
-      const recentHourly = [...hourly].filter(h => h.hour <= hour).sort((a, b) => a.hour - b.hour);
+      // Scaffold 06:00 … wall hour (or 06–23 on the midnight EOD card). Never leave a lone 00:00 row.
+      const recentHourly = buildPpiHourlyDisplay(hourly, hour, { midnightEod: hour === 0 });
 
       // ── Satori layout helpers
       const W = 640;
@@ -218,7 +220,7 @@ export async function GET(request: Request) {
 
       const hTotalOrders = recentHourly.reduce((s, h) => s + h.order_count, 0);
       const hTotalUnits  = recentHourly.reduce((s, h) => s + h.unit_count,  0);
-      const hTotalSumPpt = recentHourly.reduce((s, h) => s + Number(h.avg_ppt_seconds ?? 0) * h.order_count, 0);
+      const hTotalSumPpt = recentHourly.reduce((s, h) => s + h.sum_ppt_seconds, 0);
       const hTotalPpt    = hTotalUnits > 0 ? hTotalSumPpt / hTotalUnits : null;
 
       const layout = { type: "div", props: { style: { display: "flex", flexDirection: "column", width: W, background: "#f1f5f9", padding: 16, fontFamily: "Inter" }, children: [
@@ -289,9 +291,11 @@ export async function GET(request: Request) {
           ...recentHourly.map((h, i) => tRow(i % 2 === 0 ? "#fff" : "#fffbeb", [
             { v: `${String(h.hour).padStart(2,"0")}:00`, flex: 2 },
             { v: String(h.order_count), flex: 2 },
-            { v: h.avg_ppt_seconds != null ? (Number(h.avg_ppt_seconds) * h.order_count).toFixed(2) : "-", flex: 3 },
+            { v: h.order_count > 0 && h.avg_ppt_seconds != null ? h.sum_ppt_seconds.toFixed(2) : (h.order_count === 0 ? "0.00" : "-"), flex: 3 },
             { v: String(h.unit_count), flex: 2 },
-            { v: h.avg_ppt_seconds != null && h.unit_count > 0 ? `${(Number(h.avg_ppt_seconds) * h.order_count / h.unit_count).toFixed(2)}s` : "-", flex: 2, style: { color: "#b45309", fontWeight: 700 } },
+            { v: h.avg_ppt_seconds != null && h.unit_count > 0
+              ? `${(h.sum_ppt_seconds / h.unit_count).toFixed(2)}s`
+              : (h.order_count === 0 ? "—" : "-"), flex: 2, style: { color: "#b45309", fontWeight: 700 } },
           ] as { v: string; flex: number; style?: object }[])),
           tRow("#b45309", [
             { v: "TOTAL",                      flex: 2, style: { color: "#fff", fontWeight: 700 } },

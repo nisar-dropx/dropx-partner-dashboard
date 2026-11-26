@@ -81,6 +81,24 @@ function combinedMessageText(input: ScraperInput) {
     .join("\n");
 }
 
+/**
+ * Automated PPI / Site Summary WhatsApp flashes — never treat as completion
+ * evidence and never burn OCR on them.
+ */
+export function looksLikeAutomationFlash(text: string | null | undefined) {
+  const value = String(text ?? "");
+  if (!value.trim()) return false;
+  return (
+    /\bPPI today as of\b/i.test(value)
+    || /\bDropX Dark Store\b/i.test(value)
+    || /\bssmon_/i.test(value)
+    || /\bSite Summary\b/i.test(value)
+    || /\border[s]?\s+pending acceptance\b/i.test(value)
+    || /\bWorst\s+\d{1,2}:\d{2}\b/i.test(value)
+    || /\bTotal Performance\b/i.test(value)
+  );
+}
+
 function field(label: string, value: string | number | null | undefined): ExtractedField | null {
   if (value === null || value === undefined || value === "") return null;
   return { label, value: String(value) };
@@ -636,39 +654,43 @@ export function analyseDgFuel(candidate: ScrapableCandidate, input: { hasImage: 
 export function matchScrapable(input: ScraperInput): ScrapableCandidate | null {
   const list = scrapableCandidates(input.candidates);
   if (!list.length) return null;
-  const ocr = normalizeOcr(input.ocrText ?? "");
   const message = combinedMessageText(input);
+  const ocr = normalizeOcr(input.ocrText ?? "");
+  // Bot-owned flashes must never close a waiting Cycle Count / Expiry / DG request.
+  if (looksLikeAutomationFlash(message) || looksLikeAutomationFlash(ocr)) return null;
   const hay = `${message}\n${ocr}`.toLowerCase();
 
   const score = (candidate: ScrapableCandidate) => {
     const slug = guessSlug(candidate);
-    let points = 0;
+    // Content evidence only — waiting/image bonuses must not invent a match for PPI flashes.
+    let content = 0;
     if (slug === "cycle-count-sbc-src") {
-      if (/unified\s*cycle\s*count|boh\s*guided|simple\s*bin\s*count/.test(hay)) points += 5;
-      if (/cycle\s*count|sbc|src/.test(message.toLowerCase())) points += 2;
-      if (input.hasImage) points += 1;
+      if (/unified\s*cycle\s*count|boh\s*guided|simple\s*bin\s*count/.test(hay)) content += 5;
+      if (/cycle\s*count|sbc|src/.test(message.toLowerCase())) content += 2;
     }
     if (slug === "expiry-removed") {
-      if (/expir|shrink|expiration\s*audit|ihm\s*inventory|total\s*expired|fcsku|fnsku/.test(hay)) points += 5;
-      if (/expiry\s*removed|expiry\s*dashboard|expired\s*items/.test(message.toLowerCase())) points += 2;
-      if (input.hasImage) points += 1;
-      if (!input.hasImage && /asin|bin\s*:|total\s*expired|shrink\s*date/i.test(message)) points += 3;
+      if (/expir|shrink|expiration\s*audit|ihm\s*inventory|total\s*expired|fcsku|fnsku/.test(hay)) content += 5;
+      if (/expiry\s*removed|expiry\s*dashboard|expired\s*items/.test(message.toLowerCase())) content += 2;
+      if (!input.hasImage && /asin|bin\s*:|total\s*expired|shrink\s*date/i.test(message)) content += 3;
     }
     if (slug === "stowing-pendency") {
-      if (/stowing|pendenc/.test(message.toLowerCase())) points += 5;
-      if (parseStowingQuantity(message) !== null) points += 3;
-      if (!input.hasImage && parseStowingQuantity(message) !== null) points += 2;
+      if (/stowing|pendenc/.test(message.toLowerCase())) content += 5;
+      if (parseStowingQuantity(message) !== null) content += 3;
+      if (!input.hasImage && parseStowingQuantity(message) !== null) content += 2;
       // Bare number + image is almost never stowing — prefer screenshot types.
-      if (input.hasImage && !/stowing|pendenc/.test(message.toLowerCase())) points -= 4;
+      if (input.hasImage && !/stowing|pendenc/.test(message.toLowerCase())) content -= 4;
     }
     if (slug === "dg-fuel-level") {
-      if (/\bdg\b|fuel\s*level|diesel/.test(hay)) points += 5;
-      if (input.hasImage && list.length === 1) points += 2;
+      if (/\bdg\b|fuel\s*level|diesel/.test(hay)) content += 5;
+      // DG fuel is image-first: a lone waiting DG request with a photo is enough.
+      if (input.hasImage && list.length === 1) content += 3;
     }
+    if (content <= 0) return 0;
+    let points = content;
+    if (input.hasImage) points += 1;
     // Prefer requests still waiting over already-received (resubmit / bulk mix).
     if (isWaitingRequest(candidate.requestStatus)) points += 2;
     else if (candidate.requestStatus === "received") points -= 1;
-    // Single open scrapable request with matching media kind gets a tie-break.
     if (list.length === 1) points += 1;
     return points;
   };
@@ -685,10 +707,6 @@ export function matchScrapable(input: ScraperInput): ScrapableCandidate | null {
       .filter((row) => guessSlug(row) === "stowing-pendency")
       .sort((a, b) => Number(isWaitingRequest(b.requestStatus)) - Number(isWaitingRequest(a.requestStatus)))[0];
     if (stowing && !input.hasImage && parseStowingQuantity(message) !== null) return stowing;
-    // Image + single waiting scrapable request → that request.
-    const waiting = list.filter((row) => isWaitingRequest(row.requestStatus));
-    if (input.hasImage && waiting.length === 1) return waiting[0];
-    if (input.hasImage && list.length === 1) return list[0];
     return null;
   }
   if (ranked.length > 1 && ranked[0].points === ranked[1].points && ranked[0].points < 3) return null;

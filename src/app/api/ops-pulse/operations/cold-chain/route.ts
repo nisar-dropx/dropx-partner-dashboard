@@ -3,13 +3,19 @@ import { requireDsOperationsApi } from "@/lib/ops-pulse/ds-live-performance-guar
 import { loadDatomsAlerts, triggerDatomsPoll } from "@/lib/ops-pulse/datoms-alerts";
 
 export const dynamic = "force-dynamic";
+/** Manual poll can wait on Datoms + WhatsApp; keep under Vercel hobby/pro limits. */
+export const maxDuration = 60;
 
 export async function GET() {
   const gate = await requireDsOperationsApi("ds_cold_chain_alerts");
   if (gate.error) return gate.error;
   try {
     const alerts = await loadDatomsAlerts(gate.authorization);
-    return NextResponse.json({ alerts });
+    return NextResponse.json({
+      alerts,
+      /** Cloudflare worker cron polls Datoms every minute; UI only reads stored rows. */
+      poll: { mode: "cron", interval_seconds: 300 }
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load alerts." },

@@ -2,8 +2,29 @@ import { DatomsClient } from "./datoms.mjs";
 import { filterDatomsEvent, formatCaption } from "./filter.mjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
+import { clientRefForAlert } from "./client-ref.mjs";
 
-const POLL_WINDOW_MS = 3 * 60 * 1000;
+/** Overlap the */5 cron so a slow/failed tick still catches L2/L3 events. */
+const POLL_WINDOW_MS = 15 * 60 * 1000;
+
+/** Plaintext Datoms password. Accept misnamed DATOMS_PASSWORD_HASH secret (not a hash). */
+function datomsPassword(env) {
+  return String(env.DATOMS_PASSWORD || env.DATOMS_PASSWORD_HASH || "").trim();
+}
+
+function makeDatomsClient(env) {
+  const password = datomsPassword(env);
+  if (!env.DATOMS_EMAIL || !password) {
+    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing (plaintext password; DATOMS_PASSWORD_HASH alias accepted)");
+  }
+  return new DatomsClient({
+    email: env.DATOMS_EMAIL,
+    password,
+    customerId: env.DATOMS_CUSTOMER_ID || "17428",
+    applicationId: env.DATOMS_APPLICATION_ID || "16",
+    kv: env.ALERT_DEDUPE ?? null
+  });
+}
 const DEDUPE_TTL_SEC = 7 * 24 * 60 * 60;
 const RECENT_PREFIX = "recent:";
 
@@ -110,6 +131,7 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
   if (!base || !env.REPORT_BOT_TOKEN) throw new Error("REPORT_BOT_URL / REPORT_BOT_TOKEN not set");
 
   const image_base64 = Buffer.from(pngBytes).toString("base64");
+  const client_ref = await clientRefForAlert(alert.dedupeKey);
   const res = await fetch(`${base}/send`, {
     method: "POST",
     headers: {
@@ -117,7 +139,7 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
       "content-type": "application/json"
     },
     body: JSON.stringify({
-      client_ref: `datoms_${alert.dedupeKey}`.slice(0, 120),
+      client_ref,
       to,
       image_base64,
       mime: "image/png",
@@ -132,15 +154,7 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
 }
 
 export async function runPoll(env, { dryRun = false } = {}) {
-  if (!env.DATOMS_EMAIL || !env.DATOMS_PASSWORD) {
-    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing");
-  }
-  const client = new DatomsClient({
-    email: env.DATOMS_EMAIL,
-    password: env.DATOMS_PASSWORD,
-    customerId: env.DATOMS_CUSTOMER_ID || "17428",
-    applicationId: env.DATOMS_APPLICATION_ID || "16"
-  });
+  const client = makeDatomsClient(env);
   const now = Date.now();
   const generatedAfter = new Date(now - POLL_WINDOW_MS).toISOString();
   const generatedBefore = new Date(now).toISOString();
@@ -148,6 +162,7 @@ export async function runPoll(env, { dryRun = false } = {}) {
 
   const processed = [];
   const skipped = [];
+  const errors = [];
 
   for (const event of events) {
     const alert = filterDatomsEvent(event);
@@ -171,21 +186,27 @@ export async function runPoll(env, { dryRun = false } = {}) {
       continue;
     }
 
-    // Send first so a WhatsApp failure does not permanently bury the alert in KV.
-    await sendWhatsApp(env, alert, pngBytes, caption);
-    await env.ALERT_DEDUPE.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
-    await storeRecent(env.ALERT_DEDUPE, alert, { notifiedAt });
     try {
-      await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt });
+      // Send first so a WhatsApp failure does not permanently bury the alert in KV.
+      await sendWhatsApp(env, alert, pngBytes, caption);
+      await env.ALERT_DEDUPE.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
+      await storeRecent(env.ALERT_DEDUPE, alert, { notifiedAt });
+      try {
+        await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt });
+      } catch (error) {
+        console.error("[datoms-alerts] supabase upsert failed:", error?.message || error);
+      }
+      processed.push({
+        dedupe_key: alert.dedupeKey,
+        station: alert.station,
+        level: alert.level,
+        title: alert.title
+      });
     } catch (error) {
-      console.error("[datoms-alerts] supabase upsert failed:", error?.message || error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[datoms-alerts] alert send failed:", alert.dedupeKey, message);
+      errors.push({ dedupe_key: alert.dedupeKey, station: alert.station, error: message });
     }
-    processed.push({
-      dedupe_key: alert.dedupeKey,
-      station: alert.station,
-      level: alert.level,
-      title: alert.title
-    });
   }
 
   return {
@@ -194,7 +215,8 @@ export async function runPoll(env, { dryRun = false } = {}) {
     fetched: events.length,
     processed: processed.length,
     alerts: processed,
-    skipped_count: skipped.length
+    skipped_count: skipped.length,
+    errors
   };
 }
 
@@ -203,12 +225,23 @@ export default {
     const url = new URL(req.url);
 
     if (req.method === "GET" && url.pathname === "/health") {
+      let session = null;
+      try {
+        if (env.DATOMS_EMAIL && datomsPassword(env)) {
+          session = await makeDatomsClient(env).sessionStatus();
+        }
+      } catch {
+        session = { error: "unable to read session status" };
+      }
       return json({
         ok: true,
         service: "dropx-datoms-alerts",
         has_kv: Boolean(env.ALERT_DEDUPE),
         has_supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
-        has_report_bot: Boolean(env.REPORT_BOT_URL && env.REPORT_BOT_TOKEN)
+        has_report_bot: Boolean(env.REPORT_BOT_URL && env.REPORT_BOT_TOKEN),
+        has_datoms_password: Boolean(datomsPassword(env)),
+        poll_cron: "*/5 * * * *",
+        session
       });
     }
 
@@ -225,6 +258,19 @@ export default {
       try {
         const result = await runPoll(env, { dryRun });
         return json(result);
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    // Clear login backoff / force drop KV session after password change or rate-limit lockout.
+    if (req.method === "POST" && url.pathname === "/session/reset") {
+      if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
+      try {
+        const client = makeDatomsClient(env);
+        await client.clearSession();
+        await client.clearLoginBackoff();
+        return json({ ok: true, cleared: true });
       } catch (error) {
         return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
       }

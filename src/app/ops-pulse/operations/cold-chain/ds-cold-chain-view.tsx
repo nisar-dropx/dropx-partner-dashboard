@@ -74,12 +74,13 @@ export function DsColdChainView({
       <div className="panel-body" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <strong>L2 / L3 violations</strong>
         <span className="subtle">{alerts.length} recent</span>
+        <span className="subtle">Auto-poll every 5 min via Cloudflare cron · list refreshes every 10s</span>
         {workerConfigured ? (
           <button type="button" className="button" disabled={pending} onClick={runNow}>
-            {pending ? "Polling…" : "Poll Datoms now"}
+            {pending ? "Polling…" : "Run once now"}
           </button>
         ) : (
-          <span className="subtle">Set DATOMS_ALERTS_WORKER_URL to enable live poll.</span>
+          <span className="subtle">Set DATOMS_ALERTS_WORKER_URL to enable manual poll.</span>
         )}
         {error ? <span className="subtle" style={{ color: "#b42318" }}>{error}</span> : null}
       </div>
