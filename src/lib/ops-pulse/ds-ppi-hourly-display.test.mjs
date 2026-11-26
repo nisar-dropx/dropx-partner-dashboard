@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPpiHourlyDisplay, istParts } from "./ds-ppi-hourly-display.ts";
 
-test("10:05 as-of includes hour 10 and scaffolds from 06 with empty slots", () => {
+test("10:05 as-of lists only hours with data and never pads an empty hour 10", () => {
   const rows = buildPpiHourlyDisplay(
     [
       { hour: 6, order_count: 44, unit_count: 110, avg_ppt_seconds: 67.55 },
@@ -11,22 +11,34 @@ test("10:05 as-of includes hour 10 and scaffolds from 06 with empty slots", () =
     10
   );
   assert.equal(rows[0]?.hour, 6);
-  assert.equal(rows.at(-1)?.hour, 10);
-  assert.equal(rows.length, 5);
-  const ten = rows.find((r) => r.hour === 10);
+  assert.equal(rows.at(-1)?.hour, 9);
   assert.deepEqual(
-    { order_count: ten?.order_count, unit_count: ten?.unit_count, avg_ppt_seconds: ten?.avg_ppt_seconds },
-    { order_count: 0, unit_count: 0, avg_ppt_seconds: null }
+    rows.map((r) => r.hour),
+    [6, 9]
   );
+  assert.ok(!rows.some((r) => r.hour === 10), "empty as-of hour is omitted");
   assert.ok(!rows.some((r) => r.hour === 0), "no midnight orphan on daytime card");
 });
 
-test("exact 10:00 wall still includes hour 10 when the label is 10:00", () => {
+test("exact 10:00 wall omits hour 10 when that bucket has no completions yet", () => {
   const rows = buildPpiHourlyDisplay([{ hour: 9, order_count: 1, unit_count: 1, avg_ppt_seconds: 50 }], 10);
-  assert.equal(rows.at(-1)?.hour, 10);
+  assert.equal(rows.at(-1)?.hour, 9);
+  assert.ok(!rows.some((r) => r.hour === 10));
 });
 
-test("midnight EOD scaffolds 06 through 24 and maps hour 0 → 24:00", () => {
+test("as-of hour is kept once it has completions", () => {
+  const rows = buildPpiHourlyDisplay(
+    [
+      { hour: 9, order_count: 1, unit_count: 1, avg_ppt_seconds: 50 },
+      { hour: 10, order_count: 2, unit_count: 4, avg_ppt_seconds: 40 }
+    ],
+    10
+  );
+  assert.equal(rows.at(-1)?.hour, 10);
+  assert.equal(rows.find((r) => r.hour === 10)?.order_count, 2);
+});
+
+test("midnight EOD keeps hours with data and maps hour 0 → 24:00", () => {
   const rows = buildPpiHourlyDisplay(
     [
       { hour: 0, order_count: 1, unit_count: 1, avg_ppt_seconds: 110 },
@@ -35,12 +47,13 @@ test("midnight EOD scaffolds 06 through 24 and maps hour 0 → 24:00", () => {
     0,
     { midnightEod: true }
   );
-  assert.equal(rows[0]?.hour, 6);
-  assert.equal(rows.at(-1)?.hour, 24);
+  assert.deepEqual(
+    rows.map((r) => r.hour),
+    [22, 24]
+  );
   assert.ok(!rows.some((r) => r.hour === 0));
   assert.equal(rows.find((r) => r.hour === 24)?.order_count, 1);
   assert.equal(rows.find((r) => r.hour === 22)?.order_count, 10);
-  assert.equal(rows.find((r) => r.hour === 7)?.order_count, 0);
 });
 
 test("before open (01–05) returns no hourly rows", () => {

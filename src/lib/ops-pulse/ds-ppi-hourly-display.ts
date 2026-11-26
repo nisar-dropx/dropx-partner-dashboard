@@ -1,11 +1,13 @@
 /**
  * Dark Store PPI hourly table for WhatsApp cards and Site PPI.
  *
- * "As of HH:00 hrs" is the wall-clock IST hour of the report. The table must
- * include that hour (zero-filled when the VM has not yet produced completions)
- * and show the operating day from 06:00 — not a lone midnight 00:00 row.
+ * "As of HH:00 hrs" is the wall-clock IST hour of the report. The table lists
+ * operating-day hours from 06:00 up through that wall hour that actually have
+ * completions — empty hours (including the current as-of hour with no data yet)
+ * are omitted.
  *
- * Midnight EOD cards use 06:00–24:00. Source hour 0 is shown as display hour 24.
+ * Midnight EOD cards use 06:00–24:00. Source hour 0 is shown as display hour 24
+ * when it has data.
  */
 
 export type PpiHourlySource = {
@@ -40,11 +42,12 @@ export function istParts(atMs: number = Date.now()) {
   };
 }
 
-function toDisplayRow(sourceHour: number, displayHour: number, byHour: Map<number, PpiHourlySource>): PpiHourlyDisplayRow {
+function toDisplayRow(sourceHour: number, displayHour: number, byHour: Map<number, PpiHourlySource>): PpiHourlyDisplayRow | null {
   const row = byHour.get(sourceHour);
   const order_count = Number(row?.order_count ?? 0);
+  if (!row || !Number.isFinite(order_count) || order_count <= 0) return null;
   const unit_count = Number(row?.unit_count ?? 0);
-  const avg = row?.avg_ppt_seconds == null || !Number.isFinite(Number(row.avg_ppt_seconds))
+  const avg = row.avg_ppt_seconds == null || !Number.isFinite(Number(row.avg_ppt_seconds))
     ? null
     : Number(row.avg_ppt_seconds);
   return {
@@ -52,16 +55,17 @@ function toDisplayRow(sourceHour: number, displayHour: number, byHour: Map<numbe
     order_count,
     unit_count,
     avg_ppt_seconds: avg,
-    sum_ppt_seconds: avg != null && order_count > 0 ? avg * order_count : 0
+    sum_ppt_seconds: avg != null ? avg * order_count : 0
   };
 }
 
 /**
  * Build the hourly rows shown under PPI.
  *
- * - Daytime (wallHour 6–23): scaffold 06:00 … wallHour inclusive.
- * - Midnight EOD card (wallHour 0): scaffold 06:00 … 24:00 (hour 0 data → 24:00).
+ * - Daytime (wallHour 6–23): hours 06:00 … wallHour that have orders.
+ * - Midnight EOD card (wallHour 0): hours 06:00 … 23:00 with data, then 24:00 if hour 0 has data.
  * - Before 06:00 (except midnight EOD): empty — never a lone 00:00 orphan.
+ * - Hours with no completions are never shown.
  */
 export function buildPpiHourlyDisplay(
   rows: PpiHourlySource[],
@@ -86,10 +90,12 @@ export function buildPpiHourlyDisplay(
 
   const out: PpiHourlyDisplayRow[] = [];
   for (let h = from; h <= to; h += 1) {
-    out.push(toDisplayRow(h, h, byHour));
+    const display = toDisplayRow(h, h, byHour);
+    if (display) out.push(display);
   }
   if (midnightEod) {
-    out.push(toDisplayRow(0, PPI_EOD_DISPLAY_HOUR_END, byHour));
+    const eod = toDisplayRow(0, PPI_EOD_DISPLAY_HOUR_END, byHour);
+    if (eod) out.push(eod);
   }
   return out;
 }
