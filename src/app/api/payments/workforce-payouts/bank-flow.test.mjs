@@ -409,14 +409,14 @@ test("the UI pays only eligible location rows and displays row-specific ledger b
   assert.match(instructions, /"helper_payout_payment_items" : "workforce_payout_payment_items"[\s\S]{0,300}instruction_amount/);
   assert.match(table, /publicationPaymentReady === true/);
   assert.match(table, /row\.paymentSummary\?\.eligible === true/);
-  assert.match(table, /row\.dropxStatus\.trim\(\)\.toLowerCase\(\) === "active"/);
+  assert.doesNotMatch(table, /hasActiveWorkforceProfileStatus/);
   assert.match(table, /row\.paymentSummary\?\.status !== "Payment Processing"/);
   assert.match(table, /resolveWorkforcePayoutBankSelection\(\s*bankSelectionIndex,\s*selected\s*\)/);
   assert.match(actionSelection, /index\.set\(row\.id,/);
   assert.match(actionSelection, /selectedByPayoutIdentity/);
   assert.match(actionSelection, /const payoutIdentity = `\$\{entry\.workforceId\}\|\$\{entry\.stationId\}`/);
   assert.doesNotMatch(table, /complete profile/i);
-  assert.match(bankDialog, /Only current Active \{subjectLabel\} profiles are eligible/);
+  assert.match(bankDialog, /A non-active registration or employment status does not block/);
   assert.match(bankDialog, /Under Review and every other profile status are excluded/);
   assert.match(bankDialog, /Only the checked payout row and its location balance are included/);
   assert.match(bankDialog, /Other rows for the same DropX ID remain outside this bank file/);

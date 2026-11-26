@@ -1,3 +1,13 @@
+## Workforce bank-file eligibility — 26 November 2026
+
+Registration and employment status alone no longer block payment of an otherwise
+eligible published Workforce balance. This includes pending/returned registration,
+resignation pending and inactive/departed profiles. Both profile and location-row
+candidate writers retain deleted-profile exclusion, publication freshness, balances,
+existing processing/paid instructions, bank details, PAN, holds, location scope and
+company access. Helper policy is unchanged. No profiles are reactivated. Migration:
+`20261126104243_workforce_bank_pay_nonactive_profiles.sql`.
+
 # Team Ops, People and payroll workflows (October 2026)
 
 ## Provider-member Nill Map — 25 November 2026

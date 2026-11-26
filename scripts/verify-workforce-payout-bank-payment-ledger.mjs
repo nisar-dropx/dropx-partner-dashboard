@@ -3240,5 +3240,21 @@ assert.equal(catalog.rows[0].redownload_execute, true);
 assert.equal(catalog.rows[0].authenticated_redownload_execute, false);
 
 await verifySelectedPeriodBankPayments(db,{audience:"workforce",company,actor,bank,station});
+// Current policy: preserve earned pay across registration/employment status changes.
+const nonActiveMigration=readFileSync(new URL('../supabase/migrations/20261126104243_workforce_bank_pay_nonactive_profiles.sql',import.meta.url),'utf8');
+await db.exec(nonActiveMigration);await db.exec(nonActiveMigration);
+for(const [onboarding,lifecycle,active] of [['active','resignation_pending',true],['returned','onboarding',false],['pending','onboarding',false],['under_review','onboarding',false],['active','offboarded',false]]) {
+ await db.query('update public.workforce set onboarding_status=$1,lifecycle_status=$2,is_active=$3 where id=$4',[onboarding,lifecycle,active,atomicUnderReviewWorkforce]);
+ const profile=await previewProfile(atomicUnderReviewWorkforce);
+ assert.equal(profile.eligible,true,JSON.stringify({onboarding,lifecycle,profile}));
+ const rows=await db.query('select * from public.workforce_preview_payout_payment_rows($1,$2::date,$3::date,$4::jsonb)',[company,periodStart,periodEnd,JSON.stringify([{workforce_id:atomicUnderReviewWorkforce,station_id:kbweStation}])]);
+ assert.equal(rows.rows[0].eligible,true,JSON.stringify(rows.rows));
+}
+await db.query('update public.workforce set deleted_at=now() where id=$1',[atomicUnderReviewWorkforce]);
+assert.equal((await previewProfile(atomicUnderReviewWorkforce)).eligible,false,'deleted profiles remain unavailable');
+await db.query('update public.workforce set deleted_at=null where id=$1',[atomicUnderReviewWorkforce]);
+const nonActiveBatch=await createProfileBatch({operation:id(990),fingerprint:'9'.repeat(64),workforceIds:[atomicUnderReviewWorkforce]});
+assert.equal(nonActiveBatch.items.length,1,'a non-active payable profile can generate a bank instruction');
+assert.equal((await previewProfile(atomicUnderReviewWorkforce)).eligible,false,'the new processing instruction cannot be paid twice');
 await db.close();
 console.log("Workforce payout bank payment ledger verification passed.");

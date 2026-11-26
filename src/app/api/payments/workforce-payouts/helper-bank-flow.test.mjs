@@ -154,7 +154,7 @@ test("Helper UI keeps bank selection audience-aware and always shows an authorit
   assert.match(selection, /visibleStatus === "payment processing"/);
   assert.match(selection, /visibleStatus === "payment on hold"/);
   assert.match(selection, /audience === "workforce" && visibleStatus === "pan not linked"/);
-  assert.match(selection, /audience === "helpers" \|\| hasActiveWorkforceProfileStatus\(row\)/);
+  assert.doesNotMatch(selection, /hasActiveWorkforceProfileStatus/);
   assert.match(selection, /audience === "helpers" \|\| row\.publicationLockState === "locked"/);
   assert.match(selection, /audience === "helpers" \|\| row\.paymentDetailsAvailable/);
   assert.match(selection, /audience === "helpers" \|\| row\.panAadhaarStatus !== "NOT LINKED"/);

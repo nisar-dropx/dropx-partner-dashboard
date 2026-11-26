@@ -223,7 +223,7 @@ export function WorkforcePayoutBankDialog({
             <div className="payout-inline-message warn">
               <strong>Payment Processing lock</strong>
               <p>Generating this file marks {payoutRows.length} selected payout row{payoutRows.length === 1 ? "" : "s"} as Payment Processing. {audience === "helpers" ? "Helper payout inputs for those locations" : "Payout inputs and ID mapping for those profiles"} cannot change until the bank response is finalized.</p>
-              <p>Only current Active {subjectLabel} profiles are eligible. Under Review and every other profile status are excluded.</p>
+              <p>{audience === "helpers" ? `Only current Active ${subjectLabel} profiles are eligible. Under Review and every other profile status are excluded.` : "A non-active registration or employment status does not block an otherwise eligible published payable balance. Publication, PAN, bank details, holds and balance checks still apply."}</p>
               <p>Only the checked payout row and its location balance are included. Other rows for the same DropX ID remain outside this bank file.</p>
             </div>
             {publicationRefreshCount ? <div className="payout-inline-message warn" role="status">
