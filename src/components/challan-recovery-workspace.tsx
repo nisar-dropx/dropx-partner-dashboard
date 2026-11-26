@@ -36,10 +36,48 @@ const statusChip: Record<string, string> = {
   open: "Unassigned",
   assigned: "Assigned",
   recovering: "Recovering",
+  bank_pending: "Bank deposit · verify",
   recovered: "Recovered",
   closed: "Closed",
   cancelled: "Cancelled"
 };
+
+const allocationStatusChip: Record<string, string> = {
+  planned: "Scheduled",
+  scheduled: "Scheduled",
+  draft: "Draft payroll",
+  deducted: "Deducted",
+  recovered: "Deducted",
+  cancelled: "Cancelled",
+  waived: "Waived"
+};
+
+function titleCaseStatus(value: string) {
+  return value
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function caseStatusLabel(status: string) {
+  return statusChip[status] || titleCaseStatus(status || "unknown");
+}
+
+function allocationStatusLabel(status: string) {
+  return allocationStatusChip[status] || titleCaseStatus(status || "unknown");
+}
+
+function caseChipClass(status: string) {
+  const key = status.charAt(0).toUpperCase() + status.slice(1);
+  return crw[`st${key}` as keyof typeof crw] || "";
+}
+
+function deductedAllocated(c: ChallanRecoveryCase) {
+  return c.allocations
+    .filter((a) => ["deducted", "recovered"].includes(a.status))
+    .reduce((sum, a) => sum + a.amount, 0);
+}
 
 const FILTER_LABELS: [ChallanRecoveryDimension, string][] = [
   ["station", "Station"],
@@ -49,18 +87,21 @@ const FILTER_LABELS: [ChallanRecoveryDimension, string][] = [
 
 function allocationSummary(c: ChallanRecoveryCase) {
   return c.allocations.reduce(
-    (acc: { ref: string; name: string; total: number; month: string; count: number }[], a) => {
-      const found = acc.find((x) => x.ref === a.personRef && x.month === a.salaryMonth);
+    (acc: { ref: string; name: string; total: number; month: string; count: number; status: string }[], a) => {
+      const found = acc.find(
+        (x) => x.ref === a.personRef && x.month === a.salaryMonth && x.status === a.status
+      );
       if (found) {
         found.total += a.amount;
-        found.count = a.installmentCount;
+        found.count = Math.max(found.count, a.installmentCount);
       } else {
         acc.push({
           ref: a.personRef,
           name: a.personName,
           total: a.amount,
           month: a.salaryMonth,
-          count: a.installmentCount
+          count: a.installmentCount,
+          status: a.status
         });
       }
       return acc;
@@ -72,9 +113,16 @@ function allocationSummary(c: ChallanRecoveryCase) {
 export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecoveryView }) {
   const [view, setView] = useState(initial);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState<"payroll" | "bank_deposit">("payroll");
   const [splitMode, setSplitMode] = useState<"equal" | "custom">("custom");
   const [rows, setRows] = useState<Row[]>([]);
   const [remarks, setRemarks] = useState("");
+  const [bankAmount, setBankAmount] = useState("");
+  const [bankTxn, setBankTxn] = useState("");
+  const [bankDate, setBankDate] = useState("");
+  const [bankAttachments, setBankAttachments] = useState<{ id: string; file_name: string }[]>([]);
+  const [returnNote, setReturnNote] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -118,7 +166,10 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
   );
 
   const outstanding = shown.filter((c) => !["recovered", "closed", "cancelled"].includes(c.status));
-  const totalOutstanding = outstanding.reduce((s, c) => s + c.amount, 0);
+  const totalOutstanding = outstanding.reduce(
+    (s, c) => s + Math.max(0, c.amount - deductedAllocated(c)),
+    0
+  );
   const assignedCount = shown.filter((c) => c.allocations.length > 0).length;
   const filtersActive =
     Boolean(query.trim()) || filters.station.length > 0 || filters.status.length > 0 || filters.month.length > 0;
@@ -151,7 +202,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
           c.vehicleNo,
           c.stationCode,
           c.month,
-          statusChip[c.status] || c.status,
+          caseStatusLabel(c.status),
           c.amount,
           c.allocated,
           c.offenseDescription,
@@ -186,6 +237,8 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
     setOpenId(c.id);
     setError("");
     setNotice("");
+    setReturnNote("");
+    setRecoveryMode(c.status === "bank_pending" || c.bankDeposit?.approvalStatus === "returned" ? "bank_deposit" : "payroll");
     setSplitMode(c.allocations.length ? c.splitMode : "custom");
     setRows(
       c.allocations.length
@@ -198,7 +251,11 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
           }))
         : [{ ref: "", name: "", amount: String(c.amount), salaryMonth: "", installmentCount: "1" }]
     );
-    setRemarks("");
+    setRemarks(c.bankDeposit?.remarks || "");
+    setBankAmount(c.bankDeposit?.receivedAmount || String(c.amount));
+    setBankTxn(c.bankDeposit?.receiptReference || "");
+    setBankDate(c.bankDeposit?.receivedDate || "");
+    setBankAttachments(c.bankDeposit?.attachments || []);
     setOptionsLoading(true);
     setPeople([]);
     setPayrollMonths([]);
@@ -218,6 +275,58 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
       setError(e instanceof Error ? e.message : "Associates could not be loaded.");
     } finally {
       setOptionsLoading(false);
+    }
+  }
+
+  async function uploadBankProof(files: FileList | null) {
+    if (!openCase || !files?.length) return;
+    setUploading(true);
+    setError("");
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set("file", file);
+        form.set("caseId", openCase.id);
+        const res = await fetch("/api/ops-pulse/losses/challan-recovery", { method: "POST", body: form });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || "Proof upload failed.");
+        setBankAttachments((current) => [...current, payload.attachment]);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Proof upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function reviewBank(reviewAction: "approve" | "return") {
+    if (!openCase) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/ops-pulse/losses/challan-recovery", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "bank_review",
+          caseId: openCase.id,
+          reviewAction,
+          note: returnNote,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Bank deposit review failed.");
+      setView(payload.view);
+      setNotice(
+        reviewAction === "approve"
+          ? `Bank deposit verified for challan ${openCase.challanNumber}.`
+          : `Bank deposit returned for challan ${openCase.challanNumber}.`,
+      );
+      setOpenId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bank deposit review failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -260,6 +369,31 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
     setBusy(true);
     setError("");
     try {
+      if (recoveryMode === "bank_deposit") {
+        if (!view.canBankDeposit) throw new Error("Only Cluster Manager and above can submit a bank deposit.");
+        const response = await fetch("/api/ops-pulse/losses/challan-recovery", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "bank_deposit",
+            caseId: openCase.id,
+            remarks,
+            recovery_details: {
+              received_amount: bankAmount,
+              receipt_reference: bankTxn,
+              received_date: bankDate,
+              attachments: bankAttachments,
+            },
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Bank deposit could not be saved.");
+        setView(payload.view);
+        setNotice(`Bank deposit submitted for challan ${openCase.challanNumber}. Awaiting SLP verification.`);
+        setOpenId(null);
+        return;
+      }
+
       const allocations = rows
         .filter((r) => r.ref && Number(r.amount) > 0 && r.salaryMonth)
         .map((r) => {
@@ -302,8 +436,8 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
           <div>
             <h2>Challan recovery</h2>
             <small>
-              Recover approved traffic challans from the responsible associates — split across people and instalments.
-              This is separate from NL/SLP loss recovery; deductions post through the same payroll, under their own keys.
+              Recover approved traffic challans from associates via payroll, or submit a bank deposit for SLP verification.
+              This is separate from NL/SLP loss recovery; payroll deductions use their own keys.
             </small>
           </div>
           <div className={styles.toolbar}>
@@ -331,7 +465,7 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                 values={filters[key]}
                 options={facets[key].map((value) => ({
                   value,
-                  label: key === "status" ? statusChip[value] || value : key === "month" ? monthLabel(value) : value
+                  label: key === "status" ? caseStatusLabel(value) : key === "month" ? monthLabel(value) : value
                 }))}
                 onChange={(values) => setFilters((current) => ({ ...current, [key]: values }))}
               />
@@ -392,14 +526,12 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                   <div className={crw.caseMain}>
                     <div className={crw.caseHead}>
                       <strong className={crw.no}>{c.challanNumber}</strong>
-                      <span
-                        className={`${crw.chip} ${crw["st" + c.status.charAt(0).toUpperCase() + c.status.slice(1)] || ""}`}
-                      >
-                        {statusChip[c.status] || c.status}
+                      <span className={`${crw.chip} ${caseChipClass(c.status)}`}>
+                        {caseStatusLabel(c.status)}
                       </span>
                     </div>
                     <small className={crw.meta}>
-                      {c.vehicleNo} · {c.stationCode} · {monthLabel(c.month)} · {c.offenseDescription || "Traffic challan"}
+                      {c.offenseDescription || "Traffic challan"} · {c.vehicleNo} · {c.stationCode} · {monthLabel(c.month)}
                     </small>
                     {c.allocations.length ? (
                       <div className={crw.allocs}>
@@ -407,6 +539,8 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                           <span key={i} className={crw.alloc}>
                             {g.name || g.ref.split(":")[1]?.slice(0, 8)} · {money(g.total)} · {monthLabel(g.month)}
                             {g.count > 1 ? ` · ${g.count} instalments` : ""}
+                            {" · "}
+                            {allocationStatusLabel(g.status)}
                           </span>
                         ))}
                       </div>
@@ -418,13 +552,26 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
                       <strong>{money(c.amount)}</strong>
                       {c.allocated > 0 ? <em>{money(c.allocated)} assigned</em> : null}
                     </div>
+                    {c.status === "bank_pending" && c.bankDeposit ? (
+                      <div className={crw.allocs}>
+                        <span className={crw.alloc}>
+                          Txn {c.bankDeposit.receiptReference} · {money(Number(c.bankDeposit.receivedAmount) || 0)} · {c.bankDeposit.receivedDate}
+                        </span>
+                      </div>
+                    ) : null}
                     {view.canEdit && !["recovered", "closed", "cancelled"].includes(c.status) ? (
                       <button
                         className={`${styles.button} ${styles.primary}`}
                         type="button"
                         onClick={() => void startAssign(c)}
                       >
-                        {c.allocations.length ? "Edit assignment" : "Assign recovery"}
+                        {c.status === "bank_pending"
+                          ? view.canApproveBankDeposit
+                            ? "Verify bank deposit"
+                            : "View bank deposit"
+                          : c.allocations.length
+                            ? "Edit assignment"
+                            : "Assign recovery"}
                       </button>
                     ) : (
                       <a
@@ -464,12 +611,12 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
           >
             <header className={crw.dialogHead}>
               <div>
-                <small>Assign recovery</small>
+                <small>{openCase.status === "bank_pending" ? "Verify bank deposit" : "Assign recovery"}</small>
                 <h3>
-                  {openCase.challanNumber} · {money(openCase.amount)}
+                  {openCase.challanNumber} · {openCase.offenseDescription || "Traffic challan"}
                 </h3>
                 <small>
-                  {openCase.vehicleNo} · {openCase.stationCode}
+                  {money(openCase.amount)} · {openCase.vehicleNo} · {openCase.stationCode}
                 </small>
               </div>
               <button className={styles.button} type="button" onClick={() => setOpenId(null)} disabled={busy}>
@@ -477,104 +624,237 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
               </button>
             </header>
 
-            <div className={crw.split}>
-              <span>Split:</span>
-              <button
-                type="button"
-                className={splitMode === "equal" ? `${crw.seg} ${crw.segOn}` : crw.seg}
-                onClick={() => {
-                  setSplitMode("equal");
-                  applyEqual(rows.length);
-                }}
-              >
-                Equal
-              </button>
-              <button
-                type="button"
-                className={splitMode === "custom" ? `${crw.seg} ${crw.segOn}` : crw.seg}
-                onClick={() => setSplitMode("custom")}
-              >
-                Custom
-              </button>
-            </div>
-
-            {optionsLoading ? <p className={crw.total}>Loading associates for {openCase.stationCode}…</p> : null}
-            {!optionsLoading && !people.length ? (
-              <p className={crw.total}>No assignable associates found for {openCase.stationCode}.</p>
+            {openCase.status !== "bank_pending" && (view.canBankDeposit || recoveryMode === "bank_deposit") ? (
+              <div className={crw.split}>
+                <span>Recovery action:</span>
+                <button
+                  type="button"
+                  className={recoveryMode === "payroll" ? `${crw.seg} ${crw.segOn}` : crw.seg}
+                  onClick={() => setRecoveryMode("payroll")}
+                  disabled={busy}
+                >
+                  Recover from employees
+                </button>
+                {view.canBankDeposit ? (
+                  <button
+                    type="button"
+                    className={recoveryMode === "bank_deposit" ? `${crw.seg} ${crw.segOn}` : crw.seg}
+                    onClick={() => setRecoveryMode("bank_deposit")}
+                    disabled={busy}
+                  >
+                    Bank deposit
+                  </button>
+                ) : null}
+              </div>
             ) : null}
 
-            <div className={crw.rows}>
-              {rows.map((row, i) => (
-                <div key={i} className={crw.row}>
-                  <select
-                    value={row.ref}
-                    disabled={optionsLoading}
-                    onChange={(e) => {
-                      const person = people.find((p) => p.ref === e.target.value);
-                      setRow(i, { ref: e.target.value, name: person?.fullName || "" });
+            {recoveryMode === "bank_deposit" || openCase.status === "bank_pending" ? (
+              <div className={crw.rows}>
+                {openCase.status === "bank_pending" && openCase.bankDeposit ? (
+                  <p className={crw.total}>
+                    Submitted by {openCase.bankDeposit.proposedByName || "ops"} · awaiting independent verification.
+                    {openCase.bankDeposit.approvalNote ? ` Last note: ${openCase.bankDeposit.approvalNote}` : ""}
+                  </p>
+                ) : null}
+                {openCase.bankDeposit?.approvalStatus === "returned" ? (
+                  <p className={styles.error} role="status">
+                    Returned: {openCase.bankDeposit.approvalNote || "Correct the bank deposit and resubmit."}
+                  </p>
+                ) : null}
+                <label className={crw.remarks}>
+                  Amount
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={bankAmount}
+                    disabled={busy || openCase.status === "bank_pending"}
+                    onChange={(e) => setBankAmount(e.target.value)}
+                  />
+                </label>
+                <label className={crw.remarks}>
+                  Transaction number
+                  <input
+                    minLength={5}
+                    maxLength={160}
+                    value={bankTxn}
+                    disabled={busy || openCase.status === "bank_pending"}
+                    onChange={(e) => setBankTxn(e.target.value)}
+                    placeholder="Bank UTR / transaction reference"
+                  />
+                </label>
+                <label className={crw.remarks}>
+                  Received date
+                  <input
+                    type="date"
+                    value={bankDate}
+                    disabled={busy || openCase.status === "bank_pending"}
+                    onChange={(e) => setBankDate(e.target.value)}
+                  />
+                </label>
+                {openCase.status !== "bank_pending" ? (
+                  <label className={crw.remarks}>
+                    Screenshot / proof (required)
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      disabled={busy || uploading}
+                      onChange={(e) => {
+                        void uploadBankProof(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                ) : null}
+                {uploading ? <p className={crw.total}>Uploading proof…</p> : null}
+                {bankAttachments.map((a) => (
+                  <div key={a.id} className={crw.rowActions}>
+                    <a
+                      href={`/api/ops-pulse/losses/challan-recovery?case=${encodeURIComponent(openCase.id)}&attachment=${encodeURIComponent(a.id)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {a.file_name}
+                    </a>
+                    {openCase.status !== "bank_pending" ? (
+                      <button
+                        type="button"
+                        className={styles.button}
+                        onClick={() => setBankAttachments((current) => current.filter((f) => f.id !== a.id))}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                {openCase.status !== "bank_pending" ? (
+                  <label className={crw.remarks}>
+                    Remarks (optional)
+                    <textarea
+                      rows={2}
+                      maxLength={1000}
+                      value={remarks}
+                      onChange={(e) => setRemarks(e.target.value)}
+                      placeholder="Context for this bank deposit."
+                    />
+                  </label>
+                ) : null}
+                {openCase.status === "bank_pending" && view.canApproveBankDeposit ? (
+                  <label className={crw.remarks}>
+                    Return note (required to return)
+                    <textarea
+                      rows={2}
+                      maxLength={2000}
+                      minLength={10}
+                      value={returnNote}
+                      onChange={(e) => setReturnNote(e.target.value)}
+                      placeholder="What must be corrected on this proof?"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <div className={crw.split}>
+                  <span>Split:</span>
+                  <button
+                    type="button"
+                    className={splitMode === "equal" ? `${crw.seg} ${crw.segOn}` : crw.seg}
+                    onClick={() => {
+                      setSplitMode("equal");
+                      applyEqual(rows.length);
                     }}
                   >
-                    <option value="">Select associate…</option>
-                    {people.map((p) => (
-                      <option key={p.ref} value={p.ref}>
-                        {p.fullName}
-                        {p.employeeCode ? ` (${p.employeeCode})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Amount"
-                    value={row.amount}
-                    disabled={splitMode === "equal"}
-                    onChange={(e) => setRow(i, { amount: e.target.value })}
-                  />
-                  <select value={row.salaryMonth} onChange={(e) => setRow(i, { salaryMonth: e.target.value })}>
-                    <option value="">Salary month…</option>
-                    {payrollMonths.map((m) => (
-                      <option key={m} value={m}>
-                        {monthLabel(m)}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    max="24"
-                    step="1"
-                    title="Instalments"
-                    value={row.installmentCount}
-                    onChange={(e) => setRow(i, { installmentCount: e.target.value })}
-                  />
-                  <button type="button" className={crw.x} onClick={() => removeRow(i)} aria-label="Remove">
-                    ×
+                    Equal
+                  </button>
+                  <button
+                    type="button"
+                    className={splitMode === "custom" ? `${crw.seg} ${crw.segOn}` : crw.seg}
+                    onClick={() => setSplitMode("custom")}
+                  >
+                    Custom
                   </button>
                 </div>
-              ))}
-            </div>
 
-            <div className={crw.rowActions}>
-              <button type="button" className={styles.button} onClick={addRow}>
-                + Add associate
-              </button>
-              <span className={overAllocated ? `${crw.total} ${crw.totalOver}` : crw.total}>
-                {money(assignedTotal)} of {money(openCase.amount)}
-                {overAllocated ? " · exceeds amount" : ""}
-              </span>
-            </div>
+                {optionsLoading ? <p className={crw.total}>Loading associates for {openCase.stationCode}…</p> : null}
+                {!optionsLoading && !people.length ? (
+                  <p className={crw.total}>No assignable associates found for {openCase.stationCode}.</p>
+                ) : null}
 
-            <label className={crw.remarks}>
-              Remarks (optional)
-              <textarea
-                rows={2}
-                maxLength={1000}
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Context for this recovery."
-              />
-            </label>
+                <div className={crw.rows}>
+                  {rows.map((row, i) => (
+                    <div key={i} className={crw.row}>
+                      <select
+                        value={row.ref}
+                        disabled={optionsLoading}
+                        onChange={(e) => {
+                          const person = people.find((p) => p.ref === e.target.value);
+                          setRow(i, { ref: e.target.value, name: person?.fullName || "" });
+                        }}
+                      >
+                        <option value="">Select associate…</option>
+                        {people.map((p) => (
+                          <option key={p.ref} value={p.ref}>
+                            {p.fullName}
+                            {p.employeeCode ? ` (${p.employeeCode})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Amount"
+                        value={row.amount}
+                        disabled={splitMode === "equal"}
+                        onChange={(e) => setRow(i, { amount: e.target.value })}
+                      />
+                      <select value={row.salaryMonth} onChange={(e) => setRow(i, { salaryMonth: e.target.value })}>
+                        <option value="">Salary month…</option>
+                        {payrollMonths.map((m) => (
+                          <option key={m} value={m}>
+                            {monthLabel(m)}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="1"
+                        max="24"
+                        step="1"
+                        title="Instalments"
+                        value={row.installmentCount}
+                        onChange={(e) => setRow(i, { installmentCount: e.target.value })}
+                      />
+                      <button type="button" className={crw.x} onClick={() => removeRow(i)} aria-label="Remove">
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className={crw.rowActions}>
+                  <button type="button" className={styles.button} onClick={addRow}>
+                    + Add associate
+                  </button>
+                  <span className={overAllocated ? `${crw.total} ${crw.totalOver}` : crw.total}>
+                    {money(assignedTotal)} of {money(openCase.amount)}
+                    {overAllocated ? " · exceeds amount" : ""}
+                  </span>
+                </div>
+
+                <label className={crw.remarks}>
+                  Remarks (optional)
+                  <textarea
+                    rows={2}
+                    maxLength={1000}
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="Context for this recovery."
+                  />
+                </label>
+              </>
+            )}
 
             {error && openCase ? (
               <p className={styles.error} role="alert">
@@ -586,14 +866,39 @@ export function ChallanRecoveryWorkspace({ view: initial }: { view: ChallanRecov
               <button type="button" className={styles.button} onClick={() => setOpenId(null)} disabled={busy}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className={`${styles.button} ${styles.primary}`}
-                onClick={() => void save()}
-                disabled={busy || overAllocated}
-              >
-                {busy ? "Saving…" : "Save assignment"}
-              </button>
+              {openCase.status === "bank_pending" && view.canApproveBankDeposit ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    disabled={busy || returnNote.trim().length < 10}
+                    onClick={() => void reviewBank("return")}
+                  >
+                    Return for correction
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.primary}`}
+                    disabled={busy}
+                    onClick={() => void reviewBank("approve")}
+                  >
+                    {busy ? "Saving…" : "Verify bank deposit"}
+                  </button>
+                </>
+              ) : openCase.status === "bank_pending" ? null : (
+                <button
+                  type="button"
+                  className={`${styles.button} ${styles.primary}`}
+                  onClick={() => void save()}
+                  disabled={busy || uploading || (recoveryMode === "payroll" && overAllocated)}
+                >
+                  {busy
+                    ? "Saving…"
+                    : recoveryMode === "bank_deposit"
+                      ? "Submit bank deposit"
+                      : "Save assignment"}
+                </button>
+              )}
             </div>
           </section>
         </div>

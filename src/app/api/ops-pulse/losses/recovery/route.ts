@@ -107,7 +107,7 @@ export async function GET(request: Request) {
       people: people.map(recoveryPersonPayDisclosure),
       can_propose: !periodClosed && !auth.readOnly && hasPermission(auth, "ops_losses", "edit") && responseWindow.data?.workflow_status !== "won",
       can_approve: !periodClosed && mayActivateRedispute(auth) && hasPermission(auth,"ops_losses","edit") && history.data?.[0]?.after_value?.proposed_by !== auth.userId,
-      can_recovered: false,
+      can_recovered: !periodClosed && mayMarkAlreadyRecovered(auth) && hasPermission(auth, "ops_losses", "edit"),
       can_response: !periodClosed && !!responseWindow.data?.enabled,
       history: (history.data ?? []).map((event) => ({
         ...event,
@@ -151,13 +151,28 @@ export async function POST(request: Request) {
       .eq("code", body.outcome)
       .maybeSingle();
     if (outcome.error) throw Error("Recovery outcome could not be loaded.");
-    if (!outcome.data || !recoveryActionAllowed(outcome.data)) return reply({ error: "Use a recovery plan or record the responsible person. Redisputes are managed in Case response." }, 400);
+    const allowBankDeposit = mayMarkAlreadyRecovered(auth) && hasPermission(auth, "ops_losses", "edit");
+    if (!outcome.data || !recoveryActionAllowed(outcome.data, { allowBankDeposit }))
+      return reply({ error: "Use a recovery plan, bank deposit proof, or record the responsible person. Redisputes are managed in Case response." }, 400);
     await assertLifecycleAction(auth, station.id, "propose");
     if (body.outcome === "already_recovered") {
-      if (!mayMarkAlreadyRecovered(auth) || !hasPermission(auth, "ops_losses", "edit"))
-        return reply({ error: "Only Cluster Manager and above can mark a case as already recovered." }, 403);
+      if (!allowBankDeposit)
+        return reply({ error: "Only Cluster Manager and above can submit a bank deposit for SLP verification." }, 403);
       const error = receivedRecoveryError(body.recovery_details ?? {}, Number(amount));
       if (error) return reply({ error }, 400);
+      const attachments = Array.isArray(body.recovery_details?.attachments) ? body.recovery_details.attachments : [];
+      const ids = attachments.map((a: { id?: unknown }) => String(a?.id || "").trim()).filter(Boolean);
+      if (!ids.length) return reply({ error: "Attach a screenshot or proof of the bank deposit for SLP verification." }, 400);
+      const proof = await supabaseAdmin!
+        .from("nl_recovery_attachments")
+        .select("id")
+        .eq("company_id", scope.company)
+        .eq("month", body.month)
+        .eq("case_key", caseKey)
+        .in("id", ids);
+      if (proof.error) throw Error("Bank deposit proof could not be verified.");
+      if ((proof.data || []).length !== new Set(ids).size)
+        return reply({ error: "Upload the bank deposit screenshot again before saving." }, 400);
     }
     if (body.outcome === "responsible_left") {
       const error = departedPersonError(body.recovery_details ?? {}, body.remarks);

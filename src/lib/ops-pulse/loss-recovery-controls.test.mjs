@@ -7,6 +7,7 @@ import {
   isLossRecoveryManagerialTarget,
   filterLossRecoveryDebitPeople,
   departedPersonError,
+  receivedRecoveryError,
   defaultLossFilter,
   hasFinalLossOutcome,
   lossStatusMatches,
@@ -18,12 +19,21 @@ test('only accountable recovery actions remain', () => {
   assert.equal(recoveryActionAllowed({code:'recover',allocation_required:true}),true);
   assert.equal(recoveryActionAllowed({code:'responsible_left',allocation_required:false}),true);
   assert.equal(recoveryActionAllowed({code:'post_dispute',allocation_required:true,dispute_fields_enabled:true}),false);
+  assert.equal(recoveryActionAllowed({code:'already_recovered',allocation_required:false}),false);
+  assert.equal(recoveryActionAllowed({code:'already_recovered',allocation_required:false},{allowBankDeposit:true}),true);
 });
 test('leadership activation excludes ground and cluster managers, including read-only leadership', () => {
   const auth={isMasterOwner:false,roleCode:null};
   for (const roleCode of ['OPERATIONS_CM','OPERATIONS_CLM','OPERATIONS_TL','OPERATIONS_AOM','OPERATIONS_BH','OPERATIONS_RH','OPERATIONS_GM','GENERAL_MANAGER','GM',null]) assert.equal(mayActivateRedispute({...auth,roleCode}),false);
   for (const roleCode of ['OPERATIONS_SLPM','OPERATIONS_NH','FINANCE_MANAGER','FINANCE_FINMGR','OPERATIONS_MANAGING_PARTNER','OPERATIONS_MP']) assert.equal(mayActivateRedispute({...auth,roleCode}),true,roleCode);
   assert.equal(mayActivateRedispute({...auth,isMasterOwner:true,readOnly:true}),false);
+});
+test('bank deposit requires full amount, transaction number, date and screenshot', () => {
+  const base = { received_amount: '100', receipt_reference: 'UTR12345', received_date: '2026-11-01' };
+  assert.match(receivedRecoveryError(base, 100), /screenshot|proof/i);
+  assert.equal(receivedRecoveryError({ ...base, attachments: [{ id: 'a1', file_name: 'slip.png' }] }, 100), '');
+  assert.match(receivedRecoveryError({ ...base, received_amount: '50', attachments: [{ id: 'a1' }] }, 100), /full loss amount/i);
+  assert.match(receivedRecoveryError({ ...base, receipt_reference: 'ab', attachments: [{ id: 'a1' }] }, 100), /transaction number/i);
 });
 test('already recovered is cluster and above only', () => {
   const base = { isMasterOwner: false, roleCode: null, readOnly: false };

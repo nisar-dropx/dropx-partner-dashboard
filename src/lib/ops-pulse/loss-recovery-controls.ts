@@ -1,6 +1,14 @@
-/** Recovery outcomes cannot turn an unpaid loss into an unowned exception. */
-export function recoveryActionAllowed(o: { code: string; allocation_required: boolean; dispute_fields_enabled?: boolean }) {
-  return o.code !== "already_recovered" && !o.dispute_fields_enabled && (o.allocation_required || o.code === "responsible_left");
+/**
+ * Recovery outcomes that may be saved from the recovery form.
+ * Bank deposit (`already_recovered`) is allowed only when the caller has CM+ rights
+ * (`allowBankDeposit`); redispute-field outcomes stay on the case-response desk.
+ */
+export function recoveryActionAllowed(
+  o: { code: string; allocation_required: boolean; dispute_fields_enabled?: boolean },
+  opts?: { allowBankDeposit?: boolean },
+) {
+  if (o.code === "already_recovered") return !!opts?.allowBankDeposit;
+  return !o.dispute_fields_enabled && (o.allocation_required || o.code === "responsible_left");
 }
 
 export type LossRole = { readOnly?: boolean; isMasterOwner: boolean; roleCode: string | null; effectiveRoleCodes?: string[]; designationName?: string | null };
@@ -117,7 +125,7 @@ export function mayViewRedisputeBreakdown(auth: LossRole) {
 }
 
 /**
- * “Already recovered” is Cluster Manager and above only.
+ * Bank deposit (outcome `already_recovered`) is Cluster Manager and above only.
  * Station / location actors must not see or set it — including when they have Losses edit.
  */
 export function mayMarkAlreadyRecovered(auth: LossRole) {
@@ -126,6 +134,15 @@ export function mayMarkAlreadyRecovered(auth: LossRole) {
   if (auth.isMasterOwner) return true;
   if (roleTokens(auth).some((code) => CLUSTER_AND_ABOVE.has(code))) return true;
   return isClusterOrAboveTitle(auth.designationName);
+}
+
+function bankDepositAttachments(details: Record<string, unknown>) {
+  const raw = details.attachments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is { id: string; file_name?: string } =>
+      !!item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string" && String((item as { id: string }).id).trim().length > 0,
+  );
 }
 
 /** True for roles above the station’s mapped Cluster Manager / AOM. */
@@ -152,9 +169,14 @@ export function filterLossRecoveryDebitPeople<T extends { designation?: string |
 }
 
 export function receivedRecoveryError(details: Record<string, unknown>, amount: number) {
-  if (Math.round(Number(details.received_amount) * 100) !== Math.round(amount * 100)) return "Enter the full loss amount received. Partial collections must remain outstanding.";
-  if (String(details.receipt_reference ?? "").trim().length < 5) return "Enter the payment or receipt reference for final verification.";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(details.received_date ?? ""))) return "Enter the date the recovery was received.";
+  if (Math.round(Number(details.received_amount) * 100) !== Math.round(amount * 100))
+    return "Enter the full loss amount deposited. Partial collections must remain outstanding.";
+  if (String(details.receipt_reference ?? "").trim().length < 5)
+    return "Enter the bank transaction number for SLP verification.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(details.received_date ?? "")))
+    return "Enter the date the bank deposit was received.";
+  if (!bankDepositAttachments(details).length)
+    return "Attach a screenshot or proof of the bank deposit for SLP verification.";
   return "";
 }
 

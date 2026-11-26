@@ -1,6 +1,7 @@
 import "server-only";
 import type { AuthorizationContext } from "@/lib/authorization";
 import { hasPermission } from "@/lib/authorization";
+import { mayActivateRedispute, mayMarkAlreadyRecovered } from "@/lib/ops-pulse/loss-recovery-controls";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { readAllRows } from "@/lib/supabase-pagination";
 import { nlStationScope } from "./nl-loss";
@@ -16,6 +17,21 @@ export type ChallanRecoveryAllocation = {
   installmentCount: number;
   status: string;
   remarks: string;
+};
+
+export type ChallanBankDeposit = {
+  receivedAmount: string;
+  receiptReference: string;
+  receivedDate: string;
+  attachments: { id: string; file_name: string }[];
+  remarks: string;
+  approvalStatus: string;
+  proposedBy: string;
+  proposedByName: string;
+  proposedAt: string;
+  approvedByName: string;
+  approvedAt: string;
+  approvalNote: string;
 };
 
 export type ChallanRecoveryCase = {
@@ -36,6 +52,7 @@ export type ChallanRecoveryCase = {
   splitMode: "equal" | "custom";
   allocations: ChallanRecoveryAllocation[];
   allocated: number;
+  bankDeposit: ChallanBankDeposit | null;
 };
 
 export type ChallanRecoveryPerson = {
@@ -50,7 +67,38 @@ export type ChallanRecoveryView = {
   ready: boolean;
   cases: ChallanRecoveryCase[];
   canEdit: boolean;
+  canBankDeposit: boolean;
+  canApproveBankDeposit: boolean;
 };
+
+function mapBankDeposit(raw: unknown): ChallanBankDeposit | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  if (!row.receipt_reference && !row.approval_status) return null;
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+        .map((item) => ({
+          id: text(item.id),
+          file_name: text(item.file_name) || "Proof",
+        }))
+        .filter((item) => item.id)
+    : [];
+  return {
+    receivedAmount: text(row.received_amount),
+    receiptReference: text(row.receipt_reference),
+    receivedDate: text(row.received_date),
+    attachments,
+    remarks: text(row.remarks),
+    approvalStatus: text(row.approval_status),
+    proposedBy: text(row.proposed_by),
+    proposedByName: text(row.proposed_by_name),
+    proposedAt: text(row.proposed_at),
+    approvedByName: text(row.approved_by_name),
+    approvedAt: text(row.approved_at),
+    approvalNote: text(row.approval_note),
+  };
+}
 
 export type ChallanAssignOptions = {
   people: ChallanRecoveryPerson[];
@@ -135,14 +183,18 @@ export async function loadChallanRecovery(auth: AuthorizationContext): Promise<C
       createdAt: c.created_at,
       splitMode: (allocs[0]?.personRef && allocs.every((x) => x.amount === allocs[0].amount) ? "equal" : "custom") as "equal" | "custom",
       allocations: allocs,
-      allocated: allocs.reduce((s, a) => s + a.amount, 0)
+      allocated: allocs.reduce((s, a) => s + a.amount, 0),
+      bankDeposit: mapBankDeposit(c.bank_deposit),
     };
   });
 
+  const canEdit = !auth.readOnly && hasPermission(auth, "ops_losses", "edit");
   return {
     ready: true,
     cases: mappedCases,
-    canEdit: !auth.readOnly && hasPermission(auth, "ops_losses", "edit")
+    canEdit,
+    canBankDeposit: canEdit && mayMarkAlreadyRecovered(auth),
+    canApproveBankDeposit: canEdit && mayActivateRedispute(auth),
   };
 }
 

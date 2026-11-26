@@ -1,3 +1,30 @@
+## NL / SLP / Challan bank deposit and forward payroll month — 26 November 2026
+
+Recovery action **Bank deposit** restores outcome `already_recovered` for Cluster Manager
+and above on NL Final, SLP Final, Recovery queue and station cases that share
+`RecoveryForm`: full deposited amount, transaction number, received date and a required
+screenshot. Saves stay proposed until SLP/Finance/NH/MP verification; approval marks the
+case recovered with no payroll deduction. Partials stay outstanding. Workbooks still
+exclude this path. Challan recovery has the same Cluster submit → SLP verify path via
+`fleet_challan_recovery_bank_deposit_v1` / `fleet_challan_recovery_bank_review_v1`
+(status `bank_pending` → `recovered`). Deduct next month continues to pin only the next
+payroll month after current (October loss → November current; December needs the enabled
+exception). **Forward month is not a Cluster Manager menu item:** only SLP/Finance/NH/MP
+enable Deduct next month in Exceptions; Cluster then sees that month in Recovery payroll
+month. Migrations `20261126180000_loss_bank_deposit_proof.sql` and
+`20261126183000_challan_bank_deposit.sql`. Validate with
+`node scripts/test-loss-bank-deposit-proof.mjs` and `loss-recovery-controls` unit tests.
+
+## Workforce bank-file eligibility — 26 November 2026
+
+Registration and employment status alone no longer block payment of an otherwise
+eligible published Workforce balance. This includes pending/returned registration,
+resignation pending and inactive/departed profiles. Both profile and location-row
+candidate writers retain deleted-profile exclusion, publication freshness, balances,
+existing processing/paid instructions, bank details, PAN, holds, location scope and
+company access. Helper policy is unchanged. No profiles are reactivated. Migration:
+`20261126104243_workforce_bank_pay_nonactive_profiles.sql`.
+
 # Team Ops, People and payroll workflows (October 2026)
 
 ## Four profile statuses and Active-only Workforce bank files — 26 November 2026
@@ -405,9 +432,17 @@ AOM are eligible; the reporting walk stops at AOM. Higher management stays exclu
 People salary amounts never leave the server in the recovery picker. Assignment does not
 require a calculated People run; payroll applies available-pay limits when calculating.
 
-**Already recovered:** `mayMarkAlreadyRecovered` — Cluster Manager / City Manager / AOM and above
-(or SLP / NH / Finance / MP redispute roles). Station and under-managers with Losses edit do **not**
-see or set the “Already recovered” outcome.
+**Bank deposit** (outcome code `already_recovered`): `mayMarkAlreadyRecovered` — Cluster Manager /
+City Manager / AOM and above (or SLP / NH / Finance / MP redispute roles). Station and under-managers
+with Losses edit do **not** see or set it. Submitters enter the full deposited amount, bank
+transaction number, received date and a required screenshot; the plan stays `proposed` until an
+independent SLP/Finance/NH/MP verifier approves it. Approval marks the case `recovered` with no
+payroll deduction. Partial deposits remain outstanding. Migration:
+`20261126180000_loss_bank_deposit_proof.sql`.
+
+**Forward payroll month:** October losses default to November current payroll. Deduct next month in
+Exceptions pins the next payroll month (December in that example). The Recovery payroll month picker
+shows that month only while the grant is enabled and source-bound.
 
 **Salary cap:** `recovery_policy.salary_cap_percent` (50) of take-home, applied twice:
 

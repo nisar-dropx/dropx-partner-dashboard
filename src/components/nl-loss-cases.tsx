@@ -368,7 +368,10 @@ export function RecoveryForm({
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
-  const validation = outcome === "responsible_left" ? departedPersonError(details, remarks) : !option?.is_active || !recoveryActionAllowed(option)
+  const allowBankDeposit = !!canRecovered;
+  const actionAllowed = (o: { code: string; allocation_required: boolean; dispute_fields_enabled?: boolean }) =>
+    recoveryActionAllowed(o, { allowBankDeposit });
+  const validation = outcome === "responsible_left" ? departedPersonError(details, remarks) : !option?.is_active || !actionAllowed(option)
     ? "Select an active recovery action."
     : option.allocation_required
       ? allocationError(
@@ -491,7 +494,7 @@ export function RecoveryForm({
       if (!res.ok) throw Error(j.error);
       setRecovery(j.recovery);
       if (Number.isInteger(j.lifecycle_version)) setLifecycleVersion(j.lifecycle_version);
-      setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
+      setSuccess(canResponse ? "Recovery plan saved. Payroll remains paused while the redispute is active." : outcome === "already_recovered" ? "Bank deposit submitted for SLP verification. No payroll deduction is created until it is approved." : j.recovery.approval_status === "approved" ? (j.payroll_sync?.message || "Saved for payroll. The full recovery will be included in the applicable payroll calculation.") : "Exception submitted for approval. Payroll stays paused until another authorised approver confirms it.");
       if(onSaved)onSaved();else router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save.");
@@ -569,11 +572,42 @@ export function RecoveryForm({
         </p>
       ) : null}
       {["proposed","needs_review"].includes(recovery?.approval_status || "") ? (
-        <p className={styles.notice}>
-          Exception awaiting approval. Payroll is paused until independently confirmed.
+        <div className={styles.notice}>
+          <p>
+            {recovery?.outcome_code === "already_recovered"
+              ? "Bank deposit awaiting SLP verification. No payroll deduction is created until independently confirmed."
+              : "Exception awaiting approval. Payroll is paused until independently confirmed."}
+          </p>
+          {recovery?.outcome_code === "already_recovered" ? (
+            <dl className={styles.sourceGrid} aria-label="Bank deposit proof">
+              <div>
+                <small>Transaction number</small>
+                <strong>{String(recovery.recovery_details?.receipt_reference || "—")}</strong>
+              </div>
+              <div>
+                <small>Amount</small>
+                <strong>{money(Number(recovery.recovery_details?.received_amount || 0))}</strong>
+              </div>
+              <div>
+                <small>Received date</small>
+                <strong>{String(recovery.recovery_details?.received_date || "—")}</strong>
+              </div>
+              <div>
+                <small>Screenshot / proof</small>
+                <strong>
+                  {(recovery.recovery_details?.attachments || []).length
+                    ? (recovery.recovery_details?.attachments || []).map((a) => (
+                        <a key={a.id} href={attachmentUrl(a.id)} target="_blank" rel="noreferrer" style={{ display: "block" }}>
+                          {a.file_name || "View proof"}
+                        </a>
+                      ))
+                    : "No file attached"}
+                </strong>
+              </div>
+            </dl>
+          ) : null}
           {canApprove && mayApproveCase ? (
-            <>
-              {" "}
+            <p>
               <button
                 type="button"
                 className={styles.button}
@@ -598,7 +632,11 @@ export function RecoveryForm({
                     if (!res.ok) throw Error(j.error);
                     setRecovery(j.recovery);
                     if (Number.isInteger(j.lifecycle_version)) setLifecycleVersion(j.lifecycle_version);
-                    setSuccess("Update approved. Scheduled balances remain outstanding until collected.");
+                    setSuccess(
+                      recovery?.outcome_code === "already_recovered"
+                        ? "Bank deposit verified. The case is marked recovered; no payroll deduction was created."
+                        : "Update approved. Scheduled balances remain outstanding until collected.",
+                    );
                     if(onSaved)onSaved();else router.refresh();
                   } catch (e) {
                     setError(
@@ -611,11 +649,11 @@ export function RecoveryForm({
                   }
                 }}
               >
-                Approve update
+                {recovery?.outcome_code === "already_recovered" ? "Verify bank deposit" : "Approve update"}
               </button>
-            </>
+            </p>
           ) : null}
-        </p>
+        </div>
       ) : null}
       {recovery?.approval_status === "returned" || row.lifecycle_status === "returned_to_station" ? <p className={styles.notice}>Returned for update: {recovery?.approval_note || row.lifecycle_note}. Correct the details and submit again.</p> : null}
       {canApprove && mayApproveCase && recovery && ["proposed", "needs_review"].includes(recovery.approval_status || "") && !["recovered", "written_off", "not_recoverable"].includes(row.lifecycle_status || "") ? <details className={styles.compactDetails}><summary>Return for correction</summary>
@@ -682,25 +720,66 @@ export function RecoveryForm({
                 {outcomes
                   .filter(
                     (o) =>
-                      (o.is_active && recoveryActionAllowed(o) && !o.restricted && (o.deduction_timing !== "next_month" || !!exceptionOptions.next_month)) ||
+                      (o.is_active && actionAllowed(o) && (!o.restricted || o.code === "already_recovered" && allowBankDeposit) && (o.deduction_timing !== "next_month" || !!exceptionOptions.next_month)) ||
                       o.code === outcome,
                   )
                   .map((o) => (
-                    <option key={o.code} value={o.code} disabled={!o.is_active || !recoveryActionAllowed(o)}>
-                      {o.label}
+                    <option key={o.code} value={o.code} disabled={!o.is_active || !actionAllowed(o)}>
+                      {o.code === "already_recovered" ? "Bank deposit" : o.label}
                       {!o.is_active ? " (removed)" : ""}
                     </option>
                   ))}
               </select>
             </label>
             {outcome === "already_recovered" ? <div className={styles.departedFields}>
-              <label>Amount received<input required type="number" min="0.01" step="0.01" value={details.received_amount || ""} onChange={e=>setDetails({...details,received_amount:e.target.value})}/></label>
-              <label>Receipt / payment reference<input required minLength={5} maxLength={160} value={details.receipt_reference || ""} onChange={e=>setDetails({...details,receipt_reference:e.target.value})}/></label>
+              <label>Amount<input required type="number" min="0.01" step="0.01" value={details.received_amount || ""} onChange={e=>setDetails({...details,received_amount:e.target.value})}/></label>
+              <label>Transaction number<input required minLength={5} maxLength={160} value={details.receipt_reference || ""} onChange={e=>setDetails({...details,receipt_reference:e.target.value})} placeholder="Bank UTR / transaction reference"/></label>
               <label>Received date<input required type="date" value={details.received_date || ""} onChange={e=>setDetails({...details,received_date:e.target.value})}/></label>
-              {receiptError?<small>{receiptError}</small>:<small>Submitted for independent verification; no payroll deduction is created.</small>}
+              <label>
+                Screenshot / proof (required)
+                <input
+                  type="file"
+                  accept={settings?.recovery_policy.attachment_types.join(",") || "image/*,application/pdf"}
+                  onChange={(e) => {
+                    void upload(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <small>
+                  Up to {settings?.recovery_policy.attachment_max_count || 3}{" "}
+                  files · {settings?.recovery_policy.attachment_max_mb || 5} MB each
+                </small>
+              </label>
+              {uploading ? <p role="status">Uploading proof…</p> : null}
+              {details.attachments?.map((a) => (
+                <div className={styles.toolbar} key={a.id}>
+                  <a href={attachmentUrl(a.id)} target="_blank" rel="noreferrer">{a.file_name}</a>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() =>
+                      setDetails({
+                        ...details,
+                        attachments: details.attachments?.filter((f) => f.id !== a.id),
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              {receiptError?<small>{receiptError}</small>:<small>Submitted for SLP verification; no payroll deduction is created.</small>}
             </div> : null}
             {outcome === "responsible_left" ? <LossDepartedPerson month={row.month} caseKey={caseKey} amount={Number(row.amount)} details={details} onChange={setDetails} onCheck={setDepartedCheck} initialPayrollMonth={old?.deduction_month}/> : null}
-            {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>setPlan({...plan,deduction_month:e.target.value})}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month, ...commonOpenPayrollMonths(people,selected)].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · enabled exception' : m===deductionMonths.current_month ? ' · current payroll' : commonOpenPayrollMonths(people,selected).includes(m!) ? ' · unpaid payroll open' : ' · existing schedule'}</option>)}</select><small>Unpaid months remain selectable until payroll closes. Later-month recovery needs an enabled exception.</small></label> : null}
+            {option?.allocation_required ? <label>Recovery payroll month<select value={deductionPeriod || ""} onChange={e=>{
+              const next = e.target.value;
+              if (next && next === deductionMonths.next_month && next !== deductionMonths.current_month && next !== exceptionOptions.next_month && !(old?.deduction_month === next) && !commonOpenPayrollMonths(people,selected).includes(next)) {
+                setError("Later-month recovery needs an enabled Deduct next month exception.");
+                return;
+              }
+              setError("");
+              setPlan({...plan,deduction_month:next});
+            }}>{[...new Set([deductionMonths.current_month, exceptionOptions.next_month, old?.deduction_month, ...commonOpenPayrollMonths(people,selected)].filter(Boolean))].sort().map(m=><option key={m} value={m!}>{monthLabel(m!)}{m===exceptionOptions.next_month ? ' · forward payroll exception' : m===deductionMonths.current_month ? ' · current payroll' : commonOpenPayrollMonths(people,selected).includes(m!) ? ' · unpaid payroll open' : ' · existing schedule'}</option>)}</select><small>Example: October loss defaults to November current payroll. December needs an enabled Deduct next month exception. Unpaid earlier months stay selectable until payroll closes.</small></label> : null}
             {option?.allocation_required ? (
               <div className={styles.allocation}>
                 <div className={styles.toolbar}>
@@ -925,7 +1004,7 @@ export function RecoveryForm({
                     }
                   />
                 </label>
-                {option.attachments_enabled ? (
+                {option.attachments_enabled && outcome !== "already_recovered" ? (
                   <label>
                     Attachments (optional)
                     <input
@@ -946,8 +1025,8 @@ export function RecoveryForm({
                     </small>
                   </label>
                 ) : null}
-                {uploading ? <p role="status">Uploading evidence…</p> : null}
-                {details.attachments?.map((a) => (
+                {option.attachments_enabled && outcome !== "already_recovered" && uploading ? <p role="status">Uploading evidence…</p> : null}
+                {option.attachments_enabled && outcome !== "already_recovered" ? details.attachments?.map((a) => (
                   <div className={styles.toolbar} key={a.id}>
                     <a
                       href={attachmentUrl(a.id)}
@@ -971,7 +1050,7 @@ export function RecoveryForm({
                       Remove
                     </button>
                   </div>
-                ))}
+                )) : null}
                 {option.cctv_enabled ? (
                   <>
                     <label>

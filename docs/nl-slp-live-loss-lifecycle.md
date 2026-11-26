@@ -284,7 +284,8 @@ This section supersedes the earlier station/cluster-only proposal and Master-per
 - **Approvals:** SLP Manager, National Head, Finance Manager or Managing Partner only, always with existing page and station access. Broad Master access, AOM, Business Head and Cluster Manager are insufficient. A proposer cannot approve their own update. Station claims use the same four final roles; their own claims cannot be approved.
 - Stations and clusters with Losses edit may propose. Every save, including receipt verification, departure details and edits to an approved plan, returns to pending final approval. Return requires a reason; resubmission requires independent approval again. A recoverable debt cannot be dismissed through Reject. Claim rejection is reserved for the four final roles deciding whether a newly raised claim is valid.
 - **Collections:** actual reviewed HRMS/published Workforce deductions, draft reservations, outstanding and write-offs remain distinct. An unpaid month never completes an instalment. Three instalments mean three successfully deducted instalments; after three salary gaps the first unpaid key is still due, without doubling. A next-month full debit stays visible until actually collected. Exit balances remain outstanding.
-- A full receipt requires the exact amount, receipt/payment reference and received date, then independent approval. A partial receipt cannot mark a case fully recovered. No actual financial transactions are performed by the desk.
+- **Bank deposit** (outcome `already_recovered`): Cluster Manager and above submit the full deposited amount, bank transaction number, received date and a required screenshot/proof. The update stays proposed until an independent SLP/Finance/NH/MP verifier confirms it; approval marks the case recovered with no payroll deduction. A partial deposit cannot close the balance. No actual bank transfer is performed by the desk. Migration `20261126180000_loss_bank_deposit_proof.sql`.
+- **Forward payroll month:** an October loss defaults to November current payroll. Enabling Deduct next month in Exceptions pins December (the next applicable payroll month). Arbitrary later months stay blocked.
 - **Redisputes:** restricted submenu for those four roles. Activate individual TIDs; stations may respond only to activated TIDs. Record an LSC TT reference/link, status, next follow-up and vendor response; every update is version checked and appended to history. Filing or vendor-pending status requires a TT and follow-up date. A reported win pauses further uncollected recovery for source verification; it does not overwrite Amazon's imported outcome or reverse paid payroll. Closed/revoked windows reject further station responses. Drive evidence remains optional.
 - Pending proposals cannot masquerade as scheduled collections. Legacy exception shortcuts remain flagged for review. Notifications remain in their existing enabled/disabled state; final-approval recipients now use the same role restriction.
 
@@ -331,3 +332,14 @@ policy writes to available-pay validation. Due RPCs retain their shape and retur
 percent for compatibility. Release the Dashboard and companion HRMS payroll changes
 together. Tests cover >50% saves, available-pay reservations, legacy client fields,
 carry-forward, paid-history preservation and the existing redispute gates.
+
+## Bank deposit proof — 26 November 2026
+
+Cluster Manager and above may choose Recovery action → Bank deposit. Required fields are
+the full loss amount, transaction number, received date and at least one screenshot stored
+in `nl_recovery_attachments`. Saves remain proposed; the approvals queue labels them
+**Verify bank deposit**. Independent SLP/Finance/NH/MP approval sets lifecycle `recovered`
+with no payroll due lines. Return-for-correction keeps the debt open. Deduct next month
+still unlocks only the next payroll month after current (October loss → November default;
+December needs the exception). Apply `20261126180000_loss_bank_deposit_proof.sql`
+individually; `scripts/test-loss-bank-deposit-proof.mjs` applies it twice.

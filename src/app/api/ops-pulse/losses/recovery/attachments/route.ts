@@ -24,15 +24,23 @@ async function attachmentScope(
   if (edit) {
     const outcome = await supabaseAdmin!
       .from("nl_recovery_outcomes")
-      .select("attachments_enabled")
+      .select("code,attachments_enabled")
       .eq("company_id", scope.company)
       .eq("code", outcomeCode)
       .eq("is_active", true)
       .maybeSingle();
-    if (!outcome.data?.attachments_enabled)
+    const bankDeposit = outcome.data?.code === "already_recovered";
+    if (!outcome.data?.attachments_enabled && !bankDeposit)
       throw Error("Attachments are not enabled for this recovery action.");
   }
-  return { userId: auth.userId, company: scope.company, caseKey, policy: settings!.recovery_policy, label: "Re-dispute evidence", field: "re-dispute" };
+  return {
+    userId: auth.userId,
+    company: scope.company,
+    caseKey,
+    policy: settings!.recovery_policy,
+    label: outcomeCode === "already_recovered" ? "Bank deposit proof" : "Re-dispute evidence",
+    field: outcomeCode === "already_recovered" ? "bank-deposit" : "re-dispute",
+  };
 }
 export async function POST(request: Request) {
   try {

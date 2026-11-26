@@ -324,7 +324,7 @@ export async function POST(request: Request) {
           throw Error("This case is no longer recoverable at source.");
         const outcome = matchOutcome(cell(row, "Recovery action"), outcomes);
         if (!outcome) throw Error(`“${cell(row, "Recovery action")}” is not an active recovery action. Copy one from the Recovery actions sheet.`);
-        if (!recoveryActionAllowed(outcome) || ["responsible_left", "already_recovered"].includes(outcome.code)) throw Error("Use the recovery form for departed-person details or receipt verification. Redisputes use the restricted desk.");
+        if (!recoveryActionAllowed(outcome) || ["responsible_left", "already_recovered"].includes(outcome.code)) throw Error("Use the recovery form for departed-person details or bank deposit proof. Redisputes use the restricted desk.");
         await assertLifecycleAction(auth, station.id, "propose");
         if (outcome.restricted && !canRecovered) throw Error(`You do not have access to mark a case as “${outcome.label}”.`);
         const plan = plans.get(id) ?? null;

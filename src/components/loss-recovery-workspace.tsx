@@ -20,7 +20,7 @@ export function LossRecoveryWorkspace({rows,lines,outcomes,settings,canEdit,canR
  },[rows,lines,period]);
  const exceptionReason=(row:NlCase)=>{const r=row.recovery;
   if(r?.outcome_code==='responsible_left') return 'Person left';
-  if(r?.outcome_code==='already_recovered') return 'Verify receipt';
+  if(r?.outcome_code==='already_recovered') return 'Verify bank deposit';
   if(r?.cap_override) return 'Legacy approval review';
   if(r?.recovery_mode==='installments') return 'Split across payrolls';
   if(r?.deduction_timing==='next_month') return 'Deferred recovery';
