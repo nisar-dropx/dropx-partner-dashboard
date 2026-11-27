@@ -1,7 +1,7 @@
 /** Ambient types for the Datoms alerts worker when imported from Next.js. */
 export function runPoll(
   env: Record<string, unknown>,
-  options?: { dryRun?: boolean; allowLogin?: boolean }
+  options?: { dryRun?: boolean; allowLogin?: boolean; catchUp?: boolean }
 ): Promise<Record<string, unknown>>;
 
 export function runKeepAlive(env: Record<string, unknown>): Promise<Record<string, unknown>>;

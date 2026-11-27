@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { DatomsThingRow } from "@/lib/ops-pulse/datoms-alerts";
+import { formatMetricValue, panelMetrics, statusChips } from "./metric-utils";
 import s from "./datoms.module.css";
 
 export function DatomsListView({
@@ -52,6 +53,12 @@ export function DatomsListView({
     return [...set].sort();
   }, [facts, stationFilter, categoryFilter]);
 
+  const totals = useMemo(() => {
+    const online = filtered.filter((t) => t.online === true).length;
+    const offline = filtered.filter((t) => t.online === false).length;
+    return { total: filtered.length, online, offline };
+  }, [filtered]);
+
   function toggle(list: string[], value: string, set: (next: string[]) => void) {
     set(list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
   }
@@ -81,7 +88,7 @@ export function DatomsListView({
       <div className={s.toolbar}>
         <div className={s.title}>
           <h2>List view</h2>
-          <p>Dense asset table · cross-filtered by station and category</p>
+          <p>Datoms-style asset cards with live metrics · station and category filters</p>
         </div>
         <div className={s.actions}>
           {workerConfigured ? (
@@ -99,6 +106,25 @@ export function DatomsListView({
           {error}
         </div>
       ) : null}
+
+      <div className={s.kpiBar}>
+        <div className={s.kpi}>
+          <span className={s.kpiLabel}>Total assets</span>
+          <strong className={s.kpiValue}>{totals.total}</strong>
+        </div>
+        <div className={s.kpi}>
+          <span className={s.kpiLabel}>Online</span>
+          <strong className={s.kpiValue}>{totals.online}</strong>
+        </div>
+        <div className={s.kpi}>
+          <span className={s.kpiLabel}>Offline</span>
+          <strong className={s.kpiValue}>{totals.offline}</strong>
+        </div>
+        <div className={s.kpi}>
+          <span className={s.kpiLabel}>Stations</span>
+          <strong className={s.kpiValue}>{stationOptions.length}</strong>
+        </div>
+      </div>
 
       <div className={s.toolbar}>
         <div className={s.actions}>
@@ -130,44 +156,45 @@ export function DatomsListView({
       <section className={s.panel}>
         <div className={s.panelHead}>
           <h3>Assets</h3>
-          <span>{filtered.length} rows</span>
+          <span>{filtered.length} cards</span>
         </div>
         {!filtered.length ? (
           <div className={s.empty}>
             <strong>No assets in this filter.</strong>
           </div>
         ) : (
-          <div className={s.tableWrap}>
-            <table className={s.table}>
-              <thead>
-                <tr>
-                  <th>Station</th>
-                  <th>Name</th>
-                  <th>Category</th>
-                  <th>Online</th>
-                  <th>Observed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((row) => (
-                  <tr key={row.thing_id}>
-                    <td>{row.station_code || "—"}</td>
-                    <td>{row.name}</td>
-                    <td>{row.category || "—"}</td>
-                    <td>{row.online == null ? "—" : row.online ? "Yes" : "No"}</td>
-                    <td>
-                      {new Date(row.observed_at).toLocaleString("en-IN", {
-                        timeZone: "Asia/Kolkata",
-                        day: "2-digit",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className={s.thingGrid}>
+            {filtered.map((thing) => {
+              const status = (thing.status_json || {}) as Record<string, unknown>;
+              const metrics = panelMetrics((thing.metrics_json || {}) as Record<string, unknown>, 5);
+              const chips = statusChips(status);
+              return (
+                <article key={thing.thing_id} className={s.thingCard}>
+                  <h4>{thing.name}</h4>
+                  <div className={s.thingMeta}>
+                    <span>{thing.station_code || "—"}</span>
+                    {thing.category ? <span>{thing.category}</span> : null}
+                    <span>{thing.online == null ? "—" : thing.online ? "Online" : "Offline"}</span>
+                  </div>
+                  <div className={s.statusRow}>
+                    {chips.map((chip) => (
+                      <span key={chip.label} className={s.statusChip}>
+                        {chip.label}: <strong>{chip.value}</strong>
+                      </span>
+                    ))}
+                  </div>
+                  {metrics.map((m) => (
+                    <div key={m.key} className={s.metricRow}>
+                      <span>{m.label}</span>
+                      <strong>
+                        {formatMetricValue(m)}
+                        {m.unit ? ` ${m.unit}` : ""}
+                      </strong>
+                    </div>
+                  ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

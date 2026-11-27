@@ -206,10 +206,14 @@ async function writeLastEventsPollAt(env, iso) {
   }).catch(() => null);
 }
 
-function resolvePollWindow(nowMs, lastPollMs) {
+function resolvePollWindow(nowMs, lastPollMs, { catchUp = false } = {}) {
   let windowMs = POLL_WINDOW_MS;
-  if (!lastPollMs || nowMs - lastPollMs > POLL_WINDOW_MS) {
-    const gap = lastPollMs ? nowMs - lastPollMs : CATCHUP_WINDOW_MS;
+  if (catchUp || !lastPollMs || nowMs - lastPollMs > POLL_WINDOW_MS) {
+    const gap = catchUp
+      ? CATCHUP_WINDOW_MS
+      : lastPollMs
+        ? nowMs - lastPollMs
+        : CATCHUP_WINDOW_MS;
     windowMs = Math.min(Math.max(gap, POLL_WINDOW_MS), CATCHUP_WINDOW_MS);
   }
   return {
@@ -361,12 +365,12 @@ export async function runKeepAlive(env) {
   return result;
 }
 
-export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
+export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false } = {}) {
   const client = makeDatomsClient(env, { allowLogin });
   const kv = env.ALERT_DEDUPE || createMemoryKv();
   const now = Date.now();
   const lastPollMs = await readLastEventsPollAt(env);
-  const { generatedAfter, generatedBefore, windowMs } = resolvePollWindow(now, lastPollMs);
+  const { generatedAfter, generatedBefore, windowMs } = resolvePollWindow(now, lastPollMs, { catchUp });
   let events;
   try {
     events = await client.fetchEvents({ generatedAfter, generatedBefore });
@@ -566,15 +570,36 @@ export async function runThingsSnapshot(env, { allowLogin = false } = {}) {
       upserted: 0
     };
   }
-  // things/data is flaky (500s) — keep list cards rather than wiping the hub.
+  // Enrich with latest raw readings when list params are sparse. List already
+  // carries parameters[] for most assets — keep cards if things/data fails.
+  // Datoms caps raw things/data at 15 thing ids per request.
   try {
-    data = await client.fetchThingsData();
+    const thingIds = [
+      ...new Set(
+        list
+          .map((row) => Number(row?.id ?? row?.thing_id))
+          .filter((id) => Number.isFinite(id))
+      )
+    ];
+    const chunks = [];
+    for (let i = 0; i < thingIds.length; i += 15) chunks.push(thingIds.slice(i, i + 15));
+    for (const chunk of chunks) {
+      try {
+        const rows = await client.fetchThingsData({ thingIds: chunk });
+        data.push(...rows);
+      } catch (error) {
+        fetchErrors.push({
+          kind: "things_data",
+          error: error instanceof Error ? error.message : String(error),
+          chunk_size: chunk.length
+        });
+      }
+    }
   } catch (error) {
     fetchErrors.push({
       kind: "things_data",
       error: error instanceof Error ? error.message : String(error)
     });
-    data = [];
   }
 
   const merged = mergeThingRows(list, data);
@@ -641,33 +666,19 @@ export async function runReportsSnapshot(env, { allowLogin = false } = {}) {
   const observedAt = new Date().toISOString();
   const errors = [];
   let stored = 0;
+  let thingIds = [];
   try {
-    const [table, graph] = await Promise.all([
-      client.fetchTableData().catch((error) => {
-        errors.push({ kind: "table", error: error instanceof Error ? error.message : String(error) });
-        return null;
-      }),
-      client.fetchGraphData().catch((error) => {
-        errors.push({ kind: "graph", error: error instanceof Error ? error.message : String(error) });
-        return null;
-      })
-    ]);
-    if (table != null) {
-      await upsertReportCache(
-        env,
-        { reportKey: "gravity:table", title: "Datoms table summary", kind: "table", payload: table },
-        observedAt
-      );
-      stored += 1;
-    }
-    if (graph != null) {
-      await upsertReportCache(
-        env,
-        { reportKey: "gravity:graph", title: "Datoms graph summary", kind: "graph", payload: graph },
-        observedAt
-      );
-      stored += 1;
-    }
+    const list = await client.fetchThingsList();
+    thingIds = [
+      ...new Set(
+        list
+          .map((row) => {
+            const thing = normalizeThing(row);
+            return thing ? Number(thing.thingId) : NaN;
+          })
+          .filter((id) => Number.isFinite(id))
+      )
+    ].slice(0, 24);
   } catch (error) {
     const handled = await handleAuthFailure(env, client, error);
     return {
@@ -678,8 +689,105 @@ export async function runReportsSnapshot(env, { allowLogin = false } = {}) {
       stored: 0
     };
   }
+
+  const now = Math.floor(Date.now() / 1000);
+  const from = now - 24 * 3600;
+  const tableBody = {
+    columns: [
+      { dataIndex: "start_time_seconds", colPathExp: "start_time" },
+      { dataIndex: "end_time_seconds", colPathExp: "end_time" }
+    ],
+    apiType: "sessions",
+    timezone: "Asia/Calcutta",
+    apiConfig: {
+      api_query: {
+        page: 1,
+        limit: 25,
+        sort_by: "",
+        filter: {
+          start_time: { between: [from, now] },
+          "asset::status.active": { eq: 1 }
+        }
+      }
+    }
+  };
+  const graphBody = thingIds.length
+    ? {
+        series: [
+          {
+            data: [],
+            unit: true,
+            api_type: "data",
+            data_key: "stackedColumnChart",
+            apiConfig: {
+              aggregation_period: 3600,
+              data_type: "aggregate",
+              summarize: [],
+              parameters: ["mt_energy"],
+              data_source: "new",
+              parameter_attributes: ["sum"],
+              things: thingIds.slice(0, 8),
+              from_time: from,
+              upto_time: now
+            },
+            lineWidth: 1,
+            dataSource: "new",
+            keyPathExp: "time",
+            valPathExp: "parameter_values.mt_energy.sum",
+            dataPathExp: "result.data"
+          }
+        ]
+      }
+    : null;
+
+  const [table, graph] = await Promise.all([
+    client.fetchTableData(tableBody).catch((error) => {
+      errors.push({ kind: "table", error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }),
+    graphBody
+      ? client.fetchGraphData(graphBody).catch((error) => {
+          errors.push({ kind: "graph", error: error instanceof Error ? error.message : String(error) });
+          return null;
+        })
+      : Promise.resolve(null)
+  ]);
+
+  if (table != null) {
+    await upsertReportCache(
+      env,
+      {
+        reportKey: "gravity:sessions",
+        title: "Asset sessions (24h)",
+        kind: "table",
+        payload: table
+      },
+      observedAt
+    );
+    stored += 1;
+  }
+  if (graph != null) {
+    await upsertReportCache(
+      env,
+      {
+        reportKey: "gravity:energy-24h",
+        title: "Active energy (hourly, 24h)",
+        kind: "graph",
+        payload: { things: thingIds.slice(0, 8), series: graph }
+      },
+      observedAt
+    );
+    stored += 1;
+  }
+
   await writeSessionPollStamp(env, "last_reports_poll_at", observedAt);
-  return { ok: true, stored, errors, observed_at: observedAt };
+  return {
+    ok: true,
+    stored,
+    thing_ids: thingIds.length,
+    errors,
+    observed_at: observedAt
+  };
 }
 
 export default {

@@ -50,9 +50,13 @@ export function extractLevel(event) {
   return null;
 }
 
+/** Non-L Datoms notifications (cycle end, DG off, etc.) still land in Alerts as L1 info. */
+export function extractLevelOrInfo(event) {
+  return extractLevel(event) || "L1";
+}
+
 export function parseDatomsEvent(event) {
-  const level = extractLevel(event);
-  if (!level) return null;
+  const level = extractLevelOrInfo(event);
 
   const details = event.details ?? {};
   const siteName =
@@ -129,10 +133,14 @@ function buildTitle(event, level, alertText) {
   const fromRule = String(
     details.rule_template_name ?? details.view_name ?? event.rule_template_name ?? event.view_name ?? ""
   ).trim();
-  if (fromRule && LEVEL_RE.test(fromRule)) return `${fromRule.replace(/\s+/g, " ")} Alert`.replace(/ Alert Alert$/i, " Alert");
+  if (fromRule) {
+    const cleaned = fromRule.replace(/\s+/g, " ").replace(/ Alert$/i, "");
+    return LEVEL_RE.test(cleaned) ? `${cleaned} Alert` : cleaned;
+  }
   if (/door\s*open/i.test(alertText)) return `Door Open ${level} Alert`;
   if (/temp/i.test(alertText)) return `Temperature ${level} Alert`;
-  return `${level} Alert`;
+  const short = String(alertText || "").replace(/\s+/g, " ").trim().slice(0, 72);
+  return short || `${level} Alert`;
 }
 
 function normalizeIso(value) {
@@ -145,10 +153,13 @@ function normalizeIso(value) {
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
-/** Returns parsed alert or null if the event should be ignored. */
+/**
+ * Returns parsed alert or null if the event should be ignored.
+ * Stores every Datoms Violation notification for allowlisted stations
+ * (L1/L2/L3 plus cycle/DG/info notifications mapped to L1).
+ */
 export function filterDatomsEvent(event) {
   if (!isViolationEvent(event)) return null;
-  if (!messageHasLevel(event)) return null;
   return parseDatomsEvent(event);
 }
 

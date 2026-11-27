@@ -109,6 +109,27 @@ test("HAR-shaped event: details.rule_template_name + station_name", () => {
   assert.equal(alert.roomType, "Freezer Room");
 });
 
+test("filter keeps non-L Violation notifications as L1 info", () => {
+  const event = {
+    type: 0,
+    tags: ["Violation"],
+    entity_id: "e-cycle",
+    generated_at: "2026-11-27T10:00:00.000Z",
+    message: "TTB3 Cooling Cycle End",
+    details: {
+      site_name: "TTB3",
+      station_name: "TTB3 Chiller Compressor",
+      rule_template_name: "Cooling Cycle End",
+      alert_message: "TTB3 Cooling Cycle End"
+    }
+  };
+  const alert = filterDatomsEvent(event);
+  assert.ok(alert);
+  assert.equal(alert.level, "L1");
+  assert.equal(alert.station, "TTB3");
+  assert.match(alert.title, /Cooling Cycle End/i);
+});
+
 test("formatCaption matches WhatsApp layout", () => {
   const alert = {
     title: "Door Open L2 Alert",

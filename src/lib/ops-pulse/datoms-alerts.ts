@@ -52,7 +52,7 @@ const COMPANY_ID = "43866344-b550-4e8a-9a2d-9d23f3d8a997";
 
 type DatomsRunPoll = (
   env: Record<string, unknown>,
-  options?: { dryRun?: boolean; allowLogin?: boolean }
+  options?: { dryRun?: boolean; allowLogin?: boolean; catchUp?: boolean }
 ) => Promise<Record<string, unknown>>;
 
 type DatomsKeepAlive = (env: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -215,7 +215,11 @@ async function portalDatomsEnv() {
  * Run the Datoms poll on OpsPulse (India egress).
  * Manual UI calls use allowLogin:false so they never burn /accounts/login.
  */
-export async function runPortalDatomsPoll(options?: { dryRun?: boolean; allowLogin?: boolean }) {
+export async function runPortalDatomsPoll(options?: {
+  dryRun?: boolean;
+  allowLogin?: boolean;
+  catchUp?: boolean;
+}) {
   if (!datomsCredentialsConfigured()) {
     throw new Error("DATOMS_EMAIL and DATOMS_PASSWORD are not configured on OpsPulse.");
   }
@@ -225,13 +229,14 @@ export async function runPortalDatomsPoll(options?: { dryRun?: boolean; allowLog
   const env = await portalDatomsEnv();
   return workerMod.runPoll(env, {
     dryRun: options?.dryRun === true,
-    allowLogin: options?.allowLogin === true
+    allowLogin: options?.allowLogin === true,
+    catchUp: options?.catchUp === true
   });
 }
 
-/** Manual cold-chain / alerts button — session reuse only, never login. */
+/** Manual cold-chain / alerts button — session reuse only, never login. Pulls up to 6h. */
 export async function triggerDatomsPoll() {
-  return runPortalDatomsPoll({ allowLogin: false });
+  return runPortalDatomsPoll({ allowLogin: false, catchUp: true });
 }
 
 /** Ping Datoms with the stored token so the session does not idle-expire. Never logs in. */

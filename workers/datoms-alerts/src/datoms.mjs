@@ -727,21 +727,111 @@ export class DatomsClient {
     return all;
   }
 
-  /** Live metrics for panel cards (HAR: clients/.../things/data). */
-  async fetchThingsData(query = {}) {
+  /**
+   * Live readings (HAR: POST clients/.../things/data).
+   * Returns one merged row per thing_id with latest parameter_values.
+   */
+  async fetchThingsData({
+    thingIds = [],
+    parameters = [
+      "mc_st", "mt_power", "mvol", "mcurr", "mvolt_p",
+      "mt_energy", "ma_energy", "mr_energy", "mpf", "mfreq",
+      "mpow_r", "mpow_y", "mpow_b",
+      "mvol_r", "mvol_y", "mvol_b",
+      "mcur_ir", "mcur_iy", "mcur_ib"
+    ],
+    lookbackSeconds = 30 * 60
+  } = {}) {
     const path = `/clients/${this.customerId}/applications/${this.applicationId}/things/data`;
-    const data = await this.authedFetch(path, { query });
-    const list =
-      data?.things
-      ?? data?.data?.things
-      ?? data?.data
-      ?? data?.list
-      ?? (Array.isArray(data) ? data : []);
+    const ids = [...new Set((thingIds || []).map((id) => Number(id)).filter((n) => Number.isFinite(n)))];
+    if (!ids.length) return [];
+    const now = Math.floor(Date.now() / 1000);
+    const data = await this.authedFetch(path, {
+      method: "POST",
+      body: {
+        data_type: "raw",
+        aggregation_period: 0,
+        parameters,
+        parameter_attributes: [],
+        things: ids,
+        from_time: now - Math.max(60, lookbackSeconds),
+        upto_time: now
+      }
+    });
+    const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    const latestByThing = new Map();
+    for (const row of rows) {
+      const id = String(row?.thing_id ?? row?.id ?? "");
+      if (!id) continue;
+      const prev = latestByThing.get(id);
+      const time = Number(row?.time ?? 0);
+      if (!prev || time >= Number(prev.time ?? 0)) latestByThing.set(id, row);
+    }
     await this.touchKeepAlive();
-    return Array.isArray(list) ? list : [];
+    return [...latestByThing.entries()].map(([id, row]) => {
+      const values = row?.parameter_values && typeof row.parameter_values === "object"
+        ? row.parameter_values
+        : {};
+      const parametersOut = Object.entries(values).map(([key, value]) => ({
+        key,
+        name: key,
+        value,
+        unit: ""
+      }));
+      return {
+        id,
+        thing_id: id,
+        parameters: parametersOut,
+        data: values,
+        status: values.mc_st != null && Number(values.mc_st) > 0 ? "online" : undefined,
+        last_data_received_time: row?.time
+          ? new Date(Number(row.time) * 1000).toISOString()
+          : null
+      };
+    });
   }
 
-  /** Gravity chart payload for Detailed / Analog / Reports (HAR: POST). */
+  /** Hourly energy trend for Detailed view (HAR graph-data series shape). */
+  async fetchThingEnergyTrend(thingId, { hours = 24, parameter = "calculated_mains_energy" } = {}) {
+    const id = Number(thingId);
+    if (!Number.isFinite(id)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - Math.max(1, hours) * 3600;
+    const path = `/gravity-apis/${this.customerId}/graph-data`;
+    const data = await this.authedFetch(path, {
+      method: "POST",
+      body: {
+        series: [
+          {
+            data: [],
+            unit: true,
+            api_type: "data",
+            data_key: "stackedColumnChart",
+            apiConfig: {
+              aggregation_period: 3600,
+              data_type: "aggregate",
+              summarize: [],
+              parameters: [parameter],
+              data_source: "new",
+              parameter_attributes: ["sum"],
+              things: [id],
+              from_time: from,
+              upto_time: now
+            },
+            lineWidth: 1,
+            dataSource: "new",
+            keyPathExp: "time",
+            valPathExp: `parameter_values.${parameter}.sum`,
+            dataPathExp: "result.data"
+          }
+        ]
+      }
+    });
+    await this.touchKeepAlive();
+    return data?.data ?? data ?? null;
+  }
+
+  /** Gravity chart payload for Reports (HAR: POST). */
   async fetchGraphData(body = {}) {
     const path = `/gravity-apis/${this.customerId}/graph-data`;
     const data = await this.authedFetch(path, {
@@ -760,7 +850,7 @@ export class DatomsClient {
       body: body && typeof body === "object" ? body : {}
     });
     await this.touchKeepAlive();
-    return data?.data ?? data ?? {};
+    return data ?? {};
   }
 
   /**

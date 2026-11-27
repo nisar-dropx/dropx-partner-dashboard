@@ -10,7 +10,7 @@ export function DatomsShell({
   authorization,
   active,
   children,
-  subtitle = "Store-scoped cold-chain telemetry from Datoms — panel, list, alerts, and reports. Data is cached; login stays on the keep-alive cron."
+  subtitle = "Store-scoped cold-chain telemetry from Datoms — alerts first, then panel, list, and reports. Data is cached; login stays on the keep-alive cron."
 }: {
   authorization: AuthorizationContext;
   active: DatomsHubTab;
