@@ -243,13 +243,13 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
         },
       ],
     },
-    darkStoreReportBot,
     {
       code: "ds_live_performance",
       label: "Operations",
       icon: "O",
       permissionCodes: [...DS_OPERATIONS_PAGE_CODES],
       children: [
+        darkStoreReportBot,
         { code: "ds_live_performance", label: "Live performance", href: "/operations/live" },
         { code: "ds_ppi", label: "PPI", href: "/operations/ppi" },
         { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" },
