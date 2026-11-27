@@ -2,7 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { datomsAuthInternals } from "./datoms.mjs";
 
-const { isRateLimited, isAuthFailure, isPlaceholderToken, pickToken, LOGIN_BACKOFF_SEC } = datomsAuthInternals;
+const {
+  isRateLimited,
+  isAuthFailure,
+  isPlaceholderToken,
+  pickToken,
+  LOGIN_BACKOFF_SEC,
+  MAX_AUTH_FAILURES,
+  DATOMS_OPS_ALERT_JID
+} = datomsAuthInternals;
 
 test("isRateLimited detects 429 and Datoms copy", () => {
   assert.equal(isRateLimited(new Error("Datoms POST …: 429 TOO_MANY_REQUESTS")), true);
@@ -25,4 +33,9 @@ test("login backoff matches Datoms 24h lock (+buffer)", () => {
   assert.ok(LOGIN_BACKOFF_SEC >= 24 * 60 * 60);
   assert.equal(isPlaceholderToken("none"), true);
   assert.equal(isPlaceholderToken("real-token"), false);
+});
+
+test("ops alert JID and fail threshold are fixed", () => {
+  assert.equal(MAX_AUTH_FAILURES, 3);
+  assert.equal(DATOMS_OPS_ALERT_JID, "919645881397@s.whatsapp.net");
 });

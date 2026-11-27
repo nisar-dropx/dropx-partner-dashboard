@@ -18,11 +18,12 @@ As long as Datoms accepts the stored token, polls do **not** call `/accounts/log
 
 Rate-limit / account-lock protections:
 
-- **25-hour login backoff** after 429 / “too many requests” / “24-hour restriction” (matches Datoms support lock)
+- Prefer **stored session + keep-alive**; login only when no durable session exists
+- After **3 consecutive auth failures** (or any rate-limit response): stop login, arm **25h backoff**, and WhatsApp ops at `919645881397`
 - **Distributed login lock** (`login_lock_until`) so parallel cron ticks cannot stampede login
 - UI “Refresh from Datoms” is **session-only** (never logs in)
-- Cron may login only when no durable session exists and backoff is clear
 - Optional kill switch: `DATOMS_ALLOW_LOGIN=0` on OpsPulse
+- Ensure Report Bot `DIRECT_ALERT_JIDS` includes `919645881397@s.whatsapp.net`
 
 ## Setup
 

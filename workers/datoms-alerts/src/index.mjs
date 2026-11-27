@@ -1,4 +1,4 @@
-import { DatomsClient } from "./datoms.mjs";
+import { DatomsClient, DATOMS_OPS_ALERT_JID } from "./datoms.mjs";
 import { filterDatomsEvent, formatCaption } from "./filter.mjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
@@ -224,10 +224,76 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
   return res.json().catch(() => ({ ok: true }));
 }
 
+/** Text-only ops alert to the allowlisted direct JID — never retries Datoms login. */
+async function sendOpsAuthAlert(env, { reason, failCount }) {
+  const base = String(env.REPORT_BOT_URL || "").replace(/\/$/, "");
+  if (!base || !env.REPORT_BOT_TOKEN) {
+    console.error("[datoms-alerts] ops alert skipped: REPORT_BOT_URL / TOKEN missing");
+    return { sent: false, error: "report_bot_not_configured" };
+  }
+  const to = String(env.DATOMS_OPS_ALERT_JID || DATOMS_OPS_ALERT_JID).trim();
+  const text = [
+    "*Datoms auth alert*",
+    `Failures: ${failCount}`,
+    "Login attempts stopped to avoid another rate-limit lock.",
+    "Session keep-alive will continue if a stored token exists; otherwise wait for the backoff window.",
+    "",
+    `Detail: ${String(reason || "").slice(0, 400)}`
+  ].join("\n");
+  const client_ref = await clientRefForAlert(`ops-auth-${Date.now()}-${failCount}`);
+  const res = await fetch(`${base}/send`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.REPORT_BOT_TOKEN}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ client_ref, to, text })
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    console.error("[datoms-alerts] ops WhatsApp alert failed:", res.status, body.slice(0, 200));
+    return { sent: false, error: body.slice(0, 200) };
+  }
+  return { sent: true, to };
+}
+
+function isAuthRelatedFailure(message) {
+  return /login|auth|session|unauthorized|401|403|429|rate\s*limit|too\s*many|backoff|no_stored_session|DATOMS_EMAIL|password/i
+    .test(String(message ?? ""));
+}
+
+async function handleAuthFailure(env, client, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  let failure = error?.datomsFailure || null;
+  if (!failure && isAuthRelatedFailure(message)) {
+    failure = await client.recordAuthFailure(message).catch(() => ({
+      count: 0,
+      tripped: false,
+      shouldAlert: false,
+      reason: message
+    }));
+  }
+  let opsAlert = null;
+  if (failure?.shouldAlert) {
+    opsAlert = await sendOpsAuthAlert(env, {
+      reason: failure.reason || message,
+      failCount: failure.count
+    });
+    if (opsAlert?.sent) await client.markOpsAlerted().catch(() => null);
+  }
+  return { message, failure, opsAlert };
+}
+
 /** Keep the stored Datoms session warm — never logs in. */
 export async function runKeepAlive(env) {
   const client = makeDatomsClient(env, { allowLogin: false });
-  return client.keepAlive();
+  const result = await client.keepAlive();
+  if (result?.kept_alive) return result;
+  if (result?.reason && result.reason !== "no_stored_session") {
+    const handled = await handleAuthFailure(env, client, new Error(result.reason));
+    return { ...result, ...handled };
+  }
+  return result;
 }
 
 export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
@@ -240,20 +306,22 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
   try {
     events = await client.fetchEvents({ generatedAfter, generatedBefore });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const handled = await handleAuthFailure(env, client, error);
     const session = await client.sessionStatus().catch(() => null);
-    // Soft-fail during lockout / missing session — do not escalate into more logins.
+    // Soft-fail — do not escalate into more logins.
     return {
       ok: false,
       skipped_login: true,
-      error: message,
+      error: handled.message,
+      failure: handled.failure,
+      ops_alert: handled.opsAlert,
       session,
       window: { generatedAfter, generatedBefore },
       fetched: 0,
       processed: 0,
       alerts: [],
       skipped_count: 0,
-      errors: [{ error: message }]
+      errors: [{ error: handled.message }]
     };
   }
 

@@ -12,6 +12,10 @@ const SESSION_KV_TTL_SEC = 12 * 60 * 60;
 const LOGIN_BACKOFF_SEC = 25 * 60 * 60;
 /** Exclusive login lease so two cron ticks cannot login in parallel. */
 const LOGIN_LOCK_SEC = 90;
+/** After this many consecutive auth failures, stop logging in and alert ops. */
+const MAX_AUTH_FAILURES = 3;
+/** Ops WhatsApp direct chat for Datoms auth failure alerts. */
+export const DATOMS_OPS_ALERT_JID = "919645881397@s.whatsapp.net";
 
 /** Datoms rejects bare Worker fetches with LOGIN_CLIENT_NOT_ALLOWED without browser-like headers. */
 const BROWSER_HEADERS = {
@@ -206,6 +210,105 @@ export class DatomsClient {
           login_backoff_until: null,
           login_backoff_reason: null,
           login_lock_until: null,
+          login_fail_count: 0,
+          ops_alerted_at: null,
+          updated_at: new Date().toISOString()
+        })
+      }
+    ).catch(() => null);
+  }
+
+  async readAuthFailCount() {
+    const headers = this.sbHeaders();
+    if (!headers || !this.companyId) return 0;
+    const qs = new URLSearchParams({
+      company_id: `eq.${this.companyId}`,
+      select: "login_fail_count,ops_alerted_at",
+      limit: "1"
+    });
+    const res = await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?${qs}`, { headers });
+    if (!res.ok) return 0;
+    const rows = await res.json().catch(() => []);
+    return {
+      count: Number(rows?.[0]?.login_fail_count ?? 0) || 0,
+      opsAlertedAt: rows?.[0]?.ops_alerted_at ?? null
+    };
+  }
+
+  /**
+   * Bump consecutive auth failure count. At MAX_AUTH_FAILURES arm 25h backoff
+   * and signal that ops should get a WhatsApp alert (once per backoff window).
+   */
+  async recordAuthFailure(reason) {
+    const existing = await this.loadSessionFromSupabase({ allowPlaceholder: true });
+    const prev = await this.readAuthFailCount();
+    const count = Math.min((prev.count || 0) + 1, MAX_AUTH_FAILURES + 5);
+    const headers = this.sbHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" });
+    if (headers && this.companyId) {
+      await fetch(`${this.supabase.url}/rest/v1/ds_datoms_session?on_conflict=company_id`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          company_id: this.companyId,
+          email: this.sessionFingerprint(),
+          auth_token: this.authToken || existing?.authToken || "none",
+          private_key_jwk: this.privateKeyJwk || existing?.privateKeyJwk || {},
+          public_jwk: this.publicJwk || existing?.publicJwk || null,
+          login_fail_count: count,
+          updated_at: new Date().toISOString()
+        })
+      }).catch(() => null);
+    }
+
+    const rateLimited = isRateLimited(reason);
+    const tripped = count >= MAX_AUTH_FAILURES || rateLimited;
+    if (tripped) {
+      await this.writeLoginBackoff(
+        rateLimited
+          ? String(reason ?? "rate limited")
+          : `Stopped after ${count} consecutive Datoms auth failures`,
+        LOGIN_BACKOFF_SEC
+      );
+    }
+
+    const alreadyAlerted = Boolean(prev.opsAlertedAt)
+      && (await this.readBackoffUntil()) > Date.now();
+    return {
+      count,
+      tripped,
+      shouldAlert: tripped && !prev.opsAlertedAt,
+      alreadyAlerted,
+      reason: String(reason ?? "").slice(0, 300)
+    };
+  }
+
+  async markOpsAlerted() {
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          ops_alerted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+      }
+    ).catch(() => null);
+  }
+
+  async resetAuthFailures() {
+    const headers = this.sbHeaders({ Prefer: "return=minimal" });
+    if (!headers || !this.companyId) return;
+    await fetch(
+      `${this.supabase.url}/rest/v1/ds_datoms_session?company_id=eq.${this.companyId}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          login_fail_count: 0,
+          ops_alerted_at: null,
           updated_at: new Date().toISOString()
         })
       }
@@ -335,6 +438,8 @@ export class DatomsClient {
         login_backoff_until: null,
         login_backoff_reason: null,
         login_lock_until: null,
+        login_fail_count: 0,
+        ops_alerted_at: null,
         saved_at: savedAt,
         updated_at: savedAt
       })
@@ -342,6 +447,8 @@ export class DatomsClient {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.error("[datoms] supabase session upsert failed:", res.status, body.slice(0, 200));
+    } else {
+      await this.resetAuthFailures();
     }
   }
 
@@ -383,6 +490,17 @@ export class DatomsClient {
       );
     }
 
+    const fails = await this.readAuthFailCount();
+    if (fails.count >= MAX_AUTH_FAILURES) {
+      await this.writeLoginBackoff(
+        `Stopped after ${fails.count} consecutive Datoms auth failures`,
+        LOGIN_BACKOFF_SEC
+      );
+      throw new Error(
+        `Datoms login blocked after ${fails.count} consecutive failures. Ops alert path engaged; will not keep trying.`
+      );
+    }
+
     const locked = await this.acquireLoginLock();
     if (!locked) {
       // Another process is logging in — wait briefly then load their session.
@@ -418,9 +536,8 @@ export class DatomsClient {
           body: loginBody
         });
       } catch (error) {
-        if (isRateLimited(error)) {
-          await this.writeLoginBackoff(error.message, LOGIN_BACKOFF_SEC);
-        }
+        const failure = await this.recordAuthFailure(error?.message || error);
+        error.datomsFailure = failure;
         throw error;
       }
 
@@ -608,6 +725,8 @@ export class DatomsClient {
         headers,
         body: JSON.stringify({
           last_keepalive_at: at,
+          login_fail_count: 0,
+          ops_alerted_at: null,
           updated_at: at
         })
       }
@@ -644,6 +763,8 @@ export const datomsAuthInternals = {
   SESSION_KV_TTL_SEC,
   LOGIN_BACKOFF_SEC,
   LOGIN_LOCK_SEC,
+  MAX_AUTH_FAILURES,
+  DATOMS_OPS_ALERT_JID,
   isRateLimited,
   isAuthFailure,
   isPlaceholderToken,
