@@ -112,6 +112,14 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/datoms-things",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/datoms-reports",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/cron/dark-store-shift-noshow",
       "schedule": "*/15 * * * *"
     },

@@ -1,6 +1,7 @@
 import { ALLOWED_STATIONS, extractStationCode } from "./stations.mjs";
 
-const LEVEL_RE = /\bL([23])\b/i;
+const LEVEL_RE = /\bL([123])\b/i;
+const WA_LEVEL_RE = /\bL([23])\b/i;
 
 export function isViolationEvent(event) {
   if (!event || typeof event !== "object") return false;
@@ -21,12 +22,24 @@ function ruleParts(event) {
     event?.message,
     event?.title,
     details.rule_name,
-    details.message
+    details.message,
+    details.alert_message,
+    details.violation_message
   ];
 }
 
-export function messageHasL2L3(event) {
+/** True when any L1/L2/L3 marker is present (OpsPulse stores all three). */
+export function messageHasLevel(event) {
   return ruleParts(event).some((p) => LEVEL_RE.test(String(p ?? "")));
+}
+
+/** @deprecated Prefer messageHasLevel — kept for existing tests/imports. */
+export function messageHasL2L3(event) {
+  return ruleParts(event).some((p) => WA_LEVEL_RE.test(String(p ?? "")));
+}
+
+export function isWhatsAppLevel(level) {
+  return level === "L2" || level === "L3";
 }
 
 export function extractLevel(event) {
@@ -135,7 +148,7 @@ function normalizeIso(value) {
 /** Returns parsed alert or null if the event should be ignored. */
 export function filterDatomsEvent(event) {
   if (!isViolationEvent(event)) return null;
-  if (!messageHasL2L3(event)) return null;
+  if (!messageHasLevel(event)) return null;
   return parseDatomsEvent(event);
 }
 

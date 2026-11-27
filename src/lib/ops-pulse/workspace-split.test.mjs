@@ -5,7 +5,7 @@ import ts from 'typescript';
 function compile(path,mocks){const m={exports:{}};new Function('require','exports','module',ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>{if(n in mocks)return mocks[n];throw Error(n);},m.exports,m);return m.exports;}
 let preference='amazon_now';
 const ctx=compile('./operating-context.ts',{'next/headers':{cookies:()=>({get:k=>k==='dropx-ops-mode'?{value:preference}:undefined})},'@/lib/ops-pulse/cod':{locationModelName:l=>l.model,providerName:l=>l.provider}});
-const nav=compile('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet'}},'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>true},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:()=>false},'@/lib/ops-pulse/ds-live-performance-access':{DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary','ds_cold_chain_alerts','ds_workforce_pulse','ds_message_policies'],canViewDsOperations:()=>true,canViewDsLivePerformance:()=>true}});
+const nav=compile('./navigation.ts',{'@/lib/app-navigation':{fleetNavItem:{code:'fleet',label:'Fleet'}},'@/lib/authorization':{hasPermission:()=>true,isCompanyOwner:()=>false},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>true},'@/lib/ops-pulse/last-mile-report-bot-access':{canAccessLastMileReportBot:()=>false},'@/lib/ops-pulse/ds-live-performance-access':{DS_OPERATIONS_PAGE_CODES:['ds_live_performance','ds_ppi','ds_site_summary','ds_datoms','ds_cold_chain_alerts','ds_workforce_pulse','ds_message_policies'],canViewDsOperations:()=>true,canViewDsLivePerformance:()=>true}});
 const lm={id:'l',station_code:'LM',model:'EDSP',provider:'Amazon'},ds={id:'d',station_code:'DS',model:'NOW',provider:'Amazon'};
 test('workspace selection cannot use a cookie to grant another business location',()=>{preference='amazon_now';const r=ctx.resolveOperatingContext([lm]);assert.equal(r.mode,'amazon_edsp');assert.deepEqual(r.modeLocations,[lm]);assert.deepEqual(r.availableModes.map(x=>x.code),['amazon_edsp']);});
 test('dual access offers both workspaces, excluding HO and hidden locations',()=>{const r=ctx.resolveOperatingContext([lm,ds,{...ds,id:'h',is_ho:true},{...ds,id:'x',hide_from_location_list:true}]);assert.equal(r.mode,'amazon_now');assert.deepEqual(r.modeLocations,[ds]);assert.equal(r.availableModes.length,2);});
@@ -23,7 +23,7 @@ test('DS has unit costs, Store Health Review Desk, and no last-mile specialist w
   assert(operations.children?.some(c=>c.code==='ds_ppi'&&c.href==='/operations/ppi'));
   assert(operations.children?.some(c=>c.code==='ds_site_summary'&&c.href==='/operations/site-summary'));
   assert(operations.children?.some(c=>c.code==='ds_workforce_pulse'&&c.href==='/operations/workforce-pulse'));
-  assert(operations.children?.some(c=>c.code==='ds_cold_chain_alerts'&&c.href==='/operations/cold-chain'));
+  assert(operations.children?.some(c=>c.code==='ds_datoms'&&c.href==='/operations/datoms/panel'));
   assert(operations.children?.some(c=>c.code==='ds_message_policies'&&c.href==='/operations/message-policies'));
   assert(!catalog.some(x=>x.code==='ops_report_bot'&&!x.children));
   const teamOps=catalog.find(x=>x.label==='Team Ops');

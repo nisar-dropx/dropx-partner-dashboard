@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test src/filter.test.mjs src/client-ref.test.mjs src/datoms-auth.test.mjs",
+    "test": "node --test src/filter.test.mjs src/client-ref.test.mjs src/datoms-auth.test.mjs src/things.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },

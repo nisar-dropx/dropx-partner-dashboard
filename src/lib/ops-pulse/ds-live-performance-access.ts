@@ -11,6 +11,7 @@ export const DS_OPERATIONS_PAGE_CODES = [
   "ds_live_performance",
   "ds_ppi",
   "ds_site_summary",
+  "ds_datoms",
   "ds_cold_chain_alerts",
   "ds_workforce_pulse",
   "ds_message_policies"
@@ -65,7 +66,17 @@ export function canViewDsOperations(authorization: RoleLike | null, pageCode: Ds
   if (!authorization) return false;
   if (hasDsOperationsRole(authorization)) return true;
   const grant = authorization.permissions?.[pageCode];
-  return Boolean(grant?.canView || grant?.canAdd || grant?.canEdit);
+  if (grant?.canView || grant?.canAdd || grant?.canEdit) return true;
+  // DATOMS hub reuses the legacy cold-chain page grant.
+  if (pageCode === "ds_datoms") {
+    const legacy = authorization.permissions?.ds_cold_chain_alerts;
+    return Boolean(legacy?.canView || legacy?.canAdd || legacy?.canEdit);
+  }
+  if (pageCode === "ds_cold_chain_alerts") {
+    const hub = authorization.permissions?.ds_datoms;
+    return Boolean(hub?.canView || hub?.canAdd || hub?.canEdit);
+  }
+  return false;
 }
 
 /** @deprecated Prefer canViewDsOperations — kept for existing imports. */

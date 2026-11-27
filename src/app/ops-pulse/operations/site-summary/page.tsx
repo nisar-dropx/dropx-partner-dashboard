@@ -18,7 +18,7 @@ export default async function DarkStoreSiteSummaryPage({
   const canViewLive = canViewDsOperations(authorization, "ds_live_performance");
   const canViewPpi = canViewDsOperations(authorization, "ds_ppi");
   const canViewSite = canViewDsOperations(authorization, "ds_site_summary");
-  const canViewColdChain = canViewDsOperations(authorization, "ds_cold_chain_alerts");
+  const canViewDatoms = canViewDsOperations(authorization, "ds_datoms");
   const canViewPulse = canViewDsOperations(authorization, "ds_workforce_pulse");
   const canViewPolicies = canViewDsOperations(authorization, "ds_message_policies");
   const station = String(searchParams?.station ?? "").trim().toUpperCase();
@@ -60,7 +60,7 @@ export default async function DarkStoreSiteSummaryPage({
           canViewLive={canViewLive}
           canViewPpi={canViewPpi}
           canViewSite={canViewSite}
-          canViewColdChain={canViewColdChain}
+          canViewDatoms={canViewDatoms}
           canViewPulse={canViewPulse}
           canViewPolicies={canViewPolicies}
         />

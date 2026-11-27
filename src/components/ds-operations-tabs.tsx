@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, BarChart2, Bell, BellRing, Thermometer, Users } from "lucide-react";
+import { Activity, BarChart2, BellRing, Snowflake, Users } from "lucide-react";
 import s from "./ds-operations-tabs.module.css";
 
 const TAB_ICON: Record<string, React.ReactNode> = {
@@ -7,7 +7,7 @@ const TAB_ICON: Record<string, React.ReactNode> = {
   ppi: <BarChart2 size={14} aria-hidden />,
   site: <Users size={14} aria-hidden />,
   pulse: <Users size={14} aria-hidden />,
-  "cold-chain": <Thermometer size={14} aria-hidden />,
+  datoms: <Snowflake size={14} aria-hidden />,
   policies: <BellRing size={14} aria-hidden />
 };
 
@@ -16,18 +16,23 @@ export function DsOperationsTabs({
   canViewLive = false,
   canViewPpi = false,
   canViewSite = false,
+  canViewDatoms = false,
   canViewColdChain = false,
   canViewPulse = false,
   canViewPolicies = false
 }: {
-  active: "live" | "ppi" | "site" | "cold-chain" | "pulse" | "policies";
+  active: "live" | "ppi" | "site" | "datoms" | "cold-chain" | "pulse" | "policies";
   canViewLive?: boolean;
   canViewPpi?: boolean;
   canViewSite?: boolean;
+  canViewDatoms?: boolean;
+  /** @deprecated Prefer canViewDatoms — cold-chain redirects into DATOMS. */
   canViewColdChain?: boolean;
   canViewPulse?: boolean;
   canViewPolicies?: boolean;
 }) {
+  const showDatoms = canViewDatoms || canViewColdChain;
+  const datomsActive = active === "datoms" || active === "cold-chain";
   return (
     <nav className={s.nav} aria-label="Dark Store Operations">
       {canViewLive ? (
@@ -55,10 +60,10 @@ export function DsOperationsTabs({
           Workforce Pulse
         </Link>
       ) : null}
-      {canViewColdChain ? (
-        <Link className={`${s.tab}${active === "cold-chain" ? ` ${s.active}` : ""}`} href="/operations/cold-chain">
-          <span className={s.icon}>{TAB_ICON["cold-chain"]}</span>
-          Cold chain alerts
+      {showDatoms ? (
+        <Link className={`${s.tab}${datomsActive ? ` ${s.active}` : ""}`} href="/operations/datoms/panel">
+          <span className={s.icon}>{TAB_ICON.datoms}</span>
+          DATOMS
         </Link>
       ) : null}
       {canViewPolicies ? (

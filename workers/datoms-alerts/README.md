@@ -1,6 +1,6 @@
 # DropX Datoms L2/L3 alerts (Cloudflare Worker + OpsPulse cron)
 
-Polls Datoms IoT events every **10 minutes** from **OpsPulse Vercel (bom1 / India)** via `/api/cron/datoms-alerts`, filters DropX dark-store **L2/L3** cold-chain violations, dedupes, upserts `ds_datoms_alerts` in Supabase, and posts a PNG + caption to each station war room via the Report Bot worker.
+Polls Datoms IoT events every **10 minutes** from **OpsPulse Vercel (bom1 / India)** via `/api/cron/datoms-alerts`, filters DropX dark-store **L1/L2/L3** cold-chain violations, upserts `ds_datoms_alerts` (even when WhatsApp is muted), and posts a PNG + caption for **L2/L3** to each station war room via the Report Bot worker. Things snapshots (`*/5`) and gravity reports (`*/30`) feed the OpsPulse **DATOMS** Operations hub.
 
 Cloudflare Worker cron is **disabled** on purpose: CF scheduled Workers often egress from US IPs (Datoms then emails “login from United States”). Manual Worker `/run` defaults to **session-reuse only** (`allow_login=1` required to login).
 
@@ -40,7 +40,8 @@ Apply migration `supabase/migrations/20261126113000_ds_datoms_session.sql` on th
 
 ```bash
 wrangler secret put DATOMS_EMAIL
-wrangler secret put DATOMS_PASSWORD   # plaintext account password. Not a hash.
+wrangler secret put DATOMS_PASSWORD       # plaintext account password. Not a hash.
+wrangler secret put DATOMS_PASSWORD_NEW   # optional preferred override (same plaintext)
 wrangler secret put REPORT_BOT_URL
 wrangler secret put REPORT_BOT_TOKEN
 wrangler secret put ADMIN_KEY
@@ -53,7 +54,7 @@ wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 Set on the OpsPulse project:
 
 - `DATOMS_EMAIL` (or `DATOMS_ID`)
-- `DATOMS_PASSWORD` (plaintext; `DATOMS_PASSWORD_HASH` alias accepted)
+- `DATOMS_PASSWORD` or `DATOMS_PASSWORD_NEW` (plaintext; `NEW` preferred when set; `DATOMS_PASSWORD_HASH` alias accepted)
 - Company Supabase URL / service role (already present)
 - Report Bot URL/token come from `report_bot_settings` when available
 

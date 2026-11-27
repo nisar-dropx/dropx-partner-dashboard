@@ -21,6 +21,24 @@ test("messageHasL2L3 matches rule template and message", () => {
   assert.equal(messageHasL2L3({ view_name: "L1 only" }), false);
 });
 
+test("filter keeps L1 from alert_message and stores for OpsPulse", () => {
+  const event = {
+    type: 0,
+    tags: ["Violation"],
+    entity_id: "e-l1",
+    generated_at: "2026-11-27T07:00:00.000Z",
+    details: {
+      site_name: "TTA5",
+      station_name: "TTA5 Freezer room w/DS",
+      alert_message: "TTA5 Freezer room w/DS : Door Open L1 for more than 10 Minutes"
+    }
+  };
+  const alert = filterDatomsEvent(event);
+  assert.ok(alert);
+  assert.equal(alert.level, "L1");
+  assert.equal(alert.station, "TTA5");
+});
+
 test("filter drops non-allowed stations", () => {
   const event = {
     type: 0,

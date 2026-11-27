@@ -3,17 +3,16 @@ import { requireDsOperationsApi } from "@/lib/ops-pulse/ds-live-performance-guar
 import { loadDatomsAlerts, triggerDatomsPoll } from "@/lib/ops-pulse/datoms-alerts";
 
 export const dynamic = "force-dynamic";
-/** Manual poll can wait on Datoms + WhatsApp; keep under Vercel hobby/pro limits. */
 export const maxDuration = 60;
 
+/** Legacy cold-chain API — same data as /api/ops-pulse/operations/datoms?view=alerts. */
 export async function GET() {
-  const gate = await requireDsOperationsApi("ds_cold_chain_alerts");
+  const gate = await requireDsOperationsApi("ds_datoms");
   if (gate.error) return gate.error;
   try {
     const alerts = await loadDatomsAlerts(gate.authorization);
     return NextResponse.json({
       alerts,
-      /** OpsPulse cron polls Datoms every 10 min (session reuse); UI only reads stored rows. */
       poll: { mode: "cron", interval_seconds: 600 }
     });
   } catch (error) {
@@ -25,7 +24,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireDsOperationsApi("ds_cold_chain_alerts");
+  const gate = await requireDsOperationsApi("ds_datoms");
   if (gate.error) return gate.error;
   let action = "run";
   try {

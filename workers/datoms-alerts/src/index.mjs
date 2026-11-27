@@ -1,8 +1,9 @@
 import { DatomsClient, DATOMS_OPS_ALERT_JID } from "./datoms.mjs";
-import { filterDatomsEvent, formatCaption } from "./filter.mjs";
+import { filterDatomsEvent, formatCaption, isWhatsAppLevel } from "./filter.mjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
 import { clientRefForAlert } from "./client-ref.mjs";
+import { mergeThingRows, normalizeThing } from "./things.mjs";
 import {
   datomsLevelMessageType,
   decideDsMessageSend,
@@ -12,12 +13,14 @@ import {
   recordDsMessageSendRest
 } from "../../ds-message-policy-rest.mjs";
 
-/** Overlap the every-5-minute cron so a slow/failed tick still catches L2/L3 events. */
+/** Overlap the every-10-minute cron so a slow/failed tick still catches events. */
 const POLL_WINDOW_MS = 15 * 60 * 1000;
+/** After an outage, catch up once (capped) so historical L1–L3 are not lost forever. */
+const CATCHUP_WINDOW_MS = 6 * 60 * 60 * 1000;
 
-/** Plaintext Datoms password. Accept misnamed DATOMS_PASSWORD_HASH secret (not a hash). */
+/** Plaintext Datoms password. Prefer DATOMS_PASSWORD_NEW, then DATOMS_PASSWORD; DATOMS_PASSWORD_HASH is a misnamed alias (not a hash). */
 function datomsPassword(env) {
-  return String(env.DATOMS_PASSWORD || env.DATOMS_PASSWORD_HASH || "").trim();
+  return String(env.DATOMS_PASSWORD_NEW || env.DATOMS_PASSWORD || env.DATOMS_PASSWORD_HASH || "").trim();
 }
 
 function datomsEmail(env) {
@@ -28,7 +31,7 @@ export function makeDatomsClient(env, { allowLogin } = {}) {
   const password = datomsPassword(env);
   const email = datomsEmail(env);
   if (!email || !password) {
-    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing (plaintext password; DATOMS_ID / DATOMS_PASSWORD_HASH aliases accepted)");
+    throw new Error("DATOMS_EMAIL / DATOMS_PASSWORD missing (plaintext; DATOMS_PASSWORD_NEW / DATOMS_PASSWORD_HASH aliases accepted)");
   }
   const supabaseUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
   const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
@@ -140,10 +143,10 @@ async function supabaseUpsertAlert(env, alert, meta) {
     asset_name: alert.asset,
     room_type: alert.roomType,
     alert_text: alert.alertText,
-    caption: meta.caption,
+    caption: meta.caption ?? null,
     payload_json: alert.raw,
-    notified_at: meta.notifiedAt,
-    card_svg: meta.svg
+    notified_at: meta.notifiedAt ?? null,
+    card_svg: meta.svg ?? null
   };
   const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
   const url = `${base}/rest/v1/ds_datoms_alerts?on_conflict=company_id,dedupe_key`;
@@ -152,6 +155,68 @@ async function supabaseUpsertAlert(env, alert, meta) {
     const body = await res.text();
     throw new Error(`Supabase ds_datoms_alerts: ${res.status} ${body.slice(0, 300)}`);
   }
+}
+
+async function supabaseMarkAlertNotified(env, dedupeKey, notifiedAt, { caption, svg } = {}) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const qs = new URLSearchParams({
+    company_id: `eq.${env.COMPANY_ID}`,
+    dedupe_key: `eq.${dedupeKey}`
+  });
+  const patch = { notified_at: notifiedAt };
+  if (caption != null) patch.caption = caption;
+  if (svg != null) patch.card_svg = svg;
+  await fetch(`${base}/rest/v1/ds_datoms_alerts?${qs}`, {
+    method: "PATCH",
+    headers: { ...headers, Prefer: "return=minimal" },
+    body: JSON.stringify(patch)
+  }).catch(() => null);
+}
+
+async function readLastEventsPollAt(env) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return 0;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const qs = new URLSearchParams({
+    company_id: `eq.${env.COMPANY_ID}`,
+    select: "last_events_poll_at",
+    limit: "1"
+  });
+  const res = await fetch(`${base}/rest/v1/ds_datoms_session?${qs}`, {
+    headers: { ...headers, Prefer: "return=representation" }
+  });
+  if (!res.ok) return 0;
+  const rows = await res.json().catch(() => []);
+  const iso = rows?.[0]?.last_events_poll_at;
+  const ms = iso ? Date.parse(iso) : 0;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+async function writeLastEventsPollAt(env, iso) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const qs = new URLSearchParams({ company_id: `eq.${env.COMPANY_ID}` });
+  await fetch(`${base}/rest/v1/ds_datoms_session?${qs}`, {
+    method: "PATCH",
+    headers: { ...headers, Prefer: "return=minimal" },
+    body: JSON.stringify({ last_events_poll_at: iso, updated_at: iso })
+  }).catch(() => null);
+}
+
+function resolvePollWindow(nowMs, lastPollMs) {
+  let windowMs = POLL_WINDOW_MS;
+  if (!lastPollMs || nowMs - lastPollMs > POLL_WINDOW_MS) {
+    const gap = lastPollMs ? nowMs - lastPollMs : CATCHUP_WINDOW_MS;
+    windowMs = Math.min(Math.max(gap, POLL_WINDOW_MS), CATCHUP_WINDOW_MS);
+  }
+  return {
+    generatedAfter: new Date(nowMs - windowMs).toISOString(),
+    generatedBefore: new Date(nowMs).toISOString(),
+    windowMs
+  };
 }
 
 async function supabaseListAlerts(env, limit) {
@@ -300,8 +365,8 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
   const client = makeDatomsClient(env, { allowLogin });
   const kv = env.ALERT_DEDUPE || createMemoryKv();
   const now = Date.now();
-  const generatedAfter = new Date(now - POLL_WINDOW_MS).toISOString();
-  const generatedBefore = new Date(now).toISOString();
+  const lastPollMs = await readLastEventsPollAt(env);
+  const { generatedAfter, generatedBefore, windowMs } = resolvePollWindow(now, lastPollMs);
   let events;
   try {
     events = await client.fetchEvents({ generatedAfter, generatedBefore });
@@ -316,9 +381,11 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
       failure: handled.failure,
       ops_alert: handled.opsAlert,
       session,
-      window: { generatedAfter, generatedBefore },
+      window: { generatedAfter, generatedBefore, windowMs },
       fetched: 0,
       processed: 0,
+      stored: 0,
+      notified: 0,
       alerts: [],
       skipped_count: 0,
       errors: [{ error: handled.message }]
@@ -328,6 +395,8 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
   const processed = [];
   const skipped = [];
   const errors = [];
+  let stored = 0;
+  let notified = 0;
 
   for (const event of events) {
     const alert = filterDatomsEvent(event);
@@ -344,11 +413,34 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
 
     const caption = formatCaption(alert);
     const svg = renderAlertCardSvg(alert);
-    const pngBytes = renderAlertCardPng(alert);
-    const notifiedAt = new Date().toISOString();
 
     if (dryRun) {
       processed.push({ alert, dryRun: true });
+      continue;
+    }
+
+    // Always persist first — OpsPulse UI must show alerts even when WA is muted/failed.
+    try {
+      await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt: null });
+      stored += 1;
+      await kv.put(alert.dedupeKey, "stored", { expirationTtl: DEDUPE_TTL_SEC });
+      await storeRecent(kv, alert, { notifiedAt: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[datoms-alerts] supabase upsert failed:", alert.dedupeKey, message);
+      errors.push({ dedupe_key: alert.dedupeKey, station: alert.station, error: message });
+      continue;
+    }
+
+    processed.push({
+      dedupe_key: alert.dedupeKey,
+      station: alert.station,
+      level: alert.level,
+      title: alert.title
+    });
+
+    if (!isWhatsAppLevel(alert.level)) {
+      skipped.push({ reason: "l1_no_whatsapp", key: alert.dedupeKey, station: alert.station });
       continue;
     }
 
@@ -375,15 +467,12 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
         skipped.push({ reason: decision.reason, key: alert.dedupeKey, station: alert.station });
         continue;
       }
-      // Send first so a WhatsApp failure does not permanently bury the alert in KV.
+      const pngBytes = renderAlertCardPng(alert);
+      const notifiedAt = new Date().toISOString();
       await sendWhatsApp(env, alert, pngBytes, caption);
-      await kv.put(alert.dedupeKey, notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
+      await supabaseMarkAlertNotified(env, alert.dedupeKey, notifiedAt, { caption, svg });
       await storeRecent(kv, alert, { notifiedAt });
-      try {
-        await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt });
-      } catch (error) {
-        console.error("[datoms-alerts] supabase upsert failed:", error?.message || error);
-      }
+      notified += 1;
       await recordDsMessageSendRest({
         url: sbUrl,
         key: sbKey,
@@ -394,12 +483,6 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
         dedupeKey: alert.dedupeKey,
         meta: { level: alert.level, title: alert.title }
       });
-      processed.push({
-        dedupe_key: alert.dedupeKey,
-        station: alert.station,
-        level: alert.level,
-        title: alert.title
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("[datoms-alerts] alert send failed:", alert.dedupeKey, message);
@@ -407,15 +490,188 @@ export async function runPoll(env, { dryRun = false, allowLogin } = {}) {
     }
   }
 
+  const pollAt = new Date(now).toISOString();
+  if (!dryRun) await writeLastEventsPollAt(env, pollAt);
+
   return {
     ok: true,
-    window: { generatedAfter, generatedBefore },
+    window: { generatedAfter, generatedBefore, windowMs },
     fetched: events.length,
     processed: processed.length,
+    stored,
+    notified,
     alerts: processed,
     skipped_count: skipped.length,
     errors
   };
+}
+
+async function writeSessionPollStamp(env, column, iso) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const qs = new URLSearchParams({ company_id: `eq.${env.COMPANY_ID}` });
+  await fetch(`${base}/rest/v1/ds_datoms_session?${qs}`, {
+    method: "PATCH",
+    headers: { ...headers, Prefer: "return=minimal" },
+    body: JSON.stringify({ [column]: iso, updated_at: iso })
+  }).catch(() => null);
+}
+
+async function upsertThingSnapshot(env, thing, observedAt) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const row = {
+    company_id: env.COMPANY_ID,
+    thing_id: thing.thingId,
+    station_code: thing.stationCode,
+    name: thing.name,
+    category: thing.category,
+    site_name: thing.siteName,
+    online: thing.status?.online ?? null,
+    metrics_json: thing.metrics || {},
+    status_json: thing.status || {},
+    raw_json: thing.raw || {},
+    observed_at: observedAt,
+    updated_at: observedAt
+  };
+  const res = await fetch(`${base}/rest/v1/ds_datoms_things_snapshot?on_conflict=company_id,thing_id`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(row)
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`ds_datoms_things_snapshot: ${res.status} ${body.slice(0, 200)}`);
+  }
+}
+
+/** Snapshot Panel/List assets — session reuse only by default. */
+export async function runThingsSnapshot(env, { allowLogin = false } = {}) {
+  const client = makeDatomsClient(env, { allowLogin });
+  const observedAt = new Date().toISOString();
+  let list = [];
+  let data = [];
+  try {
+    [list, data] = await Promise.all([
+      client.fetchThingsList(),
+      client.fetchThingsData()
+    ]);
+  } catch (error) {
+    const handled = await handleAuthFailure(env, client, error);
+    return {
+      ok: false,
+      error: handled.message,
+      failure: handled.failure,
+      ops_alert: handled.opsAlert,
+      upserted: 0
+    };
+  }
+
+  const merged = mergeThingRows(list, data);
+  let upserted = 0;
+  const skipped = [];
+  const errors = [];
+  for (const row of merged) {
+    const thing = normalizeThing(row);
+    if (!thing) {
+      skipped.push({ reason: "filter", id: row?.id ?? row?.thing_id });
+      continue;
+    }
+    try {
+      await upsertThingSnapshot(env, thing, observedAt);
+      upserted += 1;
+    } catch (error) {
+      errors.push({
+        thing_id: thing.thingId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  await writeSessionPollStamp(env, "last_things_poll_at", observedAt);
+  return {
+    ok: true,
+    listed: list.length,
+    data_rows: data.length,
+    merged: merged.length,
+    upserted,
+    skipped_count: skipped.length,
+    errors,
+    observed_at: observedAt
+  };
+}
+
+async function upsertReportCache(env, { reportKey, stationCode, title, kind, payload }, observedAt) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return;
+  const base = String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL).replace(/\/$/, "");
+  const row = {
+    company_id: env.COMPANY_ID,
+    report_key: reportKey,
+    station_code: stationCode || null,
+    title: title || reportKey,
+    kind: kind || "table",
+    payload_json: payload || {},
+    observed_at: observedAt,
+    updated_at: observedAt
+  };
+  const res = await fetch(`${base}/rest/v1/ds_datoms_report_cache?on_conflict=company_id,report_key`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(row)
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`ds_datoms_report_cache: ${res.status} ${body.slice(0, 200)}`);
+  }
+}
+
+/** Cache gravity table/graph summaries for Reports tab — session reuse only. */
+export async function runReportsSnapshot(env, { allowLogin = false } = {}) {
+  const client = makeDatomsClient(env, { allowLogin });
+  const observedAt = new Date().toISOString();
+  const errors = [];
+  let stored = 0;
+  try {
+    const [table, graph] = await Promise.all([
+      client.fetchTableData().catch((error) => {
+        errors.push({ kind: "table", error: error instanceof Error ? error.message : String(error) });
+        return null;
+      }),
+      client.fetchGraphData().catch((error) => {
+        errors.push({ kind: "graph", error: error instanceof Error ? error.message : String(error) });
+        return null;
+      })
+    ]);
+    if (table != null) {
+      await upsertReportCache(
+        env,
+        { reportKey: "gravity:table", title: "Datoms table summary", kind: "table", payload: table },
+        observedAt
+      );
+      stored += 1;
+    }
+    if (graph != null) {
+      await upsertReportCache(
+        env,
+        { reportKey: "gravity:graph", title: "Datoms graph summary", kind: "graph", payload: graph },
+        observedAt
+      );
+      stored += 1;
+    }
+  } catch (error) {
+    const handled = await handleAuthFailure(env, client, error);
+    return {
+      ok: false,
+      error: handled.message,
+      failure: handled.failure,
+      ops_alert: handled.opsAlert,
+      stored: 0
+    };
+  }
+  await writeSessionPollStamp(env, "last_reports_poll_at", observedAt);
+  return { ok: true, stored, errors, observed_at: observedAt };
 }
 
 export default {
@@ -459,6 +715,24 @@ export default {
       try {
         const result = await runPoll(env, { dryRun, allowLogin });
         return json(result);
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/things/snapshot") {
+      if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
+      try {
+        return json(await runThingsSnapshot(env, { allowLogin: false }));
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/reports/snapshot") {
+      if (!adminOk(req, env)) return json({ error: "Unauthorized" }, 401);
+      try {
+        return json(await runReportsSnapshot(env, { allowLogin: false }));
       } catch (error) {
         return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
       }

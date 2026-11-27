@@ -670,6 +670,49 @@ export class DatomsClient {
     return Array.isArray(list) ? list : [];
   }
 
+  /** Panel / list asset catalog (HAR: clients/.../things/list). */
+  async fetchThingsList(query = {}) {
+    const path = `/clients/${this.customerId}/applications/${this.applicationId}/things/list`;
+    const data = await this.authedFetch(path, { query });
+    const list =
+      data?.things
+      ?? data?.data?.things
+      ?? data?.data
+      ?? data?.list
+      ?? (Array.isArray(data) ? data : []);
+    await this.touchKeepAlive();
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** Live metrics for panel cards (HAR: clients/.../things/data). */
+  async fetchThingsData(query = {}) {
+    const path = `/clients/${this.customerId}/applications/${this.applicationId}/things/data`;
+    const data = await this.authedFetch(path, { query });
+    const list =
+      data?.things
+      ?? data?.data?.things
+      ?? data?.data
+      ?? data?.list
+      ?? (Array.isArray(data) ? data : []);
+    await this.touchKeepAlive();
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** Gravity chart payload for Detailed / Analog / Reports. */
+  async fetchGraphData(query = {}) {
+    const path = `/gravity-apis/${this.customerId}/graph-data`;
+    const data = await this.authedFetch(path, { query });
+    await this.touchKeepAlive();
+    return data?.data ?? data ?? {};
+  }
+
+  async fetchTableData(query = {}) {
+    const path = `/gravity-apis/${this.customerId}/table-data`;
+    const data = await this.authedFetch(path, { query });
+    await this.touchKeepAlive();
+    return data?.data ?? data ?? {};
+  }
+
   /**
    * Lightweight authenticated ping so Datoms does not idle-expire the session.
    * Never calls /accounts/login — session-reuse only.
