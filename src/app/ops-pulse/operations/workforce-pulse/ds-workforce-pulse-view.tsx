@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Download, RefreshCw, Users, TrendingUp, Zap, BarChart3, ChevronRight, MapPin } from "lucide-react";
+import { AlertTriangle, Download, RefreshCw, Users, TrendingUp, Zap, Activity, ChevronRight, MapPin } from "lucide-react";
 import type { DsWorkforcePulsePayload, DsWorkforcePulseStore } from "@/lib/ops-pulse/ds-workforce-pulse";
 import s from "../site-summary/ds-ops.module.css";
 import ps from "./pulse.module.css";
@@ -41,18 +41,35 @@ function exportHcCsv(stores: DsWorkforcePulseStore[], businessDate: string) {
   URL.revokeObjectURL(url);
 }
 
+function StaffingBar({ rostered, required }: { rostered: number; required: number }) {
+  if (required === 0) return <span className={ps.staffBarEmpty}>—</span>;
+  const pct = Math.min(100, Math.round((rostered / required) * 100));
+  const over = pct >= 100;
+  const warn = pct < 70;
+  return (
+    <div className={ps.staffBarWrap} title={`${rostered} rostered / ${required} required (${pct}%)`}>
+      <div
+        className={`${ps.staffBarFill} ${warn ? ps.staffBarWarn : over ? ps.staffBarOver : ps.staffBarOk}`}
+        style={{ width: `${pct}%` }}
+      />
+      <span className={ps.staffBarLabel}>{pct}%</span>
+    </div>
+  );
+}
+
 export function DsWorkforcePulseView({ initial }: { initial: DsWorkforcePulsePayload }) {
   const router = useRouter();
   const [payload] = useState(initial);
   const [selected, setSelected] = useState(payload.stores[0]?.stationCode ?? "");
   const selectedStore = useMemo(
-    () => payload.stores.find((s) => s.stationCode === selected) ?? payload.stores[0] ?? null,
+    () => payload.stores.find((st) => st.stationCode === selected) ?? payload.stores[0] ?? null,
     [payload.stores, selected]
   );
 
   const networkPeakHc = payload.stores.reduce((m, r) => Math.max(m, r.planSummary.peakRequired), 0);
   const networkRostered = payload.stores.reduce((acc, r) => acc + r.rosteredHc, 0);
   const networkProductive = payload.stores.reduce((acc, r) => acc + r.productiveHc, 0);
+  const networkRequired = payload.stores.reduce((acc, r) => acc + (r.planSummary.peakRequired ?? 0), 0);
 
   return (
     <div className={s.report}>
@@ -86,28 +103,28 @@ export function DsWorkforcePulseView({ initial }: { initial: DsWorkforcePulsePay
         </div>
       </div>
 
-      {/* ── KPI stat cards ── */}
-      <div className={ps.kpiGrid}>
-        <div className={ps.kpiCard}>
-          <div className={ps.kpiIcon} style={{ background: "#eff6ff", color: "#2563eb" }}><Users size={18} aria-hidden /></div>
+      {/* ── KPI banner (Amazon-style flat cells) ── */}
+      <div className={ps.kpiBanner}>
+        <div className={ps.kpiCell}>
+          <div className={ps.kpiIconWrap} style={{ background: "#eff6ff", color: "#2563eb" }}><Users size={16} aria-hidden /></div>
           <div className={ps.kpiBody}>
             <span className={ps.kpiLabel}>Total stores</span>
             <strong className={ps.kpiValue}>{count(payload.stores.length)}</strong>
           </div>
         </div>
-        <div className={`${ps.kpiCard} ${payload.spikeCount > 0 ? ps.kpiWarn : ""}`}>
-          <div className={ps.kpiIcon} style={{ background: payload.spikeCount > 0 ? "#fff9e6" : "#f0fdf4", color: payload.spikeCount > 0 ? "#d97706" : "#087443" }}>
-            <TrendingUp size={18} aria-hidden />
+        <div className={`${ps.kpiCell} ${payload.spikeCount > 0 ? ps.kpiCellWarn : ""}`}>
+          <div className={ps.kpiIconWrap} style={{ background: payload.spikeCount > 0 ? "#fff9e6" : "#f0fdf4", color: payload.spikeCount > 0 ? "#d97706" : "#087443" }}>
+            <TrendingUp size={16} aria-hidden />
           </div>
           <div className={ps.kpiBody}>
-            <span className={ps.kpiLabel}>Spiking</span>
+            <span className={ps.kpiLabel}>Spiking stores</span>
             <strong className={ps.kpiValue} style={{ color: payload.spikeCount > 0 ? "#d97706" : undefined }}>{count(payload.spikeCount)}</strong>
-            <span className={ps.kpiSub}>stores above baseline</span>
+            <span className={ps.kpiSub}>above baseline</span>
           </div>
         </div>
-        <div className={`${ps.kpiCard} ${payload.understaffedCount > 0 ? ps.kpiDanger : ""}`}>
-          <div className={ps.kpiIcon} style={{ background: payload.understaffedCount > 0 ? "#fff1f0" : "#f0fdf4", color: payload.understaffedCount > 0 ? "#c0392b" : "#087443" }}>
-            <AlertTriangle size={18} aria-hidden />
+        <div className={`${ps.kpiCell} ${payload.understaffedCount > 0 ? ps.kpiCellDanger : ""}`}>
+          <div className={ps.kpiIconWrap} style={{ background: payload.understaffedCount > 0 ? "#fff1f0" : "#f0fdf4", color: payload.understaffedCount > 0 ? "#c0392b" : "#087443" }}>
+            <AlertTriangle size={16} aria-hidden />
           </div>
           <div className={ps.kpiBody}>
             <span className={ps.kpiLabel}>Understaffed</span>
@@ -115,184 +132,187 @@ export function DsWorkforcePulseView({ initial }: { initial: DsWorkforcePulsePay
             <span className={ps.kpiSub}>stores need attention</span>
           </div>
         </div>
-        <div className={ps.kpiCard}>
-          <div className={ps.kpiIcon} style={{ background: "#fff7f2", color: "#de5a16" }}><BarChart3 size={18} aria-hidden /></div>
+        <div className={ps.kpiCell}>
+          <div className={ps.kpiIconWrap} style={{ background: "#f0fdf4", color: "#087443" }}><Activity size={16} aria-hidden /></div>
           <div className={ps.kpiBody}>
             <span className={ps.kpiLabel}>Network rostered</span>
-            <strong className={ps.kpiValue} style={{ color: "#de5a16" }}>{count(networkRostered)}</strong>
+            <strong className={ps.kpiValue} style={{ color: "#087443" }}>{count(networkRostered)}</strong>
             <span className={ps.kpiSub}>{count(networkProductive)} productive now</span>
           </div>
         </div>
-        <div className={`${ps.kpiCard} ${ps.kpiHero}`}>
-          <div className={ps.kpiIcon} style={{ background: "#fff7f2", color: "#de5a16" }}><Zap size={18} aria-hidden /></div>
+        <div className={`${ps.kpiCell} ${ps.kpiCellHero}`}>
+          <div className={ps.kpiIconWrap} style={{ background: "#fff7f2", color: "#de5a16" }}><Zap size={16} aria-hidden /></div>
           <div className={ps.kpiBody}>
             <span className={ps.kpiLabel}>Peak required HC</span>
-            <strong className={ps.kpiValue} style={{ fontSize: 32, color: "#de5a16" }}>{count(networkPeakHc)}</strong>
+            <strong className={ps.kpiValue} style={{ color: "#de5a16", fontSize: 28 }}>{count(networkPeakHc)}</strong>
             <span className={ps.kpiSub}>across network today</span>
+          </div>
+        </div>
+        <div className={ps.kpiCell}>
+          <div className={ps.kpiIconWrap} style={{ background: "#f5f3ff", color: "#7c3aed" }}><Users size={16} aria-hidden /></div>
+          <div className={ps.kpiBody}>
+            <span className={ps.kpiLabel}>Network staffing</span>
+            <strong className={ps.kpiValue} style={{ color: "#7c3aed" }}>
+              {networkRequired > 0 ? `${Math.round((networkRostered / networkRequired) * 100)}%` : "—"}
+            </strong>
+            <span className={ps.kpiSub}>rostered vs required</span>
           </div>
         </div>
       </div>
 
       {/* ── Store board ── */}
-      <section className={s.panel}>
-        <div className={s.panelHead}>
-          <h3>Store board</h3>
-          <span>Click a row to see the hourly HC plan · Roster · live productive · demand · spike</span>
+      <section className={ps.tableCard}>
+        <div className={ps.tableCardHead}>
+          <div>
+            <h3>Store board</h3>
+            <p>Select a row to view the hourly HC plan for that store</p>
+          </div>
         </div>
         {payload.stores.length ? (
           <div style={{ overflowX: "auto" }}>
-            <table className={s.board}>
+            <table className={ps.storeTable}>
               <thead>
                 <tr>
                   <th>Store</th>
                   <th>Rostered</th>
-                  <th>Due / Reported</th>
                   <th>Productive</th>
                   <th>Waiting / Break</th>
                   <th>Active orders</th>
-                  <th>Orders / productive</th>
-                  <th>Spike</th>
                   <th>Staffing</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {payload.stores.map((row) => (
-                  <tr
-                    key={row.stationCode}
-                    onClick={() => setSelected(row.stationCode)}
-                    aria-selected={selected === row.stationCode}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>
-                      <div className={s.storeCell}>
-                        <strong>{row.stationCode}</strong>
-                        <small>{row.stationName}</small>
-                      </div>
-                    </td>
-                    <td>{count(row.rosteredHc)}</td>
-                    <td>{count(row.reportedHc)} / {count(row.dueHc)}</td>
-                    <td>
-                      <span style={{ fontWeight: 700, color: row.productiveHc > 0 ? "#087443" : undefined }}>{count(row.productiveHc)}</span>
-                    </td>
-                    <td>{count(row.waitingHc)} / {count(row.onBreakHc)}</td>
-                    <td>
-                      <span style={{ fontWeight: 650 }}>{count(row.activeOrders)}</span>
-                      {row.pendingAcceptance > 0 ? (
-                        <span className={`${s.badge} ${s.badgeBad}`} style={{ marginLeft: 6 }}>
-                          {row.pendingAcceptance} pending
+                {payload.stores.map((row, i) => {
+                  const peakReq = row.planSummary.peakRequired;
+                  return (
+                    <tr
+                      key={row.stationCode}
+                      onClick={() => setSelected(row.stationCode)}
+                      aria-selected={selected === row.stationCode}
+                      className={i % 2 === 1 ? ps.rowAlt : ""}
+                    >
+                      <td>
+                        <div className={ps.storeCell}>
+                          <strong className={ps.storeCode}>{row.stationCode}</strong>
+                          <span className={ps.storeName}>{row.stationName}</span>
+                        </div>
+                      </td>
+                      <td className={ps.tdNum}>{count(row.rosteredHc)}</td>
+                      <td className={ps.tdNum}>
+                        <span style={{ fontWeight: 700, color: row.productiveHc > 0 ? "#087443" : "var(--muted)" }}>
+                          {count(row.productiveHc)}
                         </span>
-                      ) : null}
-                    </td>
-                    <td>{row.ordersPerProductive == null ? "—" : row.ordersPerProductive}</td>
-                    <td>
-                      {row.spike?.spiked ? (
-                        <span className={`${s.badge} ${s.badgeBad}`} title={row.spike.reason}><TrendingUp size={11} aria-hidden /> Spike</span>
-                      ) : (
-                        <span className={s.badge} title={row.spike?.reason}>{row.spike?.liftPct == null ? "—" : `${row.spike.liftPct}%`}</span>
-                      )}
-                    </td>
-                    <td>
-                      {row.understaffed ? (
-                        <span className={`${s.badge} ${s.badgeBad}`}><AlertTriangle size={11} aria-hidden /> Under</span>
-                      ) : (
-                        <span className={`${s.badge} ${s.badgeGood}`}>OK</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className={ps.tdNum}>
+                        {count(row.waitingHc)} / {count(row.onBreakHc)}
+                      </td>
+                      <td className={ps.tdNum}>
+                        <span style={{ fontWeight: 650 }}>{count(row.activeOrders)}</span>
+                        {row.pendingAcceptance > 0 ? (
+                          <span className={ps.pillBad} style={{ marginLeft: 6 }}>{row.pendingAcceptance} pending</span>
+                        ) : null}
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        <StaffingBar rostered={row.rosteredHc} required={peakReq} />
+                      </td>
+                      <td>
+                        <div className={ps.statusPills}>
+                          {row.understaffed ? (
+                            <span className={ps.pillBad}><AlertTriangle size={10} aria-hidden /> Understaffed</span>
+                          ) : (
+                            <span className={ps.pillGood}>Staffed OK</span>
+                          )}
+                          {row.spike?.spiked ? (
+                            <span className={ps.pillWarn} title={row.spike.reason}><TrendingUp size={10} aria-hidden /> Spike</span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         ) : (
-          <p className={s.empty}><MapPin size={28} style={{ opacity: 0.3 }} /><span>No NOW stores in scope for this date.</span></p>
+          <div className={ps.emptyState}>
+            <MapPin size={28} style={{ opacity: 0.25 }} aria-hidden />
+            <span>No NOW stores in scope for this date.</span>
+          </div>
         )}
       </section>
 
-      {/* ── Hourly HC plan for selected store ── */}
+      {/* ── Hourly HC plan for selected store (table only, no chart) ── */}
       {selectedStore ? (
-        <section className={s.panel}>
-          <div className={s.panelHead}>
-            <h3>
-              <MapPin size={14} style={{ verticalAlign: "middle", marginRight: 4, opacity: 0.6 }} aria-hidden />
-              {selectedStore.stationCode} · Hourly HC plan
-            </h3>
-            <span style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 2, background: "#de5a16", display: "inline-block" }} />
-                <span style={{ fontSize: 11 }}>Required HC</span>
-              </span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(37,99,235,0.2)", border: "1.5px solid rgba(37,99,235,0.3)", display: "inline-block" }} />
-                <span style={{ fontSize: 11 }}>Rostered</span>
-              </span>
-              <span style={{ color: "var(--muted)" }}>Target {selectedStore.targetOrdersPerAssociateHour} orders / assoc-hr</span>
-              <Link className={s.link} href={`/rostering?station=${encodeURIComponent(selectedStore.stationCode)}`} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                Open rostering <ChevronRight size={12} aria-hidden />
-              </Link>
-            </span>
+        <section className={ps.tableCard}>
+          <div className={ps.tableCardHead}>
+            <div>
+              <h3>
+                <MapPin size={14} style={{ verticalAlign: "middle", marginRight: 4, opacity: 0.55 }} aria-hidden />
+                {selectedStore.stationCode} · Hourly HC Plan
+              </h3>
+              <p>Target {selectedStore.targetOrdersPerAssociateHour} orders / assoc-hr</p>
+            </div>
+            <Link className={ps.linkBtn} href={`/rostering?station=${encodeURIComponent(selectedStore.stationCode)}`}>
+              Open rostering <ChevronRight size={12} aria-hidden />
+            </Link>
           </div>
 
-          {/* Bar chart */}
           {selectedStore.hourlyPlan.length ? (
-            <>
-              <div className={ps.hcChart} aria-hidden>
-                {(() => {
-                  const maxVal = Math.max(...selectedStore.hourlyPlan.map(r => Math.max(r.requiredHc, r.rosteredHc ?? 0)), 1);
-                  return selectedStore.hourlyPlan.map((row) => {
-                    const reqPct = Math.round((row.requiredHc / maxVal) * 90);
-                    const rosPct = row.rosteredHc != null ? Math.round((row.rosteredHc / maxVal) * 90) : null;
-                    const understaffed = row.variance != null && row.variance < 0;
+            <div style={{ overflowX: "auto" }}>
+              <table className={ps.hcTable}>
+                <thead>
+                  <tr>
+                    <th>Hour IST</th>
+                    <th>Orders</th>
+                    <th>Required HC</th>
+                    <th>Rostered HC</th>
+                    <th>Variance</th>
+                    <th>Coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedStore.hourlyPlan.map((row, i) => {
+                    const isUnder = row.variance != null && row.variance < 0;
+                    const isOver = row.variance != null && row.variance > 0;
                     return (
-                      <div key={row.hour} className={ps.hcBar} title={`${String(row.hour).padStart(2, "0")}:00 · Req: ${row.requiredHc} · Ros: ${row.rosteredHc ?? "—"}`}>
-                        <div className={ps.hcBarInner}>
-                          {rosPct != null && (
-                            <span className={ps.hcRostered} style={{ height: `${rosPct}px` }} />
-                          )}
-                          <span
-                            className={ps.hcRequired}
-                            style={{ height: `${reqPct}px`, background: understaffed ? "#c0392b" : "#de5a16" }}
+                      <tr key={row.hour} className={i % 2 === 1 ? ps.rowAlt : ""}>
+                        <td className={ps.tdHour}>{String(row.hour).padStart(2, "0")}:00</td>
+                        <td className={ps.tdNum}>{count(row.orderCount)}</td>
+                        <td className={ps.tdNum}><span style={{ fontWeight: 700 }}>{count(row.requiredHc)}</span></td>
+                        <td className={ps.tdNum}>
+                          {row.rosteredHc == null
+                            ? <span style={{ color: "var(--muted)" }}>—</span>
+                            : count(row.rosteredHc)
+                          }
+                        </td>
+                        <td className={ps.tdNum}>
+                          {row.variance == null
+                            ? <span style={{ color: "var(--muted)" }}>—</span>
+                            : (
+                              <span className={isUnder ? ps.pillBad : isOver ? ps.pillGood : ps.pillNeutral}>
+                                {row.variance > 0 ? `+${row.variance}` : row.variance}
+                              </span>
+                            )
+                          }
+                        </td>
+                        <td style={{ minWidth: 110 }}>
+                          <StaffingBar
+                            rostered={row.rosteredHc ?? 0}
+                            required={row.requiredHc}
                           />
-                        </div>
-                        <small>{String(row.hour).padStart(2, "0")}</small>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-
-              <div style={{ overflowX: "auto" }}>
-                <table className={s.board}>
-                  <thead>
-                    <tr>
-                      <th>Hour IST</th>
-                      <th>Orders</th>
-                      <th>Required HC</th>
-                      <th>Rostered HC</th>
-                      <th>Variance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedStore.hourlyPlan.map((row) => (
-                      <tr key={row.hour}>
-                        <td style={{ fontWeight: 650 }}>{String(row.hour).padStart(2, "0")}:00</td>
-                        <td>{count(row.orderCount)}</td>
-                        <td><span style={{ fontWeight: 700 }}>{count(row.requiredHc)}</span></td>
-                        <td>{row.rosteredHc == null ? <span style={{ color: "var(--muted)" }}>—</span> : count(row.rosteredHc)}</td>
-                        <td>
-                          {row.variance == null ? <span style={{ color: "var(--muted)" }}>—</span> : (
-                            <span className={`${s.badge} ${row.variance < 0 ? s.badgeBad : s.badgeGood}`}>
-                              {row.variance > 0 ? `+${row.variance}` : row.variance}
-                            </span>
-                          )}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <p className={s.empty}><BarChart3 size={28} style={{ opacity: 0.3 }} /><span>No PPI hourly demand for this date yet.</span></p>
+            <div className={ps.emptyState}>
+              <Activity size={28} style={{ opacity: 0.25 }} aria-hidden />
+              <span>No PPI hourly demand for this date yet.</span>
+            </div>
           )}
         </section>
       ) : null}
