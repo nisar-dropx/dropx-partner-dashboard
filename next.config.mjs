@@ -19,6 +19,11 @@ const nextConfig = {
     // A custom webpack function turns the separate build worker off by default;
     // keep it on so each compilation's memory is released when it finishes.
     webpackBuildWorker: true,
+    // Default 1 MB body limit rejects WhatsApp images (typically 2–5 MB each).
+    // Expense requests allow up to 3 image files; 20 MB gives safe headroom.
+    serverActions: {
+      bodySizeLimit: "20mb"
+    },
     outputFileTracingIncludes: {
       "/api/cron/report-bot": ["./assets/report-fonts/**/*"],
       "/api/ops-pulse/ai-report": ["./assets/report-fonts/**/*"],
