@@ -1,0 +1,213 @@
+/* PPI Dashboard — matches the reference PPI Calculation Dashboard style */
+
+/* ── Summary stats banner ── */
+.statsBanner {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line, #e2e7ee);
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+  background: #fff;
+  text-align: center;
+}
+
+.statLabel {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted, #667085);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.statValue {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  color: var(--ink, #1f2937);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* ── Sections ── */
+.section {
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+.sectionAmber {
+  border: 2px solid #fde68a;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fffbeb;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: inherit;
+  border-bottom: 1px solid var(--line, #e2e7ee);
+}
+
+.sectionAmber .sectionHead {
+  border-bottom-color: #fde68a;
+}
+
+.sectionHead h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink, #1f2937);
+}
+
+/* ── Download button ── */
+.dlBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.dlBtn:hover:not(:disabled) { opacity: 0.9; }
+.dlBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Main table ── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Green header (associate table) */
+.theadGreen th {
+  padding: 12px 20px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Amber header (hourly table) */
+.theadAmber th {
+  padding: 12px 20px;
+  background: #d97706;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.theadAmber th:not(:first-child),
+.theadGreen th:not(:first-child) {
+  text-align: right;
+}
+
+/* Row styles */
+.rowWhite { background: #fff; }
+.rowGray  { background: #f9fafb; }
+.rowAmber { background: #fffbeb; }
+
+.table tbody tr:last-child:not(.totalRowGreen):not(.totalRowAmber) td {
+  border-bottom: none;
+}
+
+/* Total rows */
+.totalRowGreen {
+  background: #15803d;
+  color: #fff;
+  font-weight: 700;
+}
+
+.totalRowAmber {
+  background: #b45309;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Cells */
+.tdLeft {
+  padding: 12px 20px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tdMono {
+  padding: 12px 20px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 13px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.totalRowGreen .tdLeft,
+.totalRowGreen .tdMono,
+.totalRowAmber .tdLeft,
+.totalRowAmber .tdMono {
+  border-bottom: none;
+}
+
+/* PPT value — green for good, red/orange for slow */
+.pptCell {
+  font-weight: 700;
+  color: #15803d;
+}
+
+.pptCell[data-slow="true"] {
+  color: #d97706;
+}
+
+.pptAmber {
+  font-weight: 700;
+  color: #92400e;
+}
+
+/* Empty */
+.emptyCell {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--muted, #667085);
+  font-size: 13px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 720px) {
+  .statsBanner {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .statValue {
+    font-size: 20px;
+  }
+}

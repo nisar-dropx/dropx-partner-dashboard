@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Coffee, Loader2, Package, RefreshCw, ShoppingCart, Timer, Users, Zap } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, ShoppingCart } from "lucide-react";
 import type { DsLiveNetwork, DsLiveSiteOrder, DsLiveStoreDetail } from "@/lib/ops-pulse/ds-live-performance";
 import s from "./ds-ops.module.css";
+import ss from "./site-summary.module.css";
 
 const POLL_MS = 10_000;
 
@@ -249,89 +250,76 @@ export function DsSiteSummaryView({
 
       {error ? <p className={s.error} role="alert"><AlertTriangle size={14} aria-hidden />{error}</p> : null}
 
-      {/* ── Associate status cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 10 }} aria-label="Associate status">
+      {/* ── Associate status banner (matches Amazon Site Summary header) ── */}
+      <div className={ss.assocBanner}>
         {(
           [
-            { label: "Waiting", value: associates.waitingForOrders, icon: <Timer size={16} />, color: "#667085", bg: "#f8fafc" },
-            { label: "On Break", value: associates.onBreak, icon: <Coffee size={16} />, color: "#667085", bg: "#f8fafc" },
-            { label: "Offered", value: associates.offered, icon: <Zap size={16} />, color: "#d97706", bg: "#fffbeb" },
-            { label: "Picking", value: associates.picking, icon: <ShoppingCart size={16} />, color: "#2563eb", bg: "#eff6ff" },
-            { label: "Packing", value: associates.packingRacking, icon: <Package size={16} />, color: "#7c3aed", bg: "#f5f3ff" },
-            { label: "Other", value: associates.otherActivities, icon: <Users size={16} />, color: "#667085", bg: "#f8fafc" },
-            { label: "Total", value: associates.total, icon: <Users size={16} />, color: "#de5a16", bg: "#fff7f2", hero: true }
+            { label: "Waiting for Orders", value: associates.waitingForOrders },
+            { label: "On Break",            value: associates.onBreak },
+            { label: "Offered",             value: associates.offered },
+            { label: "Picking",             value: associates.picking },
+            { label: "Packing & Racking",   value: associates.packingRacking },
+            { label: "Other Activities",    value: associates.otherActivities },
+            { label: "Total Associates",    value: associates.total }
           ]
-        ).map(({ label, value, icon, color, bg, hero }) => (
-          <div key={label} style={{ background: bg, border: `1px solid ${hero ? "#f0d4c5" : "var(--line, #e2e7ee)"}`, borderRadius: 14, padding: hero ? "14px 16px" : "12px 14px", display: "flex", flexDirection: "column", gap: 4, boxShadow: hero ? "0 2px 8px rgba(222,90,22,0.08)" : "0 1px 3px rgba(16,24,40,0.05)" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 5, color, fontSize: 11, fontWeight: 650 }}>
-              {icon} {label}
-            </span>
-            <strong style={{ fontSize: hero ? 28 : 20, fontWeight: 800, color: hero ? "#de5a16" : "var(--ink)", letterSpacing: hero ? "-0.8px" : "-0.3px", lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>
-              {count(value)}
-            </strong>
+        ).map(({ label, value }) => (
+          <div key={label} className={ss.assocCell}>
+            <span className={ss.assocLabel}>{label}</span>
+            <strong className={ss.assocValue}>{count(value)}</strong>
           </div>
         ))}
       </div>
 
       {pendingAcceptance > 0 ? (
-        <p className={s.error} role="status">
+        <div className={ss.alertBanner} role="status">
           <AlertTriangle size={14} aria-hidden />
-          <strong>Attention!</strong> {pendingAcceptance} order{pendingAcceptance === 1 ? "" : "s"} pending acceptance — ensure pickers are available.
-        </p>
+          Attention! You have {pendingAcceptance} order{pendingAcceptance === 1 ? "" : "s"} pending acceptance. Please ensure pickers are available to accept new orders.
+        </div>
       ) : null}
 
-      {/* ── Active orders ── */}
-      <section className={s.panel}>
-        <div className={s.panelHead}>
-          <h3>Active orders</h3>
-          <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <span className={`${s.badge} ${s.badgeGood}`}>{orders.filter(o => !actualTarget(o.totalSeconds, o.totalTargetSeconds).over).length} on time</span>
-            {orders.filter(o => actualTarget(o.totalSeconds, o.totalTargetSeconds).over).length > 0 && (
-              <span className={`${s.badge} ${s.badgeBad}`}>{orders.filter(o => actualTarget(o.totalSeconds, o.totalTargetSeconds).over).length} over SLA</span>
-            )}
-            <span>SLA {fmtClock(detail?.slaSeconds ?? 15)}</span>
-          </span>
+      {/* ── Active orders table (matches Amazon layout exactly) ── */}
+      <section className={ss.ordersPanel}>
+        <div className={ss.ordersPanelHead}>
+          <span>OID</span>
+          <span>Items</span>
+          <span>% Picking Completed</span>
+          <span>Assigned Associate</span>
+          <span>Acceptance Time</span>
+          <span>Picking Time</span>
+          <span>Pack &amp; Rack Time</span>
+          <span>Total Time</span>
         </div>
         {orders.length ? (
           <div style={{ overflowX: "auto" }}>
-            <table className={s.board}>
+            <table className={ss.ordersTable}>
               <thead>
                 <tr>
                   <th>OID</th>
                   <th>Items</th>
-                  <th>% Done</th>
-                  <th>Associate</th>
-                  <th>Acceptance</th>
-                  <th>Picking</th>
-                  <th>Pack &amp; Rack</th>
-                  <th>Total</th>
+                  <th>% Picking Completed</th>
+                  <th>Assigned Associate</th>
+                  <th>Acceptance Time</th>
+                  <th>Picking Time</th>
+                  <th>Pack &amp; Rack Time</th>
+                  <th>Total Time</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.map((o) => {
+                {orders.map((o, i) => {
                   const accept = actualTarget(o.acceptanceSeconds ?? o.elapsedSeconds, o.acceptanceTargetSeconds ?? detail?.slaSeconds ?? 15);
                   const picking = actualTarget(o.pickingSeconds, o.pickingTargetSeconds);
                   const pack = actualTarget(o.packRackSeconds, o.packRackTargetSeconds);
                   const total = actualTarget(o.totalSeconds, o.totalTargetSeconds);
                   return (
-                    <tr key={o.oid}>
-                      <td><strong style={{ color: "#2563eb" }}>{o.oid}</strong></td>
+                    <tr key={o.oid} className={i % 2 === 1 ? ss.rowAlt : ""}>
+                      <td><span className={ss.oidLink}>{o.oid}</span></td>
                       <td>{count(o.items)}</td>
-                      <td>
-                        {o.pctComplete == null ? "—" : (
-                          <span>
-                            <span className={s.badge}>{Math.round(o.pctComplete)}%</span>
-                            <span style={{ display: "block", width: 48, height: 4, background: "#f3f4f6", borderRadius: 2, marginTop: 3 }}>
-                              <span style={{ display: "block", width: `${Math.round(o.pctComplete)}%`, height: "100%", background: "#2563eb", borderRadius: 2 }} />
-                            </span>
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ fontWeight: 600 }}>{o.picker || <span style={{ color: "var(--muted)" }}>Unassigned</span>}</td>
-                      <td><span className={`${s.badge} ${accept.over ? s.badgeBad : s.badgeGood}`}>{accept.text}</span></td>
-                      <td><span className={`${s.badge} ${picking.over ? s.badgeBad : picking.text === "—" ? "" : s.badgeGood}`}>{picking.text}</span></td>
-                      <td><span className={`${s.badge} ${pack.over ? s.badgeBad : pack.text === "—" ? "" : ""}`}>{pack.text}</span></td>
-                      <td><span className={`${s.badge} ${total.over ? s.badgeBad : total.text === "—" ? "" : s.badgeGood}`}>{total.text}</span></td>
+                      <td>{o.pctComplete == null ? "—" : `${Math.round(o.pctComplete)}%`}</td>
+                      <td className={ss.associate}>{o.picker || <span className={ss.noAssoc}>No Idle Associates</span>}</td>
+                      <td><span className={accept.over ? ss.timeOver : ss.timeOk}>{accept.text}</span></td>
+                      <td><span className={picking.over ? ss.timeOver : ""}>{picking.text}</span></td>
+                      <td>{pack.text}</td>
+                      <td><span className={total.over ? ss.timeOver : ""}>{total.text}</span></td>
                     </tr>
                   );
                 })}
@@ -339,7 +327,7 @@ export function DsSiteSummaryView({
             </table>
           </div>
         ) : (
-          <p className={s.empty}>
+          <div className={ss.empty}>
             <ShoppingCart size={28} style={{ opacity: 0.25 }} aria-hidden />
             <span>
               {detail?.siteFetchedAt
@@ -348,7 +336,7 @@ export function DsSiteSummaryView({
                   ? "Site Summary not ingested yet — keep the VM monitor running."
                   : "No history found at or before this time."}
             </span>
-          </p>
+          </div>
         )}
       </section>
     </div>
