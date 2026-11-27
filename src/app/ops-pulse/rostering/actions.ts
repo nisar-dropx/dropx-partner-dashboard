@@ -859,8 +859,22 @@ async function publishPlan(companyId: string, authorization: AuthorizationContex
     .select("id")
     .maybeSingle();
   if (approved.error || !approved.data) throw new Error(approved.error?.message ?? "This roster is no longer available.");
-  if (plan.roster_kind === "recurring_weekly") {
+  if (plan.roster_kind === "recurring_weekly" && plan.location_id && plan.effective_from) {
     await retireFullyReplacedRosterPlans(db(), companyId, plan.id);
+    // Blanket-supersede any older recurring plans that retireFullyReplacedRosterPlans
+    // left alive because they were not fully replaced (e.g. a person missing their
+    // weekly-off entry). A newer effective_from means this plan governs going forward
+    // for everyone, matching the behaviour of the Connect manager approval path.
+    const ended = await db().from("hr_roster_plans")
+      .update({ superseded_at: plan.effective_from })
+      .eq("company_id", companyId)
+      .eq("location_id", plan.location_id)
+      .eq("roster_kind", "recurring_weekly")
+      .eq("status", "approved")
+      .is("superseded_at", null)
+      .neq("id", plan.id)
+      .lt("effective_from", plan.effective_from);
+    if (ended.error) throw new Error(ended.error.message);
   }
   if (plan.roster_kind === "dated" && plan.location_id && plan.period_start && plan.period_end) {
     await syncRecurringBaselineFromDatedPlan(companyId, authorization, {
