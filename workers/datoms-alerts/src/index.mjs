@@ -82,22 +82,66 @@ function createMemoryKv() {
   };
 }
 
-async function supabaseHasDedupe(env, dedupeKey) {
+/** Existing alert row, or null. L2/L3 with notified_at null are not "done" — WA may still be due. */
+async function supabaseAlertState(env, dedupeKey) {
   const headers = sbHeaders(env);
-  if (!headers || !env.COMPANY_ID) return false;
+  if (!headers || !env.COMPANY_ID) return null;
   const qs = new URLSearchParams({
     company_id: `eq.${env.COMPANY_ID}`,
     dedupe_key: `eq.${dedupeKey}`,
-    select: "dedupe_key",
+    select: "dedupe_key,level,notified_at,station_code,title,site_name,asset_name,room_type,alert_text,generated_at,rule_name",
     limit: "1"
   });
   const res = await fetch(
     `${String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "").replace(/\/$/, "")}/rest/v1/ds_datoms_alerts?${qs}`,
     { headers: { ...headers, Prefer: "return=representation" } }
   );
-  if (!res.ok) return false;
+  if (!res.ok) return null;
   const rows = await res.json().catch(() => []);
-  return Array.isArray(rows) && rows.length > 0;
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+function alertFullyHandled(state) {
+  if (!state) return false;
+  if (state.notified_at) return true;
+  // L1 (and other non-WA levels) only need to be stored once.
+  return !isWhatsAppLevel(state.level);
+}
+
+/** L2/L3 rows that were saved for the hub but never reached the war room. */
+async function supabasePendingWhatsAppAlerts(env, limit = 40) {
+  const headers = sbHeaders(env);
+  if (!headers || !env.COMPANY_ID) return [];
+  const qs = new URLSearchParams({
+    company_id: `eq.${env.COMPANY_ID}`,
+    level: "in.(L2,L3)",
+    notified_at: "is.null",
+    select: "dedupe_key,level,station_code,title,site_name,asset_name,room_type,alert_text,generated_at,rule_name",
+    order: "generated_at.asc",
+    limit: String(limit)
+  });
+  const res = await fetch(
+    `${String(env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "").replace(/\/$/, "")}/rest/v1/ds_datoms_alerts?${qs}`,
+    { headers: { ...headers, Prefer: "return=representation" } }
+  );
+  if (!res.ok) return [];
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function alertFromStoredRow(row) {
+  return {
+    dedupeKey: row.dedupe_key,
+    level: row.level,
+    station: row.station_code,
+    title: row.title || row.rule_name || `${row.level} Alert`,
+    siteName: row.site_name || row.station_code || "—",
+    asset: row.asset_name || "—",
+    roomType: row.room_type || "—",
+    alertText: row.alert_text || "—",
+    generatedAt: row.generated_at,
+    rule: row.rule_name || row.level
+  };
 }
 
 function json(data, status = 200, extra = {}) {
@@ -293,6 +337,57 @@ async function sendWhatsApp(env, alert, pngBytes, caption) {
   return res.json().catch(() => ({ ok: true }));
 }
 
+/**
+ * Policy + Report Bot delivery for one L2/L3 alert.
+ * Returns { sent:true } | { sent:false, reason } | throws on hard send failure.
+ */
+async function tryNotifyWhatsApp(env, alert, { caption, svg } = {}) {
+  if (!isWhatsAppLevel(alert.level)) {
+    return { sent: false, reason: "l1_no_whatsapp" };
+  }
+  const companyId = env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997";
+  const sbUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
+  const sbKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
+  const messageType = datomsLevelMessageType(alert.level) ?? "datoms_l2";
+  let policy = fallbackDsMessagePolicy(messageType);
+  const fromDb = await fetchDsMessagePolicy({ url: sbUrl, key: sbKey, companyId, messageType });
+  if (fromDb) policy = fromDb;
+  let lastSent = null;
+  if (sbKey) {
+    lastSent = await fetchLastDsMessageSentAt({
+      url: sbUrl,
+      key: sbKey,
+      companyId,
+      messageType,
+      stationCode: alert.station
+    });
+  }
+  const decision = decideDsMessageSend({ policy, lastSentAtMs: lastSent });
+  if (!decision.allowSend) {
+    return { sent: false, reason: decision.reason };
+  }
+  const resolvedCaption = caption ?? formatCaption(alert);
+  const resolvedSvg = svg ?? renderAlertCardSvg(alert);
+  const pngBytes = renderAlertCardPng(alert);
+  const notifiedAt = new Date().toISOString();
+  await sendWhatsApp(env, alert, pngBytes, resolvedCaption);
+  await supabaseMarkAlertNotified(env, alert.dedupeKey, notifiedAt, {
+    caption: resolvedCaption,
+    svg: resolvedSvg
+  });
+  await recordDsMessageSendRest({
+    url: sbUrl,
+    key: sbKey,
+    companyId,
+    messageType,
+    stationCode: alert.station,
+    policyVersion: policy.version,
+    dedupeKey: alert.dedupeKey,
+    meta: { level: alert.level, title: alert.title }
+  });
+  return { sent: true, notifiedAt, caption: resolvedCaption, svg: resolvedSvg };
+}
+
 /** Text-only ops alert to the allowlisted direct JID — never retries Datoms login. */
 async function sendOpsAuthAlert(env, { reason, failCount }) {
   const base = String(env.REPORT_BOT_URL || "").replace(/\/$/, "");
@@ -401,6 +496,42 @@ export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false
   const errors = [];
   let stored = 0;
   let notified = 0;
+  let waRetried = 0;
+
+  // Hub store-first used to mark L2/L3 as "done" before WA succeeded. Drain those.
+  if (!dryRun) {
+    const pending = await supabasePendingWhatsAppAlerts(env);
+    for (const row of pending) {
+      const alert = alertFromStoredRow(row);
+      const kvHit = await kv.get(alert.dedupeKey);
+      if (kvHit && String(kvHit) !== "stored") {
+        skipped.push({ reason: "dedupe", key: alert.dedupeKey });
+        continue;
+      }
+      try {
+        const result = await tryNotifyWhatsApp(env, alert);
+        if (!result.sent) {
+          skipped.push({ reason: result.reason || "wa_pending", key: alert.dedupeKey, station: alert.station });
+          continue;
+        }
+        await kv.put(alert.dedupeKey, result.notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
+        await storeRecent(kv, alert, { notifiedAt: result.notifiedAt });
+        notified += 1;
+        waRetried += 1;
+        processed.push({
+          dedupe_key: alert.dedupeKey,
+          station: alert.station,
+          level: alert.level,
+          title: alert.title,
+          retry: true
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[datoms-alerts] pending WA retry failed:", alert.dedupeKey, message);
+        errors.push({ dedupe_key: alert.dedupeKey, station: alert.station, error: message });
+      }
+    }
+  }
 
   for (const event of events) {
     const alert = filterDatomsEvent(event);
@@ -408,9 +539,9 @@ export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false
       skipped.push({ reason: "filter", id: event?.entity_id ?? event?.id });
       continue;
     }
-    const dedupeHit = (await kv.get(alert.dedupeKey))
-      || (await supabaseHasDedupe(env, alert.dedupeKey));
-    if (dedupeHit) {
+    const existing = await supabaseAlertState(env, alert.dedupeKey);
+    const kvHit = await kv.get(alert.dedupeKey);
+    if ((kvHit && String(kvHit) !== "stored") || alertFullyHandled(existing)) {
       skipped.push({ reason: "dedupe", key: alert.dedupeKey });
       continue;
     }
@@ -423,17 +554,20 @@ export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false
       continue;
     }
 
-    // Always persist first — OpsPulse UI must show alerts even when WA is muted/failed.
-    try {
-      await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt: null });
-      stored += 1;
-      await kv.put(alert.dedupeKey, "stored", { expirationTtl: DEDUPE_TTL_SEC });
-      await storeRecent(kv, alert, { notifiedAt: null });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[datoms-alerts] supabase upsert failed:", alert.dedupeKey, message);
-      errors.push({ dedupe_key: alert.dedupeKey, station: alert.station, error: message });
-      continue;
+    const alreadyStored = Boolean(existing);
+    if (!alreadyStored) {
+      // Persist first so OpsPulse shows the alert even when WA is muted/failed.
+      // Do not KV-dedupe yet for L2/L3 — a failed send must be retryable next poll.
+      try {
+        await supabaseUpsertAlert(env, alert, { caption, svg, notifiedAt: null });
+        stored += 1;
+        await storeRecent(kv, alert, { notifiedAt: null });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[datoms-alerts] supabase upsert failed:", alert.dedupeKey, message);
+        errors.push({ dedupe_key: alert.dedupeKey, station: alert.station, error: message });
+        continue;
+      }
     }
 
     processed.push({
@@ -444,49 +578,20 @@ export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false
     });
 
     if (!isWhatsAppLevel(alert.level)) {
+      await kv.put(alert.dedupeKey, "l1", { expirationTtl: DEDUPE_TTL_SEC });
       skipped.push({ reason: "l1_no_whatsapp", key: alert.dedupeKey, station: alert.station });
       continue;
     }
 
     try {
-      const companyId = env.COMPANY_ID || "43866344-b550-4e8a-9a2d-9d23f3d8a997";
-      const sbUrl = env.SUPABASE_URL || env.COMPANY_SUPABASE_URL || "";
-      const sbKey = env.SUPABASE_SERVICE_ROLE_KEY || env.COMPANY_SUPABASE_SERVICE_ROLE_KEY || "";
-      const messageType = datomsLevelMessageType(alert.level) ?? "datoms_l2";
-      let policy = fallbackDsMessagePolicy(messageType);
-      const fromDb = await fetchDsMessagePolicy({ url: sbUrl, key: sbKey, companyId, messageType });
-      if (fromDb) policy = fromDb;
-      let lastSent = null;
-      if (sbKey) {
-        lastSent = await fetchLastDsMessageSentAt({
-          url: sbUrl,
-          key: sbKey,
-          companyId,
-          messageType,
-          stationCode: alert.station
-        });
-      }
-      const decision = decideDsMessageSend({ policy, lastSentAtMs: lastSent });
-      if (!decision.allowSend) {
-        skipped.push({ reason: decision.reason, key: alert.dedupeKey, station: alert.station });
+      const result = await tryNotifyWhatsApp(env, alert, { caption, svg });
+      if (!result.sent) {
+        skipped.push({ reason: result.reason || "wa_pending", key: alert.dedupeKey, station: alert.station });
         continue;
       }
-      const pngBytes = renderAlertCardPng(alert);
-      const notifiedAt = new Date().toISOString();
-      await sendWhatsApp(env, alert, pngBytes, caption);
-      await supabaseMarkAlertNotified(env, alert.dedupeKey, notifiedAt, { caption, svg });
-      await storeRecent(kv, alert, { notifiedAt });
+      await kv.put(alert.dedupeKey, result.notifiedAt, { expirationTtl: DEDUPE_TTL_SEC });
+      await storeRecent(kv, alert, { notifiedAt: result.notifiedAt });
       notified += 1;
-      await recordDsMessageSendRest({
-        url: sbUrl,
-        key: sbKey,
-        companyId,
-        messageType,
-        stationCode: alert.station,
-        policyVersion: policy.version,
-        dedupeKey: alert.dedupeKey,
-        meta: { level: alert.level, title: alert.title }
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error("[datoms-alerts] alert send failed:", alert.dedupeKey, message);
@@ -504,6 +609,7 @@ export async function runPoll(env, { dryRun = false, allowLogin, catchUp = false
     processed: processed.length,
     stored,
     notified,
+    wa_retried: waRetried,
     alerts: processed,
     skipped_count: skipped.length,
     errors
