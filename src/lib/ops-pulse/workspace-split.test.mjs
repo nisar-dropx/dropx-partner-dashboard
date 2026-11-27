@@ -23,7 +23,7 @@ test('DS has unit costs, Store Health Review Desk, and no last-mile specialist w
   assert(operations.children?.some(c=>c.code==='ds_ppi'&&c.href==='/operations/ppi'));
   assert(operations.children?.some(c=>c.code==='ds_site_summary'&&c.href==='/operations/site-summary'));
   assert(operations.children?.some(c=>c.code==='ds_workforce_pulse'&&c.href==='/operations/workforce-pulse'));
-  assert(operations.children?.some(c=>c.code==='ds_datoms'&&c.href==='/operations/datoms/panel'));
+  assert(operations.children?.some(c=>c.code==='ds_datoms'&&c.href==='/operations/datoms/alerts'));
   assert(operations.children?.some(c=>c.code==='ds_message_policies'&&c.href==='/operations/message-policies'));
   assert(!catalog.some(x=>x.code==='ops_report_bot'&&!x.children));
   const teamOps=catalog.find(x=>x.label==='Team Ops');

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function DatomsIndexPage() {
-  redirect("/operations/datoms/panel");
+  redirect("/operations/datoms/alerts");
 }

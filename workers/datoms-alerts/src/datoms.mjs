@@ -62,6 +62,23 @@ function isPlaceholderToken(token) {
   return !value || value === "backoff" || value === "none";
 }
 
+/** Datoms events API expects unix seconds (HAR), not ISO timestamps. */
+export function toUnixSeconds(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value > 1e12 ? Math.floor(value / 1000) : Math.floor(value));
+  }
+  const text = String(value).trim();
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const n = Number(text);
+    if (!Number.isFinite(n)) return text;
+    return String(n > 1e12 ? Math.floor(n / 1000) : Math.floor(n));
+  }
+  const ms = Date.parse(text);
+  if (!Number.isFinite(ms)) return text;
+  return String(Math.floor(ms / 1000));
+}
+
 async function jsonFetch(url, { method = "GET", headers = {}, body } = {}) {
   const res = await fetch(url, {
     method,
@@ -609,17 +626,22 @@ export class DatomsClient {
     await this._loginInflight;
   }
 
-  async authedFetch(path, { method = "GET", query = {} } = {}) {
+  async authedFetch(path, { method = "GET", query = {}, body } = {}) {
     await this.ensureSession();
     const run = async () => {
-      const u = new URL(`${API_BASE}${path}`);
+      // Most IoT routes live under API_BASE; gravity table-data is under /web-api/v1 (HAR).
+      const base = String(path).startsWith("/web-api/")
+        ? "https://app.datoms.io"
+        : API_BASE;
+      const u = new URL(String(path).startsWith("http") ? path : `${base}${path}`);
       for (const [k, v] of Object.entries(query)) {
         if (v != null && v !== "") u.searchParams.set(k, String(v));
       }
       const dpop = await mintDpop(this.privateKey, method, u.toString());
       return jsonFetch(u.toString(), {
         method,
-        headers: { auth_token: this.authToken, dpop }
+        headers: { auth_token: this.authToken, dpop },
+        body
       });
     };
 
@@ -657,8 +679,9 @@ export class DatomsClient {
     const data = await this.authedFetch(path, {
       query: {
         get_details: "true",
-        generated_after: generatedAfter ?? "",
-        generated_before: generatedBefore ?? ""
+        // HAR captures send unix seconds — ISO strings return an empty list.
+        generated_after: toUnixSeconds(generatedAfter),
+        generated_before: toUnixSeconds(generatedBefore)
       }
     });
     const list =
@@ -670,18 +693,38 @@ export class DatomsClient {
     return Array.isArray(list) ? list : [];
   }
 
-  /** Panel / list asset catalog (HAR: clients/.../things/list). */
+  /** Panel / list asset catalog (HAR: clients/.../things/list with paging). */
   async fetchThingsList(query = {}) {
     const path = `/clients/${this.customerId}/applications/${this.applicationId}/things/list`;
-    const data = await this.authedFetch(path, { query });
-    const list =
-      data?.things
-      ?? data?.data?.things
-      ?? data?.data
-      ?? data?.list
-      ?? (Array.isArray(data) ? data : []);
+    const pageSize = Math.min(Math.max(Number(query.results_per_page) || 12, 1), 100);
+    const startPage = Math.max(Number(query.page_no) || 1, 1);
+    const singlePage = query.page_no != null && query.paginate === false;
+    const all = [];
+    let page = startPage;
+    for (let guard = 0; guard < 50; guard += 1) {
+      const data = await this.authedFetch(path, {
+        query: {
+          page_no: String(page),
+          results_per_page: String(pageSize),
+          site: query.site ?? "",
+          thing_category: query.thing_category ?? "",
+          search: query.search ?? "",
+          online_offline_status: query.online_offline_status ?? ""
+        }
+      });
+      const list =
+        data?.things
+        ?? data?.data?.things
+        ?? data?.data
+        ?? data?.list
+        ?? (Array.isArray(data) ? data : []);
+      const rows = Array.isArray(list) ? list : [];
+      all.push(...rows);
+      if (singlePage || rows.length < pageSize) break;
+      page += 1;
+    }
     await this.touchKeepAlive();
-    return Array.isArray(list) ? list : [];
+    return all;
   }
 
   /** Live metrics for panel cards (HAR: clients/.../things/data). */
@@ -698,17 +741,24 @@ export class DatomsClient {
     return Array.isArray(list) ? list : [];
   }
 
-  /** Gravity chart payload for Detailed / Analog / Reports. */
-  async fetchGraphData(query = {}) {
+  /** Gravity chart payload for Detailed / Analog / Reports (HAR: POST). */
+  async fetchGraphData(body = {}) {
     const path = `/gravity-apis/${this.customerId}/graph-data`;
-    const data = await this.authedFetch(path, { query });
+    const data = await this.authedFetch(path, {
+      method: "POST",
+      body: body && typeof body === "object" ? body : {}
+    });
     await this.touchKeepAlive();
     return data?.data ?? data ?? {};
   }
 
-  async fetchTableData(query = {}) {
-    const path = `/gravity-apis/${this.customerId}/table-data`;
-    const data = await this.authedFetch(path, { query });
+  async fetchTableData(body = {}) {
+    // HAR: POST /web-api/v1/gravity-apis/{customer}/table-data (not under iot-platform).
+    const path = `/web-api/v1/gravity-apis/${this.customerId}/table-data`;
+    const data = await this.authedFetch(path, {
+      method: "POST",
+      body: body && typeof body === "object" ? body : {}
+    });
     await this.touchKeepAlive();
     return data?.data ?? data ?? {};
   }

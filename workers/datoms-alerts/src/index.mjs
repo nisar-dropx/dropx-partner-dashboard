@@ -553,11 +553,9 @@ export async function runThingsSnapshot(env, { allowLogin = false } = {}) {
   const observedAt = new Date().toISOString();
   let list = [];
   let data = [];
+  const fetchErrors = [];
   try {
-    [list, data] = await Promise.all([
-      client.fetchThingsList(),
-      client.fetchThingsData()
-    ]);
+    list = await client.fetchThingsList();
   } catch (error) {
     const handled = await handleAuthFailure(env, client, error);
     return {
@@ -568,11 +566,21 @@ export async function runThingsSnapshot(env, { allowLogin = false } = {}) {
       upserted: 0
     };
   }
+  // things/data is flaky (500s) — keep list cards rather than wiping the hub.
+  try {
+    data = await client.fetchThingsData();
+  } catch (error) {
+    fetchErrors.push({
+      kind: "things_data",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    data = [];
+  }
 
   const merged = mergeThingRows(list, data);
   let upserted = 0;
   const skipped = [];
-  const errors = [];
+  const errors = [...fetchErrors];
   for (const row of merged) {
     const thing = normalizeThing(row);
     if (!thing) {

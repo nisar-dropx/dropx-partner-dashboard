@@ -61,7 +61,7 @@ export function DsOperationsTabs({
         </Link>
       ) : null}
       {showDatoms ? (
-        <Link className={`${s.tab}${datomsActive ? ` ${s.active}` : ""}`} href="/operations/datoms/panel">
+        <Link className={`${s.tab}${datomsActive ? ` ${s.active}` : ""}`} href="/operations/datoms/alerts">
           <span className={s.icon}>{TAB_ICON.datoms}</span>
           DATOMS
         </Link>

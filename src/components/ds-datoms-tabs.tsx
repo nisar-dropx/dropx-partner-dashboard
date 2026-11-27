@@ -3,9 +3,9 @@ import { Bell, LayoutGrid, List, FileBarChart2 } from "lucide-react";
 import s from "./ds-operations-tabs.module.css";
 
 const TABS = [
+  { id: "alerts", href: "/operations/datoms/alerts", label: "Alerts", icon: <Bell size={14} aria-hidden /> },
   { id: "panel", href: "/operations/datoms/panel", label: "Panel", icon: <LayoutGrid size={14} aria-hidden /> },
   { id: "list", href: "/operations/datoms/list", label: "List", icon: <List size={14} aria-hidden /> },
-  { id: "alerts", href: "/operations/datoms/alerts", label: "Alerts", icon: <Bell size={14} aria-hidden /> },
   { id: "reports", href: "/operations/datoms/reports", label: "Reports", icon: <FileBarChart2 size={14} aria-hidden /> }
 ] as const;
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { datomsAuthInternals } from "./datoms.mjs";
+import { datomsAuthInternals, toUnixSeconds } from "./datoms.mjs";
 
 const {
   isRateLimited,
@@ -38,4 +38,11 @@ test("login backoff matches Datoms 24h lock (+buffer)", () => {
 test("ops alert JID and fail threshold are fixed", () => {
   assert.equal(MAX_AUTH_FAILURES, 3);
   assert.equal(DATOMS_OPS_ALERT_JID, "919645881397@s.whatsapp.net");
+});
+
+test("toUnixSeconds matches Datoms HAR event query shape", () => {
+  assert.equal(toUnixSeconds("2026-11-27T10:00:00.000Z"), "1795773600");
+  assert.equal(toUnixSeconds(1795773600), "1795773600");
+  assert.equal(toUnixSeconds(1795773600000), "1795773600");
+  assert.equal(toUnixSeconds(""), "");
 });

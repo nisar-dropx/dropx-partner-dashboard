@@ -254,7 +254,7 @@ export function opsNavCatalogForMode(mode: OperatingMode): NavItem[] {
         { code: "ds_ppi", label: "PPI", href: "/operations/ppi" },
         { code: "ds_site_summary", label: "Site Summary", href: "/operations/site-summary" },
         { code: "ds_workforce_pulse", label: "Workforce Pulse", href: "/operations/workforce-pulse" },
-        { code: "ds_datoms", label: "DATOMS", href: "/operations/datoms/panel" }
+        { code: "ds_datoms", label: "DATOMS", href: "/operations/datoms/alerts" }
       ]
     },
     {
