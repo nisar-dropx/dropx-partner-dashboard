@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
     const misPunch = rows.filter((row) => row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
-      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
+      .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, attachment_path_out, status, review_remarks, created_at")
       .eq("company_id", worker.companyId)
       .eq("profile_type", worker.profileType)
       .eq("profile_id", worker.profileId)
@@ -153,6 +153,7 @@ export async function GET(request: NextRequest) {
           reasonCode: item.reason_code,
           remarks: item.remarks,
           hasAttachment: Boolean(item.attachment_path),
+          hasAttachmentOut: Boolean(item.attachment_path_out),
           status: item.status,
           reviewRemarks: item.review_remarks,
           createdAt: item.created_at
