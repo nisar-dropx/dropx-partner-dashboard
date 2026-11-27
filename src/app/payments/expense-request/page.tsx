@@ -583,6 +583,10 @@ export default async function ExpenseRequestPage({
                   Estimated Amount
                   <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} readOnly />
                 </label>
+                <label>
+                  Actual Amount *
+                  <input className="field" min="0" name="amount" placeholder="Enter actual amount" required step="0.01" type="number" />
+                </label>
               </div>
               <PaymentBeneficiaryFields
                 allowedPaymentModes={bankHead?.supported_payment_modes}
@@ -612,13 +616,6 @@ export default async function ExpenseRequestPage({
                   </div>
                 </>
               ) : null}
-              <div className="section-divider" />
-              <div className="form-grid two">
-                <label>
-                  Actual Amount *
-                  <input className="field" min="0" name="amount" placeholder="Enter actual amount" required step="0.01" type="number" />
-                </label>
-              </div>
               <label className="payment-resubmit-remarks">
                 Remarks
                 <textarea className="field" name="remarks" rows={3} defaultValue={bankRequest.remarks ?? ""} />
