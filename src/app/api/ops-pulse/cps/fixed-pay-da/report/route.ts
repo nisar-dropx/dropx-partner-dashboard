@@ -122,12 +122,12 @@ export async function GET(request: Request) {
     }))
   );
 
-  return workbookResponse({
-    fileName: `fixed-pay-da-cps-${range.from}-to-${range.to}.xlsx`,
-    sheets: [
+  return workbookResponse(
+    [
       { name: "Station summary", rows: stationRows },
       { name: "Daily", rows: dailyRows },
       { name: "Associates", rows: associateRows }
-    ]
-  });
+    ],
+    `fixed-pay-da-cps-${range.from}-to-${range.to}.xlsx`
+  );
 }
