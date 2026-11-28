@@ -34,6 +34,8 @@ const nextConfig = {
       "/api/ops-pulse/audits/report/*": ["./assets/report-fonts/**/*"],
       "/ops-pulse/audits": ["./assets/report-fonts/**/*"],
       "/api/cron/dark-store-ppi": ["./src/app/api/cron/dark-store-ppi/*.ttf"],
+      "/api/cron/datoms-alerts": ["./src/app/api/cron/dark-store-ppi/*.ttf"],
+      "/api/ops-pulse/operations/datoms": ["./src/app/api/cron/dark-store-ppi/*.ttf"],
     },
     optimizePackageImports: ["lucide-react"]
   }

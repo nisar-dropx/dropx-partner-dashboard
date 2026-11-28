@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PNG } from "pngjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 
 const sample = {
@@ -13,9 +14,19 @@ const sample = {
   level: "L3"
 };
 
+function nonWhitePixelCount(pngBytes) {
+  const png = PNG.sync.read(pngBytes);
+  let count = 0;
+  for (let i = 0; i < png.data.length; i += 4) {
+    if (png.data[i] < 250 || png.data[i + 1] < 250 || png.data[i + 2] < 250) count += 1;
+  }
+  return count;
+}
+
 test("alert SVG uses the detail card layout, not the pixel banner", () => {
   const svg = renderAlertCardSvg(sample);
   assert.match(svg, /Door Open L3 Alert/);
+  assert.match(svg, /font-family="Inter"/);
   assert.match(svg, /Site :/);
   assert.match(svg, /Asset :/);
   assert.match(svg, /Room Type :/);
@@ -25,7 +36,7 @@ test("alert SVG uses the detail card layout, not the pixel banner", () => {
   assert.doesNotMatch(svg, /#ea580c/);
 });
 
-test("alert PNG rasterizes the detail card", async () => {
+test("alert PNG rasterizes visible text, not only the divider", async () => {
   const png = await renderAlertCardPng(sample);
   assert.ok(Buffer.isBuffer(png));
   assert.ok(png.length > 2000);
@@ -33,4 +44,6 @@ test("alert PNG rasterizes the detail card", async () => {
   assert.equal(png[1], 0x50); // P
   assert.equal(png[2], 0x4e); // N
   assert.equal(png[3], 0x47); // G
+  // Divider alone is ~1–2k non-white pixels; full card text is far denser.
+  assert.ok(nonWhitePixelCount(png) > 8000, "expected Inter-rendered text pixels");
 });
