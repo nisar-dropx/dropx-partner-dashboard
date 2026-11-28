@@ -29,8 +29,8 @@ company access. Helper policy is unchanged. No profiles are reactivated. Migrati
 
 ## Four profile statuses and Active-only Workforce bank files — 26 November 2026
 
-Profile status is Pending, Active, Returned or Inactive. Registration submitted,
-under review and approved-awaiting-activation display as Pending; rejected/returned
+Profile status is Pending, Under Review, Active, Returned or Inactive. Registration submitted,
+and approved-awaiting-activation display as Pending; under_review displays as Under Review (restored 28 November). Rejected/returned
 registration displays as Returned. A completed registration with its enabled flag
 and pending resignation/termination/settlement stays Active until its exit is
 completed or the profile is explicitly deactivated. Completed exits, suspension,

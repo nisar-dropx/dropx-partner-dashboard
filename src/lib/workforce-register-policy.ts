@@ -19,7 +19,7 @@ export type WorkforceStation = {
 function first<T>(value: Relation<T> | undefined) { return Array.isArray(value) ? value[0] : value; }
 function normalized(value: string | undefined) { return (value ?? "").trim().toUpperCase().replace(/[ _-]/g, ""); }
 /** Profile status is separate from registration review and exit workflow stages. */
-export function workforceProfileStatus(source?: WorkforceProfileStatusSource | null): "" | "Pending" | "Active" | "Returned" | "Inactive" {
+export function workforceProfileStatus(source?: WorkforceProfileStatusSource | null): "" | "Pending" | "Under Review" | "Active" | "Returned" | "Inactive" {
   if (!source) return "";
   if (source.deleted_at) return "Inactive";
   const lifecycle = String(source.people_lifecycle_status ?? source.lifecycle_status ?? "").trim().toLowerCase();
@@ -28,6 +28,7 @@ export function workforceProfileStatus(source?: WorkforceProfileStatusSource | n
   const onboarding = String(source.onboarding_status ?? "").trim().toLowerCase();
   if (["cancelled", "inactive", "exited", "offboarded"].includes(onboarding)) return "Inactive";
   if (["returned", "rejected"].includes(onboarding)) return "Returned";
+  if (onboarding === "under_review") return "Under Review";
   if (onboarding && onboarding !== "active") return "Pending";
   return source.is_active === true ? "Active" : "Inactive";
 }
