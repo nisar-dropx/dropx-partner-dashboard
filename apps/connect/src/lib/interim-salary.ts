@@ -28,6 +28,19 @@ export function isLossRecoverySalaryItem(item: Pick<SalaryItem, "code" | "source
 export function lossRecoverySplitLabel(item: Pick<SalaryItem, "code" | "name" | "source" | "metadata">) {
   const name = String(item.name || "").trim();
   const meta = metaRecord(item.metadata);
+  const report = String(meta.report ?? "").toLowerCase();
+  const challanNumber = typeof meta.challan_number === "string"
+    ? meta.challan_number.trim()
+    : String(meta.case_key ?? "").replace(/^challan:/i, "").trim();
+  if (report === "challan" || (typeof meta.case_key === "string" && /^challan:/i.test(meta.case_key))) {
+    if (name && !/^loss(\s+recovery)?(\s+deduction)?$/i.test(name) && name.toUpperCase() !== "OPS_LOSS_RECOVERY") {
+      return name;
+    }
+    const offense = typeof meta.offense === "string" && meta.offense.trim()
+      ? meta.offense.trim()
+      : "Traffic challan";
+    return challanNumber ? `${offense} · Challan ${challanNumber}` : offense;
+  }
   const month = typeof meta.month === "string" ? meta.month : "";
   const caseKey = typeof meta.case_key === "string" ? meta.case_key : "";
   const tid = caseKey.replace(/^slp:/i, "");

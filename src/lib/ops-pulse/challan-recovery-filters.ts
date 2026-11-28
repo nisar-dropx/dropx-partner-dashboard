@@ -47,8 +47,29 @@ export function challanRecoveryFacetOptions(
     .sort((a, b) => a.localeCompare(b));
 }
 
+const CASE_STATUS_LABELS: Record<string, string> = {
+  open: "Unassigned",
+  assigned: "Assigned",
+  recovering: "Recovering",
+  recovered: "Recovered",
+  closed: "Closed",
+  cancelled: "Cancelled"
+};
+
+const ALLOCATION_STATUS_LABELS: Record<string, string> = {
+  planned: "Scheduled",
+  scheduled: "Scheduled",
+  draft: "Draft payroll",
+  deducted: "Deducted",
+  recovered: "Deducted",
+  cancelled: "Cancelled",
+  waived: "Waived"
+};
+
 export function challanRecoverySearchHaystack(row: ChallanRecoveryCase) {
-  const people = row.allocations.map((a) => `${a.personName} ${a.personRef} ${a.utr}`).join(" ");
+  const people = row.allocations
+    .map((a) => `${a.personName} ${a.personRef} ${a.utr} ${ALLOCATION_STATUS_LABELS[a.status] || a.status}`)
+    .join(" ");
   return [
     row.challanNumber,
     row.vehicleNo,
@@ -57,6 +78,7 @@ export function challanRecoverySearchHaystack(row: ChallanRecoveryCase) {
     row.issuingAuthority,
     row.approvedByName,
     row.status,
+    CASE_STATUS_LABELS[row.status] || row.status,
     row.month,
     people
   ]

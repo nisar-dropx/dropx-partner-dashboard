@@ -97,12 +97,12 @@ export function CpsAdHocFilters({
   function updateClusters(values: string[]) {
     const currentSet = new Set(draftClusters);
     const nextSet = new Set(values);
-    const addedCodes = stations.filter((station) => nextSet.has(station.cluster) && !currentSet.has(station.cluster)).map((station) => station.code);
+    const addedCodes = stations
+      .filter((station) => nextSet.has(station.cluster) && !currentSet.has(station.cluster))
+      .map((station) => station.code);
     setDraftClusters(values);
-    setDraftStations((current) => [...new Set([...current, ...addedCodes])].filter((code) => {
-      const station = stationByCode.get(code);
-      return station && nextSet.has(station.cluster);
-    }));
+    // Keep previously selected stations even if their cluster was cleared (zero-match stay visible).
+    setDraftStations((current) => [...new Set([...current, ...addedCodes])]);
   }
 
   function apply() {
@@ -114,9 +114,11 @@ export function CpsAdHocFilters({
       params.set("to", last);
     }
     if (draftClusters.length !== clusters.length) params.set("clusters", draftClusters.length ? draftClusters.join(",") : "_none");
-    const availableCodes = availableStations.map((station) => station.code);
-    const selectedCodes = draftStations.filter((code) => availableCodes.includes(code));
-    if (selectedCodes.length !== availableCodes.length) params.set("stations", selectedCodes.length ? selectedCodes.join(",") : "_none");
+    // Preserve zero-match station selections so users can clear them deliberately.
+    const selectedCodes = draftStations.filter((code) => stationByCode.has(code));
+    if (selectedCodes.length !== availableStations.length || selectedCodes.some((code) => !availableStations.some((station) => station.code === code))) {
+      params.set("stations", selectedCodes.length ? selectedCodes.join(",") : "_none");
+    }
     router.push(`${pathname}${params.size ? `?${params.toString()}` : ""}`);
   }
 
@@ -149,8 +151,24 @@ export function CpsAdHocFilters({
         allLabel="All stations"
         label="Stations"
         onChange={setDraftStations}
-        options={availableStations.map((station) => ({ value: station.code, label: station.code, helper: `${station.name} · ${station.region}` }))}
-        selected={draftStations.filter((code) => availableStations.some((station) => station.code === code))}
+        options={[
+          ...availableStations.map((station) => ({
+            value: station.code,
+            label: station.code,
+            helper: `${station.name} · ${station.region}`
+          })),
+          ...draftStations
+            .filter((code) => stationByCode.has(code) && !availableStations.some((station) => station.code === code))
+            .map((code) => {
+              const station = stationByCode.get(code)!;
+              return {
+                value: station.code,
+                label: station.code,
+                helper: `${station.name} · ${station.region} · outside selected clusters`
+              };
+            })
+        ]}
+        selected={draftStations.filter((code) => stationByCode.has(code))}
       />
       <button className="button cps-adhoc-apply" onClick={apply} type="button">Apply</button>
       <button aria-label="Reset filters" className="button secondary cps-adhoc-reset" onClick={reset} type="button"><X aria-hidden="true" size={14} />Reset</button>

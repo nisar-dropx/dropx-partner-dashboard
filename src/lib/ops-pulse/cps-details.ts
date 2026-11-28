@@ -72,7 +72,7 @@ export function daCohortTotals(rows: CpsDaDetail[], cohort: CpsDaDay["cohort"]) 
   const customerReturns=people.reduce((n,r)=>n+r.customer_returns,0);
   const shipments=cpsShipmentCount(deliveries,customerReturns);
   const pending = people.some(p => p.pending_fixed_dates?.length);
-  return {people, amount, deliveries, customerReturns, shipments, pending, cps:!pending && shipments>0?amount/shipments:null};
+  return {people, amount, deliveries, customerReturns, shipments, pending, cps:shipments>0?amount/shipments:null};
 }
 export function cpsFuelTrend(snapshot: CpsSnapshot) {
   const dates=[...new Set(snapshot.daily.map(d=>d.work_date))].sort();

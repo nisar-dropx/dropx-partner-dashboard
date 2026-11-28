@@ -90,7 +90,12 @@ function describeStatus(view: MarshSessionView): { tone: LiveEvent["tone"]; text
     case "connecting":
       return { tone: "info", text: "Connecting to Marsh identity… submitting encrypted credentials." };
     case "otp_required":
-      return { tone: "warn", text: "OTP required — check the Marsh email inbox and enter the code below." };
+      return {
+        tone: "warn",
+        text: view.gmailOtpConfigured
+          ? "OTP required — worker is reading the Marsh Gmail inbox automatically. Manual entry stays available as fallback."
+          : "OTP required — tech@ Gmail OAuth is not linked yet. Enter the code manually, or finish GMAIL_REFRESH_TOKEN setup (OTPs forward from dropxlogistics33)."
+      };
     case "active":
       return { tone: "good", text: "Session active. Cookie stored for enroll, terminate, and ecard sync." };
     case "failed":

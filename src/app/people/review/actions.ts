@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createAppNotification } from "@/lib/app-notifications";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { enqueueActivationAutomation } from "@/lib/lifecycle-automation";
 import { assignEmployeeToPosition } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -135,6 +136,52 @@ export async function reviewPeopleProfile(formData: FormData) {
       sourceKey: `${id}:${action}:${reviewedAt}`,
       variables: { remarks }
     });
+
+    if (action === "approve" && (profileType === "employee" || profileType === "contractor" || profileType === "workforce")) {
+      const row = current.data as Record<string, unknown>;
+      const station = row.location_id
+        ? await supabaseAdmin.from("stations").select("station_code").eq("id", row.location_id).maybeSingle()
+        : { data: null };
+      let designationCode: string | null = null;
+      let designationName = String(row.designation ?? "").trim() || null;
+      if (row.designation_id) {
+        const designation = await supabaseAdmin
+          .from("designations")
+          .select("code,name")
+          .eq("id", row.designation_id)
+          .maybeSingle();
+        designationCode = designation.data?.code ?? null;
+        designationName = designation.data?.name ?? designationName;
+      }
+      const isDeliveryAssociate = profileType === "workforce" &&
+        /\bDA\b|DELIVERY\s*ASSOCIATE/i.test(`${designationCode || ""} ${designationName || ""}`);
+      await enqueueActivationAutomation({
+        companyId,
+        profileType,
+        profileId: id,
+        pan: (row.pan_number as string | null) ?? null,
+        email: (row.email as string | null) ?? null,
+        fullName: (row.full_name as string | null) ?? null,
+        dob: (row.date_of_birth as string | null) ?? null,
+        gender: (row.gender as string | null) ?? null,
+        doj: (row.date_of_join as string | null) ?? null,
+        mobile: (row.mobile as string | null) ?? null,
+        designation: designationName,
+        designationCode,
+        stationCode: station.data?.station_code ?? null,
+        isDeliveryAssociate,
+        fatherName: (row.father_name as string | null) ?? null,
+        address: (row.address as string | null) ?? null,
+        stateCode: (row.state_code as string | null) ?? null,
+        state: (row.state_code as string | null) ?? null,
+        pincode: ((row.pincode ?? row.postal_pin) as string | null) ?? null,
+        landmark: (row.landmark as string | null) ?? null,
+        drivingLicenseNo: (row.driving_license_no as string | null) ?? null,
+        dlFrontPath: (row.dl_front_path as string | null) ?? null,
+        dlBackPath: (row.dl_back_path as string | null) ?? null,
+        dropxId: ((row.employee_code ?? row.dropx_id) as string | null) ?? null
+      }).catch((error) => console.error("[people-review] activation automation", error));
+    }
 
     revalidatePath("/people/review");
     revalidatePath(profileType === "employee"

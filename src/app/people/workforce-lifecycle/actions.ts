@@ -233,6 +233,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
       dropx_id?: string | null;
     };
     await enqueueActivationAutomation({
+      companyId,
       profileType: "workforce",
       profileId: id,
       pan: profile.pan_number,

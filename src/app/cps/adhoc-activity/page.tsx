@@ -59,9 +59,13 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
   const clusterSet = new Set(selectedClusters);
   const clusterLocations = allLocations.filter((location) => clusterSet.has(clusterFor(location)));
   const stationCodes = clusterLocations.map((location) => location.station_code);
-  const selectedCodes = listParam(searchParams?.stations, stationCodes);
+  const allStationCodes = allLocations.map((location) => location.station_code);
+  // Preserve zero-match station selections that sit outside the current cluster filter.
+  const selectedCodes = searchParams?.stations
+    ? listParam(searchParams.stations, allStationCodes)
+    : stationCodes;
   const selectedCodeSet = new Set(selectedCodes);
-  const selectedLocations = clusterLocations.filter((location) => selectedCodeSet.has(location.station_code));
+  const selectedLocations = allLocations.filter((location) => selectedCodeSet.has(location.station_code));
   const activity = await loadAdHocActivity(companyId, selectedLocations, range.from, range.to);
   const periodName = periodLabel(range.from, range.to, today);
   const reportSearch = new URLSearchParams({ from: range.from, to: range.to });

@@ -98,6 +98,11 @@ export default async function CpsPage({
                 Adhoc Van &amp; DA
               </Link>
             )}
+            {hasPermission(auth, "cps_overview", "access") && (
+              <Link prefetch={false} href="/cps/fixed-pay-da">
+                Fixed Pay DA
+              </Link>
+            )}
             {hasPermission(auth, "cps_inputs", "access") && (
               <Link
                 prefetch={false}

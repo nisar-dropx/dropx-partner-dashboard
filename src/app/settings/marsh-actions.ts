@@ -19,6 +19,10 @@ export type MarshEcardSyncProgress = {
 export type MarshSessionView = {
   ok?: boolean;
   credentialsConfigured: boolean;
+  /** True when worker can read Marsh OTP from tech@ Gmail (forwarded). */
+  gmailOtpConfigured?: boolean;
+  /** True when Identity remember cookies are stored for OTP-skip re-login. */
+  rememberMachine?: boolean;
   status: string;
   challengeId: string | null;
   lastError: string | null;
