@@ -77,6 +77,9 @@ function loadReviewActions(currentProfile, options = {}) {
         return "company-id";
       }
     },
+    "@/lib/lifecycle-automation": {
+      async enqueueActivationAutomation() {}
+    },
     "@/lib/position-access": {
       async assignEmployeeToPosition() {}
     },
