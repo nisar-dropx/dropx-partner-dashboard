@@ -639,6 +639,39 @@
   }
 }
 
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #f1f3f6;
+  font-size: 12px;
+  color: var(--muted, #667085);
+}
+
+.pager button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line, #e2e7ee);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink, #1f2937);
+  cursor: pointer;
+}
+
+.pager button:hover:not(:disabled) {
+  border-color: #c5cdd8;
+}
+
+.pager button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 @media (max-width: 720px) {
   .kpiBar {
     grid-template-columns: repeat(2, minmax(0, 1fr));

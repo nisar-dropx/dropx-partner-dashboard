@@ -73,12 +73,23 @@ export function parseDatomsEvent(event) {
 
   if (!station || !ALLOWED_STATIONS.has(station)) return null;
 
+  const rawAlertText =
+    String(
+      details.alert_message
+        ?? details.violation_message
+        ?? event.message
+        ?? event.title
+        ?? ""
+    ).trim();
+  const parsed = splitAssetAlertMessage(rawAlertText);
+
   const asset =
     String(
       details.station_name
         ?? details.asset_name
         ?? details.assetName
         ?? event.asset_name
+        ?? parsed.asset
         ?? ""
     ).trim() || "—";
   const roomType =
@@ -87,16 +98,10 @@ export function parseDatomsEvent(event) {
         ?? details.room_type
         ?? details.roomType
         ?? details.room_name
+        ?? parsed.roomType
         ?? ""
     ).trim() || "—";
-  const alertText =
-    String(
-      details.alert_message
-        ?? details.violation_message
-        ?? event.message
-        ?? event.title
-        ?? ""
-    ).trim() || "—";
+  const alertText = String(parsed.alertText || rawAlertText || "—").trim() || "—";
 
   const rule =
     String(
@@ -126,6 +131,36 @@ export function parseDatomsEvent(event) {
     dedupeKey: `${entityId}:${generatedAt}:${rule}`,
     raw: event
   };
+}
+
+/**
+ * Datoms often packs "TTA5 Freezer room w/DS : Door Open L2 for more than 20 Minutes".
+ * Pull asset / room / short alert text from that pattern when structured fields are blank.
+ */
+export function splitAssetAlertMessage(raw) {
+  const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return { asset: null, roomType: null, alertText: null };
+  const m = text.match(/^(.+?)\s*:\s*(.+)$/);
+  if (!m) return { asset: null, roomType: null, alertText: text };
+  const asset = m[1].trim();
+  let alertText = m[2].trim();
+  // Card copy prefers "Door open for more than 30 Minutes" over repeating the L-level.
+  alertText = alertText
+    .replace(/\b(Door Open|Temperature Greater Than Threshold)\s+L[123]\b/gi, (_, kind) => kind)
+    .replace(/\s+/g, " ")
+    .trim();
+  return { asset, roomType: inferRoomType(asset), alertText };
+}
+
+function inferRoomType(asset) {
+  const text = String(asset ?? "");
+  const m = text.match(/\b(chiller|freezer|cold|ambient|dry)\s*rooms?\b/i);
+  if (!m) return null;
+  return m[0]
+    .toLowerCase()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildTitle(event, level, alertText) {
@@ -165,14 +200,15 @@ export function filterDatomsEvent(event) {
 
 export function formatCaption(alert, { timeZone = "Asia/Kolkata" } = {}) {
   const when = formatDisplayTime(alert.generatedAt, timeZone);
+  const site = alert.station || alert.siteName || "—";
   return [
     `*${alert.title}*`,
     when,
     "",
-    `Site: ${alert.siteName}`,
-    `Asset: ${alert.asset}`,
-    `Room Type: ${alert.roomType}`,
-    `Alert: ${alert.alertText}`
+    `Site: ${site}`,
+    `Asset: ${alert.asset || "—"}`,
+    `Room Type: ${alert.roomType || "—"}`,
+    `Alert: ${alert.alertText || "—"}`
   ].join("\n");
 }
 

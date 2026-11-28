@@ -5,6 +5,8 @@ import { AlertTriangle, MessageSquare, RefreshCw, Thermometer, Wifi } from "luci
 import type { DatomsAlertRow } from "@/lib/ops-pulse/datoms-alerts";
 import s from "./datoms.module.css";
 
+const PAGE_SIZE = 20;
+
 function formatWhen(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -40,6 +42,7 @@ export function DatomsAlertsView({
   const [error, setError] = useState<string | null>(null);
   const [levelFilter, setLevelFilter] = useState<string[]>([]);
   const [stationFilter, setStationFilter] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -98,6 +101,23 @@ export function DatomsAlertsView({
       })
       .map((f) => f.row);
   }, [facts, levelFilter, stationFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, safePage]);
+  const rangeStart = filtered.length ? (safePage - 1) * PAGE_SIZE + 1 : 0;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [levelFilter, stationFilter]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const levelOptions = useMemo(() => {
     const base = facts.filter((f) => !stationFilter.length || stationFilter.includes(f.station));
@@ -201,7 +221,11 @@ export function DatomsAlertsView({
             <Thermometer size={15} aria-hidden />
             Recent violations
           </h3>
-          <span>{filtered.length} alert{filtered.length === 1 ? "" : "s"} in view</span>
+          <span>
+            {filtered.length
+              ? `Showing ${rangeStart}–${rangeEnd} of ${filtered.length}`
+              : "0 alerts in view"}
+          </span>
         </div>
 
         {!filtered.length ? (
@@ -211,41 +235,60 @@ export function DatomsAlertsView({
             <span>Temperature violations appear when the cron worker polls Datoms.</span>
           </div>
         ) : (
-          <div className={s.alertList}>
-            {filtered.map((row) => {
-              const isL3 = row.level === "L3";
-              const isL2 = row.level === "L2";
-              return (
-                <div key={row.id} className={s.alertRow}>
-                  <div className={`${s.alertIcon} ${isL3 ? s.alertIconL3 : isL2 ? s.alertIconL2 : s.alertIconL1}`} aria-hidden>
-                    <Thermometer size={16} />
-                  </div>
-                  <div className={s.alertBody}>
-                    <p className={s.alertTitle}>{row.title || row.rule_name || "Temperature alert"}</p>
-                    {row.alert_text ? <p className={s.alertText}>{row.alert_text}</p> : null}
-                    <div className={s.alertMeta}>
-                      <span>
-                        <Wifi size={11} aria-hidden />
-                        {row.asset_name || row.site_name || "—"}
-                      </span>
-                      {row.station_code ? <span>{row.station_code}</span> : null}
-                      <span style={{ marginLeft: "auto" }}>{timeAgo(row.generated_at)}</span>
+          <>
+            <div className={s.alertList}>
+              {pageRows.map((row) => {
+                const isL3 = row.level === "L3";
+                const isL2 = row.level === "L2";
+                return (
+                  <div key={row.id} className={s.alertRow}>
+                    <div className={`${s.alertIcon} ${isL3 ? s.alertIconL3 : isL2 ? s.alertIconL2 : s.alertIconL1}`} aria-hidden>
+                      <Thermometer size={16} />
+                    </div>
+                    <div className={s.alertBody}>
+                      <p className={s.alertTitle}>{row.title || row.rule_name || "Temperature alert"}</p>
+                      {row.alert_text ? <p className={s.alertText}>{row.alert_text}</p> : null}
+                      <div className={s.alertMeta}>
+                        <span>
+                          <Wifi size={11} aria-hidden />
+                          {row.asset_name || row.site_name || "—"}
+                        </span>
+                        {row.station_code ? <span>{row.station_code}</span> : null}
+                        <span style={{ marginLeft: "auto" }}>{timeAgo(row.generated_at)}</span>
+                      </div>
+                    </div>
+                    <div className={s.alertRight}>
+                      <span className={`${s.level} ${isL3 ? s.levelL3 : isL2 ? s.levelL2 : s.levelL1}`}>{row.level}</span>
+                      <span className={s.alertTime}>{formatWhen(row.generated_at)}</span>
+                      {row.notified_at ? (
+                        <span className={s.waNotified}>
+                          <MessageSquare size={11} aria-hidden />
+                          WA sent
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                  <div className={s.alertRight}>
-                    <span className={`${s.level} ${isL3 ? s.levelL3 : isL2 ? s.levelL2 : s.levelL1}`}>{row.level}</span>
-                    <span className={s.alertTime}>{formatWhen(row.generated_at)}</span>
-                    {row.notified_at ? (
-                      <span className={s.waNotified}>
-                        <MessageSquare size={11} aria-hidden />
-                        WA sent
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+            {totalPages > 1 ? (
+              <div className={s.pager}>
+                <span>
+                  Page {safePage} of {totalPages}
+                </span>
+                <button type="button" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
     </div>

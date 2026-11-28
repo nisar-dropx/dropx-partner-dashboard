@@ -1,5 +1,5 @@
 import { DatomsClient, DATOMS_OPS_ALERT_JID } from "./datoms.mjs";
-import { filterDatomsEvent, formatCaption, isWhatsAppLevel } from "./filter.mjs";
+import { filterDatomsEvent, formatCaption, isWhatsAppLevel, splitAssetAlertMessage } from "./filter.mjs";
 import { renderAlertCardPng, renderAlertCardSvg } from "./card.mjs";
 import { STATION_JIDS } from "./stations.mjs";
 import { clientRefForAlert } from "./client-ref.mjs";
@@ -130,15 +130,16 @@ async function supabasePendingWhatsAppAlerts(env, limit = 40) {
 }
 
 function alertFromStoredRow(row) {
+  const parsed = splitAssetAlertMessage(row.alert_text);
   return {
     dedupeKey: row.dedupe_key,
     level: row.level,
     station: row.station_code,
     title: row.title || row.rule_name || `${row.level} Alert`,
     siteName: row.site_name || row.station_code || "—",
-    asset: row.asset_name || "—",
-    roomType: row.room_type || "—",
-    alertText: row.alert_text || "—",
+    asset: String(row.asset_name || parsed.asset || "").trim() || "—",
+    roomType: String(row.room_type || parsed.roomType || "").trim() || "—",
+    alertText: String(parsed.alertText || row.alert_text || "—").trim() || "—",
     generatedAt: row.generated_at,
     rule: row.rule_name || row.level
   };
@@ -368,7 +369,7 @@ async function tryNotifyWhatsApp(env, alert, { caption, svg } = {}) {
   }
   const resolvedCaption = caption ?? formatCaption(alert);
   const resolvedSvg = svg ?? renderAlertCardSvg(alert);
-  const pngBytes = renderAlertCardPng(alert);
+  const pngBytes = await renderAlertCardPng(alert);
   const notifiedAt = new Date().toISOString();
   await sendWhatsApp(env, alert, pngBytes, resolvedCaption);
   await supabaseMarkAlertNotified(env, alert.dedupeKey, notifiedAt, {

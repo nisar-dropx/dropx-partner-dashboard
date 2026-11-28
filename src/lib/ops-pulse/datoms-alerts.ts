@@ -79,7 +79,7 @@ export async function datomsScopedStationCodes(authorization: AuthorizationConte
 
 export async function loadDatomsAlerts(
   authorization: AuthorizationContext,
-  { limit = 80 }: { limit?: number } = {}
+  { limit = 200 }: { limit?: number } = {}
 ): Promise<DatomsAlertRow[]> {
   const companyId = authorization.companyId;
   if (!companyId) return [];

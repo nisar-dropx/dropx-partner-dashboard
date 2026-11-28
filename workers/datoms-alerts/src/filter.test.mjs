@@ -5,7 +5,8 @@ import {
   formatCaption,
   isViolationEvent,
   messageHasL2L3,
-  parseDatomsEvent
+  parseDatomsEvent,
+  splitAssetAlertMessage
 } from "./filter.mjs";
 
 test("isViolationEvent accepts type 0 and Violation tag", () => {
@@ -134,6 +135,7 @@ test("formatCaption matches WhatsApp layout", () => {
   const alert = {
     title: "Door Open L2 Alert",
     generatedAt: "2026-11-25T09:34:00.000Z",
+    station: "TTA5",
     siteName: "TTA5",
     asset: "TTA5 Freezer room w/DS",
     roomType: "Freezer Room",
@@ -142,5 +144,35 @@ test("formatCaption matches WhatsApp layout", () => {
   const caption = formatCaption(alert, { timeZone: "UTC" });
   assert.match(caption, /^\*Door Open L2 Alert\*/);
   assert.match(caption, /Site: TTA5/);
+  assert.match(caption, /Asset: TTA5 Freezer room w\/DS/);
+  assert.match(caption, /Room Type: Freezer Room/);
   assert.match(caption, /Alert: Door open for more than 20 Minutes/);
+});
+
+test("splitAssetAlertMessage fills Asset and Room Type from packed Datoms text", () => {
+  const parsed = splitAssetAlertMessage(
+    "TCC3 Chiller Room w/DS : Temperature Greater Than Threshold L3 for more than 15 Minutes"
+  );
+  assert.equal(parsed.asset, "TCC3 Chiller Room w/DS");
+  assert.equal(parsed.roomType, "Chiller Room");
+  assert.match(parsed.alertText, /Temperature Greater Than Threshold for more than 15 Minutes/i);
+});
+
+test("temperature event without structured asset still populates card fields", () => {
+  const alert = filterDatomsEvent({
+    type: 0,
+    tags: ["Violation"],
+    entity_id: "29669",
+    generated_at: "2026-11-28T03:26:00.000Z",
+    details: {
+      site_name: "TCC3",
+      rule_template_name: "Temperature Greater Than Threshold L3",
+      alert_message: "TCC3 Chiller Room w/DS : Temperature Greater Than Threshold L3 for more than 15 Minutes"
+    }
+  });
+  assert.ok(alert);
+  assert.equal(alert.station, "TCC3");
+  assert.equal(alert.asset, "TCC3 Chiller Room w/DS");
+  assert.equal(alert.roomType, "Chiller Room");
+  assert.match(alert.alertText, /Temperature Greater Than Threshold for more than 15 Minutes/i);
 });
